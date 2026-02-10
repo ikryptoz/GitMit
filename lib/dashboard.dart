@@ -106,6 +106,37 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     }
   }
 
+  Future<void> _confirmAndRunThenPop({
+    required String title,
+    required String message,
+    required Future<void> Function() action,
+    required String popResult,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Pokračovat')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await action();
+      if (mounted) {
+        Navigator.of(context).pop(popResult);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = FirebaseAuth.instance.currentUser;
@@ -245,20 +276,22 @@ class _UserProfilePageState extends State<_UserProfilePage> {
           const SizedBox(height: 12),
 
           FilledButton.tonal(
-            onPressed: () => _confirmAndRun(
+            onPressed: () => _confirmAndRunThenPop(
               title: 'Smazat chat u mě?',
               message: 'Smaže zprávy a přehled konverzace jen u tebe.',
               action: () => _deleteChatForMe(myUid: myUid),
+              popResult: 'deleted_chat_for_me',
             ),
             child: const Text('Smazat chat u mě'),
           ),
           const SizedBox(height: 12),
 
           FilledButton.tonal(
-            onPressed: () => _confirmAndRun(
+            onPressed: () => _confirmAndRunThenPop(
               title: 'Smazat chat u obou?',
               message: 'Pokusí se smazat konverzaci u obou uživatelů. Funguje jen pokud je druhá strana propojená v databázi.',
               action: () => _deleteChatForBoth(myUid: myUid),
+              popResult: 'deleted_chat_for_both',
             ),
             child: const Text('Smazat chat u obou'),
           ),
@@ -2024,12 +2057,23 @@ class _ChatsTabState extends State<_ChatsTab> {
     await _reactToMessage(login: login, messageKey: messageKey, emoji: emoji);
   }
 
-  void _openUserProfile({required String login, required String avatarUrl}) {
-    Navigator.of(context).push(
+  Future<void> _openUserProfile({required String login, required String avatarUrl}) async {
+    final res = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => _UserProfilePage(login: login, avatarUrl: avatarUrl),
       ),
     );
+
+    if (!mounted) return;
+    if (res == 'deleted_chat_for_me' || res == 'deleted_chat_for_both') {
+      setState(() {
+        _activeLogin = null;
+        _activeAvatarUrl = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chat byl smazán.')),
+      );
+    }
   }
 
   Future<void> _sendVerified({required bool asModerator, required String moderatorGithub}) async {
