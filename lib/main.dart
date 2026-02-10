@@ -4,13 +4,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:gitmit/register.dart';
 import 'package:gitmit/dashboard.dart';
+import 'package:gitmit/notifications_service.dart';
+import 'package:gitmit/deep_links.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 import 'dart:convert';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  await AppNotifications.initialize();
+  await DeepLinks.initialize();
   runApp(const MyApp());
 }
 
@@ -27,6 +32,7 @@ class MyApp extends StatelessWidget {
     const green4 = Color(0xFF0A241B); // #0A241B (GREEN 6, tmavší)
 
     return MaterialApp(
+      navigatorKey: DeepLinks.navigatorKey,
       title: 'GitMit',
       theme: ThemeData(
         brightness: Brightness.dark,
@@ -85,28 +91,45 @@ class MyApp extends StatelessWidget {
 }
 
 // AuthGate widget rozhoduje, kam uživatele pustit podle přihlášení
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
   @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  StreamSubscription<User?>? _sub;
+  User? _user;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = FirebaseAuth.instance.authStateChanges().listen((u) {
+      _user = u;
+      _ready = true;
+      AppNotifications.setUser(u);
+      DeepLinks.onAuthChanged(u);
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.active) {
-          final user = snapshot.data;
-          if (user == null) {
-            return const LoginPage();
-          } else {
-            return const DashboardPage();
-          }
-        }
-        return const Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(child: CircularProgressIndicator()),
-        );
-      },
-    );
+    if (!_ready) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return _user == null ? const LoginPage() : const DashboardPage();
   }
 }
 

@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter/services.dart';
+import 'package:gitmit/group_invites.dart';
 import 'package:gitmit/github_api.dart';
+import 'package:gitmit/join_group_via_link_qr_page.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:http/http.dart' as http;
+import 'package:qr_flutter/qr_flutter.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -301,6 +305,678 @@ class _UserProfilePageState extends State<_UserProfilePage> {
   }
 }
 
+class _CreateGroupPage extends StatefulWidget {
+  const _CreateGroupPage({required this.myGithubUsername});
+
+  final String myGithubUsername;
+
+  @override
+  State<_CreateGroupPage> createState() => _CreateGroupPageState();
+}
+
+class _CreateGroupPageState extends State<_CreateGroupPage> {
+  final _title = TextEditingController();
+  final _description = TextEditingController();
+  final _logoUrl = TextEditingController();
+  final _members = TextEditingController();
+
+  Timer? _membersDebounce;
+  String _membersLastQuery = '';
+  List<String> _membersSuggestions = const [];
+
+  bool _sendMessages = true;
+  bool _allowMembersToAdd = true;
+  bool _inviteLinkEnabled = false;
+
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _members.addListener(_onMembersChanged);
+  }
+
+  @override
+  void dispose() {
+    _members.removeListener(_onMembersChanged);
+    _membersDebounce?.cancel();
+    _title.dispose();
+    _description.dispose();
+    _logoUrl.dispose();
+    _members.dispose();
+    super.dispose();
+  }
+
+  static final _memberDelim = RegExp(r'[\s,;]+');
+
+  String? _currentMentionQueryLower() {
+    final text = _members.text;
+    var cursor = _members.selection.baseOffset;
+    if (cursor < 0 || cursor > text.length) cursor = text.length;
+
+    final before = text.substring(0, cursor);
+    final lastDelim = before.lastIndexOf(_memberDelim);
+    final tokenStart = (lastDelim == -1) ? 0 : lastDelim + 1;
+    final token = before.substring(tokenStart).trimLeft();
+    if (!token.startsWith('@')) return null;
+    final q = token.substring(1).trim();
+    if (q.isEmpty) return null;
+    return q.toLowerCase();
+  }
+
+  Future<List<String>> _queryUsernameSuggestions(String prefixLower) async {
+    final snap = await rtdb()
+        .ref('usernames')
+        .orderByKey()
+        .startAt(prefixLower)
+        .endAt('$prefixLower\uf8ff')
+        .limitToFirst(8)
+        .get();
+    final v = snap.value;
+    final m = (v is Map) ? v : null;
+    if (m == null) return const [];
+    return m.keys.map((e) => e.toString()).toList(growable: false);
+  }
+
+  void _onMembersChanged() {
+    _membersDebounce?.cancel();
+    _membersDebounce = Timer(const Duration(milliseconds: 150), () async {
+      final q = _currentMentionQueryLower();
+      if (q == null) {
+        if (_membersSuggestions.isNotEmpty && mounted) {
+          setState(() => _membersSuggestions = const []);
+        }
+        _membersLastQuery = '';
+        return;
+      }
+
+      if (q == _membersLastQuery) return;
+      _membersLastQuery = q;
+
+      try {
+        final res = await _queryUsernameSuggestions(q);
+        if (!mounted) return;
+        setState(() => _membersSuggestions = res);
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _membersSuggestions = const []);
+      }
+    });
+  }
+
+  void _applyMemberSuggestion(String loginLower) {
+    final text = _members.text;
+    var cursor = _members.selection.baseOffset;
+    if (cursor < 0 || cursor > text.length) cursor = text.length;
+
+    int start = cursor;
+    while (start > 0 && !_memberDelim.hasMatch(text.substring(start - 1, start))) {
+      start--;
+    }
+
+    int end = cursor;
+    while (end < text.length && !_memberDelim.hasMatch(text.substring(end, end + 1))) {
+      end++;
+    }
+
+    final replacement = '@$loginLower';
+    final nextText = text.replaceRange(start, end, replacement);
+    final withComma = (end >= text.length) ? '$nextText, ' : nextText;
+
+    _members.value = TextEditingValue(
+      text: withComma,
+      selection: TextSelection.collapsed(offset: (start + replacement.length) + ((end >= text.length) ? 2 : 0)),
+    );
+
+    setState(() => _membersSuggestions = const []);
+  }
+
+  List<String> _parseUsernames(String raw) {
+    final tokens = raw
+        .split(RegExp(r'[\s,;]+'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .map((e) => e.startsWith('@') ? e.substring(1) : e)
+        .toList();
+    final out = <String>[];
+    final seen = <String>{};
+    for (final t in tokens) {
+      final lower = t.toLowerCase();
+      if (seen.add(lower)) out.add(t);
+    }
+    return out;
+  }
+
+  Future<void> _create() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+
+    final title = _title.text.trim();
+    final desc = _description.text.trim();
+    final logo = _logoUrl.text.trim();
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vyplň název skupiny.')));
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final groupPush = rtdb().ref('groups').push();
+      final groupId = groupPush.key;
+      if (groupId == null) throw Exception('Nelze vytvořit groupId');
+
+      final inviteCode = _inviteLinkEnabled ? generateInviteCode() : '';
+
+      await groupPush.set({
+        'title': title,
+        'description': desc,
+        if (logo.isNotEmpty) 'logoUrl': logo,
+        if (inviteCode.isNotEmpty) 'inviteCode': inviteCode,
+        'createdByUid': current.uid,
+        'createdByGithub': widget.myGithubUsername,
+        'createdAt': ServerValue.timestamp,
+        'updatedAt': ServerValue.timestamp,
+        'permissions': {
+          'sendMessages': _sendMessages,
+          'allowMembersToAdd': _allowMembersToAdd,
+          'inviteLinkEnabled': _inviteLinkEnabled,
+        },
+      });
+
+      await rtdb().ref('groupMembers/$groupId/${current.uid}').set({
+        'role': 'admin',
+        'joinedAt': ServerValue.timestamp,
+      });
+      await rtdb().ref('userGroups/${current.uid}/$groupId').set(true);
+
+      final usernames = _parseUsernames(_members.text);
+      final missing = <String>[];
+      for (final u in usernames) {
+        final lower = u.toLowerCase();
+        final snap = await rtdb().ref('usernames/$lower').get();
+        final uid = snap.value?.toString();
+        if (uid == null || uid.isEmpty) {
+          missing.add(u);
+          continue;
+        }
+        if (uid == current.uid) continue;
+
+        await rtdb().ref('groupInvites/$uid/$groupId').set({
+          'groupId': groupId,
+          'groupTitle': title,
+          if (logo.isNotEmpty) 'groupLogoUrl': logo,
+          'invitedByUid': current.uid,
+          'invitedByGithub': widget.myGithubUsername,
+          'createdAt': ServerValue.timestamp,
+        });
+      }
+
+      if (!mounted) return;
+      if (missing.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Nenalezeno v aplikaci: ${missing.map((e) => '@$e').join(', ')}')),
+        );
+      }
+
+      Navigator.of(context).pop(groupId);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Vytvořit skupinu')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(
+            controller: _title,
+            decoration: const InputDecoration(labelText: 'Název'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _description,
+            decoration: const InputDecoration(labelText: 'Popis'),
+            maxLines: 3,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _logoUrl,
+            decoration: const InputDecoration(labelText: 'Logo URL (volitelné)'),
+          ),
+          const SizedBox(height: 16),
+          const Text('Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
+          SwitchListTile(
+            value: _sendMessages,
+            onChanged: (v) => setState(() => _sendMessages = v),
+            title: const Text('Send new messages'),
+          ),
+          SwitchListTile(
+            value: _allowMembersToAdd,
+            onChanged: (v) => setState(() => _allowMembersToAdd = v),
+            title: const Text('Přidávat uživatele'),
+          ),
+          SwitchListTile(
+            value: _inviteLinkEnabled,
+            onChanged: (v) => setState(() => _inviteLinkEnabled = v),
+            title: const Text('Invite via link / QR'),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _members,
+            decoration: const InputDecoration(
+              labelText: 'Přidat lidi podle username',
+              hintText: '@user1, @user2',
+            ),
+            maxLines: 3,
+          ),
+          if (_membersSuggestions.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: _membersSuggestions.map((loginLower) {
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.alternate_email, size: 18),
+                    title: Text('@$loginLower'),
+                    onTap: () => _applyMemberSuggestion(loginLower),
+                  );
+                }).toList(growable: false),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _saving ? null : _create,
+            child: _saving ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator()) : const Text('Vytvořit'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupInfoPage extends StatefulWidget {
+  const _GroupInfoPage({required this.groupId});
+
+  final String groupId;
+
+  @override
+  State<_GroupInfoPage> createState() => _GroupInfoPageState();
+}
+
+class _GroupInfoPageState extends State<_GroupInfoPage> {
+  final _title = TextEditingController();
+  final _description = TextEditingController();
+  final _logoUrl = TextEditingController();
+
+  bool _inited = false;
+  Future<String?>? _inviteCodeFuture;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _description.dispose();
+    _logoUrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _update(String groupId, Map<String, Object?> patch) async {
+    await rtdb().ref('groups/$groupId').update({...patch, 'updatedAt': ServerValue.timestamp});
+  }
+
+  Future<String?> _loadOrEnsureInviteCode({
+    required String groupId,
+    required String existingCode,
+    required bool isAdmin,
+    required bool enabled,
+  }) async {
+    if (!enabled) return null;
+    if (existingCode.trim().isNotEmpty) return existingCode.trim();
+    if (!isAdmin) return null;
+
+    final newCode = generateInviteCode();
+    await rtdb().ref('groups/$groupId/inviteCode').set(newCode);
+    return newCode;
+  }
+
+  Future<void> _regenerateInviteCode({required String groupId}) async {
+    final newCode = generateInviteCode();
+    await rtdb().ref('groups/$groupId/inviteCode').set(newCode);
+    if (mounted) {
+      setState(() {
+        _inviteCodeFuture = Future.value(newCode);
+      });
+    }
+  }
+
+  Future<void> _requestAddMember({
+    required String groupId,
+    required String targetLogin,
+    required String requestedByGithub,
+  }) async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final targetLower = targetLogin.trim().toLowerCase();
+    final snap = await rtdb().ref('usernames/$targetLower').get();
+    final targetUid = snap.value?.toString();
+    if (targetUid == null || targetUid.isEmpty) {
+      throw Exception('Uživatel není registrovaný v GitMitu.');
+    }
+    if (targetUid == current.uid) return;
+
+    // Create pending request under group.
+    await rtdb().ref('groupJoinRequests/$groupId/$targetLower').set({
+      'targetLogin': targetLogin,
+      'targetUid': targetUid,
+      'requestedByUid': current.uid,
+      'requestedByGithub': requestedByGithub,
+      'createdAt': ServerValue.timestamp,
+    });
+
+    // Fan-out inbox pointers to all admins.
+    final membersSnap = await rtdb().ref('groupMembers/$groupId').get();
+    final mv = membersSnap.value;
+    final m = (mv is Map) ? mv : null;
+    if (m != null) {
+      for (final e in m.entries) {
+        if (e.value is! Map) continue;
+        final mm = Map<String, dynamic>.from(e.value as Map);
+        final role = (mm['role'] ?? 'member').toString();
+        if (role != 'admin') continue;
+        final adminUid = e.key.toString();
+        await rtdb().ref('groupAdminInbox/$adminUid/${groupId}~$targetLower').set({
+          'groupId': groupId,
+          'targetLower': targetLower,
+          'targetLogin': targetLogin,
+          'requestedByUid': current.uid,
+          'requestedByGithub': requestedByGithub,
+          'createdAt': ServerValue.timestamp,
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+
+    final groupRef = rtdb().ref('groups/${widget.groupId}');
+    final memberRef = rtdb().ref('groupMembers/${widget.groupId}/${current.uid}');
+    final myUserRef = rtdb().ref('users/${current.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: groupRef.onValue,
+      builder: (context, gSnap) {
+        final gv = gSnap.data?.snapshot.value;
+        final gm = (gv is Map) ? gv : null;
+        final title = (gm?['title'] ?? 'Skupina').toString();
+        final desc = (gm?['description'] ?? '').toString();
+        final logo = (gm?['logoUrl'] ?? '').toString();
+        final inviteCode = (gm?['inviteCode'] ?? '').toString();
+        final perms = (gm?['permissions'] is Map) ? (gm?['permissions'] as Map) : null;
+        final sendMessages = perms?['sendMessages'] != false;
+        final allowMembersToAdd = perms?['allowMembersToAdd'] != false;
+        final inviteLinkEnabled = perms?['inviteLinkEnabled'] == true;
+
+        if (!_inited) {
+          _title.text = title;
+          _description.text = desc;
+          _logoUrl.text = logo;
+          _inited = true;
+        }
+
+        return StreamBuilder<DatabaseEvent>(
+          stream: memberRef.onValue,
+          builder: (context, mSnap) {
+            final mv = mSnap.data?.snapshot.value;
+            final mm = (mv is Map) ? mv : null;
+            final role = (mm?['role'] ?? 'member').toString();
+            final isAdmin = role == 'admin';
+
+            if (!inviteLinkEnabled) {
+              _inviteCodeFuture = null;
+            } else {
+              _inviteCodeFuture ??= _loadOrEnsureInviteCode(
+                groupId: widget.groupId,
+                existingCode: inviteCode,
+                isAdmin: isAdmin,
+                enabled: inviteLinkEnabled,
+              );
+            }
+
+            return StreamBuilder<DatabaseEvent>(
+              stream: myUserRef.onValue,
+              builder: (context, uSnap) {
+                final uv = uSnap.data?.snapshot.value;
+                final um = (uv is Map) ? uv : null;
+                final myGithub = (um?['githubUsername'] ?? '').toString();
+
+                return Scaffold(
+                  appBar: AppBar(title: const Text('Skupina')),
+                  body: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 28,
+                            backgroundImage: logo.isNotEmpty ? NetworkImage(logo) : null,
+                            child: logo.isEmpty ? const Icon(Icons.group) : null,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                                Text(isAdmin ? 'Admin' : 'Member', style: Theme.of(context).textTheme.bodySmall),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      if (isAdmin) ...[
+                        TextField(controller: _title, decoration: const InputDecoration(labelText: 'Název')),
+                        const SizedBox(height: 12),
+                        TextField(controller: _description, decoration: const InputDecoration(labelText: 'Popis'), maxLines: 3),
+                        const SizedBox(height: 12),
+                        TextField(controller: _logoUrl, decoration: const InputDecoration(labelText: 'Logo URL')),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: () => _update(widget.groupId, {
+                            'title': _title.text.trim(),
+                            'description': _description.text.trim(),
+                            'logoUrl': _logoUrl.text.trim(),
+                          }),
+                          child: const Text('Uložit'),
+                        ),
+                        const Divider(height: 32),
+                        const Text('Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
+                        SwitchListTile(
+                          value: sendMessages,
+                          onChanged: (v) => _update(widget.groupId, {
+                            'permissions/sendMessages': v,
+                          }),
+                          title: const Text('Send new messages'),
+                        ),
+                        SwitchListTile(
+                          value: allowMembersToAdd,
+                          onChanged: (v) => _update(widget.groupId, {
+                            'permissions/allowMembersToAdd': v,
+                          }),
+                          title: const Text('Přidávat uživatele'),
+                        ),
+                        SwitchListTile(
+                          value: inviteLinkEnabled,
+                          onChanged: (v) async {
+                            await _update(widget.groupId, {
+                              'permissions/inviteLinkEnabled': v,
+                            });
+                            if (!mounted) return;
+                            if (v) {
+                              setState(() {
+                                _inviteCodeFuture = _loadOrEnsureInviteCode(
+                                  groupId: widget.groupId,
+                                  existingCode: inviteCode,
+                                  isAdmin: true,
+                                  enabled: true,
+                                );
+                              });
+                            } else {
+                              setState(() {
+                                _inviteCodeFuture = null;
+                              });
+                            }
+                          },
+                          title: const Text('Invite via link / QR'),
+                        ),
+                      ] else ...[
+                        ListTile(title: Text(title), subtitle: desc.isNotEmpty ? Text(desc) : null),
+                        const Divider(height: 32),
+                      ],
+
+                      if (inviteLinkEnabled) ...[
+                        const Text('Invite link / QR', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        FutureBuilder<String?>(
+                          future: _inviteCodeFuture,
+                          builder: (context, codeSnap) {
+                            final code = (codeSnap.data ?? '').trim();
+                            if (code.isEmpty) {
+                              return const ListTile(
+                                leading: Icon(Icons.link),
+                                title: Text('Link není dostupný'),
+                                subtitle: Text('Zkus to za chvilku znovu.'),
+                              );
+                            }
+                            final link = buildGroupInviteLink(groupId: widget.groupId, code: code);
+                            final qrPayload = buildGroupInviteQrPayload(groupId: widget.groupId, code: code);
+
+                            return Column(
+                              children: [
+                                ListTile(
+                                  leading: const Icon(Icons.link),
+                                  title: const Text('Pozvánka'),
+                                  subtitle: Text(link, maxLines: 2, overflow: TextOverflow.ellipsis),
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.copy),
+                                    onPressed: () async {
+                                      await Clipboard.setData(ClipboardData(text: link));
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Link zkopírován.')),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ),
+                                Center(
+                                  child: QrImageView(
+                                    data: qrPayload,
+                                    size: 220,
+                                  ),
+                                ),
+                                if (isAdmin) ...[
+                                  const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    onPressed: () => _regenerateInviteCode(groupId: widget.groupId),
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('Regenerovat pozvánku'),
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
+                        ),
+                        const Divider(height: 32),
+                      ],
+
+                      ListTile(
+                        leading: const Icon(Icons.person_add_alt_1),
+                        title: const Text('Přidat uživatele'),
+                        subtitle: Text(
+                          allowMembersToAdd ? 'Pošle se žádost adminům (pokud nejsi admin).' : 'Může jen admin.',
+                        ),
+                        onTap: (!allowMembersToAdd && !isAdmin)
+                            ? null
+                            : () async {
+                                final ctrl = TextEditingController();
+                                final login = await showDialog<String>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Přidat @username'),
+                                    content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '@username')),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Zrušit')),
+                                      FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('OK')),
+                                    ],
+                                  ),
+                                );
+                                if (login == null || login.trim().isEmpty) return;
+                                final normalized = login.startsWith('@') ? login.substring(1) : login;
+
+                                try {
+                                  if (isAdmin) {
+                                    final lower = normalized.toLowerCase();
+                                    final snap = await rtdb().ref('usernames/$lower').get();
+                                    final uid = snap.value?.toString();
+                                    if (uid == null || uid.isEmpty) throw Exception('Uživatel není registrovaný v GitMitu.');
+                                    await rtdb().ref('groupInvites/$uid/${widget.groupId}').set({
+                                      'groupId': widget.groupId,
+                                      'groupTitle': title,
+                                      if (logo.isNotEmpty) 'groupLogoUrl': logo,
+                                      'invitedByUid': current.uid,
+                                      'invitedByGithub': myGithub,
+                                      'createdAt': ServerValue.timestamp,
+                                    });
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pozvánka odeslána.')));
+                                    }
+                                  } else {
+                                    await _requestAddMember(
+                                      groupId: widget.groupId,
+                                      targetLogin: normalized,
+                                      requestedByGithub: myGithub,
+                                    );
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Žádost odeslána adminům.')));
+                                    }
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                                  }
+                                }
+                              },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
 class _DashboardPageState extends State<DashboardPage> {
   int _index = 0;
   String? _openChatLogin;
@@ -322,6 +998,125 @@ class _DashboardPageState extends State<DashboardPage> {
     'Nastavení',
     'Profil',
   ];
+
+  PreferredSizeWidget _pillAppBar(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final title = _titles[_index];
+    return AppBar(
+      centerTitle: true,
+      title: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        child: Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
+  Widget _pillBottomNav(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    const items = <({IconData icon, String label})>[
+      (icon: Icons.dashboard, label: 'Dashboard'),
+      (icon: Icons.chat_bubble_outline, label: 'Chaty'),
+      (icon: Icons.people_outline, label: 'Kontakty'),
+      (icon: Icons.settings_outlined, label: 'Nastavení'),
+      (icon: Icons.person_outline, label: 'Profil'),
+    ];
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final w = c.maxWidth;
+            final itemW = w / items.length;
+            const h = 64.0;
+            const inset = 6.0;
+
+            return SizedBox(
+              height: h,
+              child: Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: cs.surface,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: cs.outlineVariant),
+                    ),
+                  ),
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOut,
+                    left: _index * itemW + inset,
+                    top: inset,
+                    width: itemW - inset * 2,
+                    height: h - inset * 2,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: cs.primary,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      for (var i = 0; i < items.length; i++)
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: () {
+                              setState(() {
+                                if (i == 1 && _index != 1) {
+                                  // Ruční přepnutí na Chaty vždy otevře přehled.
+                                  _openChatLogin = null;
+                                  _openChatAvatarUrl = null;
+                                  _chatsOverviewToken++;
+                                }
+                                _index = i;
+                              });
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    items[i].icon,
+                                    size: 22,
+                                    color: (i == _index) ? cs.onPrimary : cs.onSurface,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    items[i].label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                          color: (i == _index) ? cs.onPrimary : cs.onSurface,
+                                          fontWeight: (i == _index) ? FontWeight.w700 : FontWeight.w500,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
@@ -456,30 +1251,9 @@ class _DashboardPageState extends State<DashboardPage> {
         ];
 
         return Scaffold(
-          appBar: AppBar(title: Text(_titles[_index])),
+          appBar: _pillAppBar(context),
           body: pages[_index],
-          bottomNavigationBar: BottomNavigationBar(
-            currentIndex: _index,
-            onTap: (value) {
-              setState(() {
-                if (value == 1 && _index != 1) {
-                  // Ruční přepnutí na Chaty vždy otevře přehled.
-                  _openChatLogin = null;
-                  _openChatAvatarUrl = null;
-                  _chatsOverviewToken++;
-                }
-                _index = value;
-              });
-            },
-            type: BottomNavigationBarType.fixed,
-            items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-              BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Chaty'),
-              BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: 'Kontakty'),
-              BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'Nastavení'),
-              BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Profil'),
-            ],
-          ),
+          bottomNavigationBar: _pillBottomNav(context),
         );
       },
     );
@@ -501,6 +1275,7 @@ class UserSettings {
     required this.giftsVisible,
     required this.vibrationEnabled,
     required this.soundsEnabled,
+    required this.notificationsEnabled,
     required this.language,
   });
 
@@ -517,6 +1292,7 @@ class UserSettings {
   final bool giftsVisible;
   final bool vibrationEnabled;
   final bool soundsEnabled;
+  final bool notificationsEnabled;
   final String language;
 
   static UserSettings fromSnapshot(Object? value) {
@@ -563,6 +1339,7 @@ class UserSettings {
       giftsVisible: readBool('giftsVisible', true),
       vibrationEnabled: readBool('vibrationEnabled', true),
       soundsEnabled: readBool('soundsEnabled', true),
+      notificationsEnabled: readBool('notificationsEnabled', true),
       language: readString('language', 'cs'),
     );
   }
@@ -1190,6 +1967,7 @@ class _SettingsNotificationsPage extends StatelessWidget {
 
   Future<void> _reset(String uid) async {
     await _update(uid, {
+      'notificationsEnabled': true,
       'vibrationEnabled': true,
       'soundsEnabled': true,
     });
@@ -1210,6 +1988,12 @@ class _SettingsNotificationsPage extends StatelessWidget {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              SwitchListTile(
+                value: s.notificationsEnabled,
+                onChanged: (v) => _update(u.uid, {'notificationsEnabled': v}),
+                title: const Text('Notifikace'),
+                subtitle: const Text('Push upozornění a upozornění v aplikaci'),
+              ),
               SwitchListTile(
                 value: s.vibrationEnabled,
                 onChanged: (v) => _update(u.uid, {'vibrationEnabled': v}),
@@ -1948,10 +2732,13 @@ class _ChatsTab extends StatefulWidget {
 class _ChatsTabState extends State<_ChatsTab> {
   String? _activeLogin;
   String? _activeAvatarUrl;
+  String? _activeGroupId;
   String? _activeVerifiedUid;
   String? _activeVerifiedGithub;
   bool _moderatorAnonymous = true;
   final _messageController = TextEditingController();
+
+  int _overviewMode = 0; // 0=priváty, 1=skupiny, 2=složky
 
   @override
   void initState() {
@@ -1968,6 +2755,7 @@ class _ChatsTabState extends State<_ChatsTab> {
       setState(() {
         _activeLogin = null;
         _activeAvatarUrl = null;
+        _activeGroupId = null;
         _activeVerifiedUid = null;
         _activeVerifiedGithub = null;
       });
@@ -1996,6 +2784,36 @@ class _ChatsTabState extends State<_ChatsTab> {
     super.dispose();
   }
 
+  Color _bubbleColor(BuildContext context, String key) {
+    final cs = Theme.of(context).colorScheme;
+    switch (key) {
+      case 'surfaceVariant':
+        return cs.surfaceVariant;
+      case 'primaryContainer':
+        return cs.primaryContainer;
+      case 'secondaryContainer':
+        return cs.secondaryContainer;
+      case 'surface':
+      default:
+        return cs.surface;
+    }
+  }
+
+  Color _bubbleTextColor(BuildContext context, String key) {
+    final cs = Theme.of(context).colorScheme;
+    switch (key) {
+      case 'surfaceVariant':
+        return cs.onSurfaceVariant;
+      case 'primaryContainer':
+        return cs.onPrimaryContainer;
+      case 'secondaryContainer':
+        return cs.onSecondaryContainer;
+      case 'surface':
+      default:
+        return cs.onSurface;
+    }
+  }
+
   Future<void> _send() async {
     final current = FirebaseAuth.instance.currentUser;
     final login = _activeLogin;
@@ -2021,6 +2839,13 @@ class _ChatsTabState extends State<_ChatsTab> {
       'lastMessageAt': ServerValue.timestamp,
       'savedAt': ServerValue.timestamp,
     });
+
+    if (widget.settings.vibrationEnabled) {
+      HapticFeedback.lightImpact();
+    }
+    if (widget.settings.soundsEnabled) {
+      SystemSound.play(SystemSoundType.click);
+    }
   }
 
   Future<void> _reactToMessage({required String login, required String messageKey, required String emoji}) async {
@@ -2113,14 +2938,17 @@ class _ChatsTabState extends State<_ChatsTab> {
     }
 
     final currentUserRef = rtdb().ref('users/${current.uid}');
+    final invitesRef = rtdb().ref('groupInvites/${current.uid}');
 
     // Seznam chatů + ověření
-    if (_activeLogin == null && _activeVerifiedUid == null) {
+    if (_activeLogin == null && _activeVerifiedUid == null && _activeGroupId == null) {
       final chatsMetaRef = rtdb().ref('savedChats/${current.uid}');
       final chatsMessagesRef = rtdb().ref('messages/${current.uid}');
       final blockedRef = rtdb().ref('blocked/${current.uid}');
       final myVerifyReqRef = _verifiedRequestRef(current.uid);
       final allVerifyReqsRef = rtdb().ref('verifiedRequests');
+      final userGroupsRef = rtdb().ref('userGroups/${current.uid}');
+      final groupsRef = rtdb().ref('groups');
 
       return StreamBuilder<DatabaseEvent>(
         stream: currentUserRef.onValue,
@@ -2236,6 +3064,278 @@ class _ChatsTabState extends State<_ChatsTab> {
                             const Divider(height: 1),
                           ],
 
+                          // Pozvánky do skupin (pod ověřením účtu)
+                          StreamBuilder<DatabaseEvent>(
+                            stream: invitesRef.onValue,
+                            builder: (context, invSnap) {
+                              final iv = invSnap.data?.snapshot.value;
+                              final imap = (iv is Map) ? iv : null;
+                              final invites = <Map<String, dynamic>>[];
+                              if (imap != null) {
+                                for (final e in imap.entries) {
+                                  if (e.value is! Map) continue;
+                                  final m = Map<String, dynamic>.from(e.value as Map);
+                                  m['__key'] = e.key.toString();
+                                  invites.add(m);
+                                }
+                                invites.sort((a, b) {
+                                  final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                                  final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                                  return bt.compareTo(at);
+                                });
+                              }
+
+                              Future<void> acceptInvite(String key, Map<String, dynamic> inv) async {
+                                final groupId = (inv['groupId'] ?? '').toString();
+                                if (groupId.isEmpty) return;
+                                await rtdb().ref('groupMembers/$groupId/${current.uid}').set({
+                                  'role': 'member',
+                                  'joinedAt': ServerValue.timestamp,
+                                  'joinedVia': 'invite',
+                                });
+                                await rtdb().ref('userGroups/${current.uid}/$groupId').set(true);
+                                await invitesRef.child(key).remove();
+                              }
+
+                              Future<void> declineInvite(String key) async {
+                                await invitesRef.child(key).remove();
+                              }
+
+                              Future<void> acceptAll() async {
+                                for (final inv in invites) {
+                                  final key = (inv['__key'] ?? '').toString();
+                                  if (key.isEmpty) continue;
+                                  await acceptInvite(key, inv);
+                                }
+                              }
+
+                              Future<void> declineAll() async {
+                                for (final inv in invites) {
+                                  final key = (inv['__key'] ?? '').toString();
+                                  if (key.isEmpty) continue;
+                                  await declineInvite(key);
+                                }
+                              }
+
+                              if (invites.isEmpty) return const SizedBox.shrink();
+
+                              return Column(
+                                children: [
+                                  ListTile(
+                                    leading: const Icon(Icons.group_add),
+                                    title: const Text('Pozvánky do skupin'),
+                                    subtitle: Text('Čeká: ${invites.length}'),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            onPressed: acceptAll,
+                                            child: const Text('Přijmout všechny'),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            onPressed: declineAll,
+                                            child: const Text('Odmítnout všechny'),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ...invites.map((inv) {
+                                    final key = (inv['__key'] ?? '').toString();
+                                    final groupTitle = (inv['groupTitle'] ?? 'Skupina').toString();
+                                    final groupId = (inv['groupId'] ?? '').toString();
+                                    final invitedBy = (inv['invitedByGithub'] ?? '').toString();
+                                    return ListTile(
+                                      leading: const Icon(Icons.group),
+                                      title: Text(groupTitle),
+                                      subtitle: invitedBy.isNotEmpty ? Text('Pozval: @$invitedBy') : (groupId.isNotEmpty ? Text(groupId) : null),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.close),
+                                            onPressed: () => declineInvite(key),
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.check),
+                                            onPressed: () => acceptInvite(key, inv),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }),
+                                  const Divider(height: 1),
+                                ],
+                              );
+                            },
+                          ),
+
+                          // Inbox pro adminy skupin: žádosti od členů na přidání lidí
+                          StreamBuilder<DatabaseEvent>(
+                            stream: rtdb().ref('groupAdminInbox/${current.uid}').onValue,
+                            builder: (context, inboxSnap) {
+                              final iv = inboxSnap.data?.snapshot.value;
+                              final im = (iv is Map) ? iv : null;
+                              final items = <Map<String, dynamic>>[];
+                              if (im != null) {
+                                for (final e in im.entries) {
+                                  if (e.value is! Map) continue;
+                                  final m = Map<String, dynamic>.from(e.value as Map);
+                                  m['__key'] = e.key.toString();
+                                  items.add(m);
+                                }
+                                items.sort((a, b) {
+                                  final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                                  final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                                  return bt.compareTo(at);
+                                });
+                              }
+
+                              Future<void> _cleanupAllAdmins({required String groupId, required String targetLower}) async {
+                                final membersSnap = await rtdb().ref('groupMembers/$groupId').get();
+                                final mv = membersSnap.value;
+                                final m = (mv is Map) ? mv : null;
+                                if (m != null) {
+                                  for (final e in m.entries) {
+                                    if (e.value is! Map) continue;
+                                    final mm = Map<String, dynamic>.from(e.value as Map);
+                                    final role = (mm['role'] ?? 'member').toString();
+                                    if (role != 'admin') continue;
+                                    final adminUid = e.key.toString();
+                                    await rtdb().ref('groupAdminInbox/$adminUid/${groupId}~$targetLower').remove();
+                                  }
+                                }
+                              }
+
+                              Future<void> _approve(Map<String, dynamic> item) async {
+                                final key = (item['__key'] ?? '').toString();
+                                final groupId = (item['groupId'] ?? '').toString();
+                                final targetLower = (item['targetLower'] ?? '').toString();
+                                final targetLogin = (item['targetLogin'] ?? '').toString();
+                                if (groupId.isEmpty || targetLower.isEmpty) return;
+
+                                final uidSnap = await rtdb().ref('usernames/$targetLower').get();
+                                final targetUid = uidSnap.value?.toString();
+                                if (targetUid == null || targetUid.isEmpty) {
+                                  await _cleanupAllAdmins(groupId: groupId, targetLower: targetLower);
+                                  await rtdb().ref('groupJoinRequests/$groupId/$targetLower').remove();
+                                  return;
+                                }
+
+                                final gSnap = await rtdb().ref('groups/$groupId').get();
+                                final gv = gSnap.value;
+                                final gm = (gv is Map) ? gv : null;
+                                final title = (gm?['title'] ?? 'Skupina').toString();
+                                final logo = (gm?['logoUrl'] ?? '').toString();
+
+                                await rtdb().ref('groupInvites/$targetUid/$groupId').set({
+                                  'groupId': groupId,
+                                  'groupTitle': title,
+                                  if (logo.isNotEmpty) 'groupLogoUrl': logo,
+                                  'invitedByUid': current.uid,
+                                  'invitedByGithub': myGithub,
+                                  'createdAt': ServerValue.timestamp,
+                                  'via': 'member_request',
+                                  if (targetLogin.isNotEmpty) 'targetLogin': targetLogin,
+                                });
+
+                                await _cleanupAllAdmins(groupId: groupId, targetLower: targetLower);
+                                await rtdb().ref('groupJoinRequests/$groupId/$targetLower').remove();
+                                await rtdb().ref('groupAdminInbox/${current.uid}/$key').remove();
+                              }
+
+                              Future<void> _reject(Map<String, dynamic> item) async {
+                                final key = (item['__key'] ?? '').toString();
+                                final groupId = (item['groupId'] ?? '').toString();
+                                final targetLower = (item['targetLower'] ?? '').toString();
+                                if (groupId.isEmpty || targetLower.isEmpty) return;
+                                await _cleanupAllAdmins(groupId: groupId, targetLower: targetLower);
+                                await rtdb().ref('groupJoinRequests/$groupId/$targetLower').remove();
+                                await rtdb().ref('groupAdminInbox/${current.uid}/$key').remove();
+                              }
+
+                              if (items.isEmpty) return const SizedBox.shrink();
+
+                              return Column(
+                                children: [
+                                  ListTile(
+                                    leading: const Icon(Icons.admin_panel_settings_outlined),
+                                    title: const Text('Žádosti do skupin'),
+                                    subtitle: Text('Čeká: ${items.length}'),
+                                  ),
+                                  ...items.map((item) {
+                                    final groupId = (item['groupId'] ?? '').toString();
+                                    final targetLogin = (item['targetLogin'] ?? '').toString();
+                                    final requestedBy = (item['requestedByGithub'] ?? '').toString();
+                                    return StreamBuilder<DatabaseEvent>(
+                                      stream: (groupId.isEmpty) ? const Stream.empty() : rtdb().ref('groups/$groupId').onValue,
+                                      builder: (context, gSnap) {
+                                        final gv = gSnap.data?.snapshot.value;
+                                        final gm = (gv is Map) ? gv : null;
+                                        final title = (gm?['title'] ?? 'Skupina').toString();
+                                        return ListTile(
+                                          leading: const Icon(Icons.group),
+                                          title: Text(title),
+                                          subtitle: Text(
+                                            'Přidat: @${targetLogin.isEmpty ? 'uživatel' : targetLogin}${requestedBy.isNotEmpty ? ' • od @$requestedBy' : ''}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          trailing: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                icon: const Icon(Icons.close),
+                                                onPressed: () => _reject(item),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.check),
+                                                onPressed: () => _approve(item),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  }),
+                                  const Divider(height: 1),
+                                ],
+                              );
+                            },
+                          ),
+
+                          // Přepínače: Priváty / Skupiny / Složky
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Priváty'),
+                                  selected: _overviewMode == 0,
+                                  onSelected: (_) => setState(() => _overviewMode = 0),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('Skupiny'),
+                                  selected: _overviewMode == 1,
+                                  onSelected: (_) => setState(() => _overviewMode = 1),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('Složky'),
+                                  selected: _overviewMode == 2,
+                                  onSelected: (_) => setState(() => _overviewMode = 2),
+                                ),
+                              ],
+                            ),
+                          ),
+
                           if (isModerator) ...[
                             const Padding(
                               padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -2268,30 +3368,121 @@ class _ChatsTabState extends State<_ChatsTab> {
                             const Divider(height: 1),
                           ],
 
-                          if (rows.isEmpty)
+                          if (_overviewMode == 0) ...[
+                            if (rows.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                child: Text('Zatím žádné chaty. Napiš někomu zprávu.'),
+                              )
+                            else
+                              ...rows.map((r) {
+                                final login = (r['login'] ?? '').toString();
+                                final avatarUrl = (r['avatarUrl'] ?? '').toString();
+                                final lastText = (r['lastText'] ?? '').toString();
+                                return ListTile(
+                                  leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
+                                  title: Text('@$login'),
+                                  subtitle: lastText.isNotEmpty
+                                      ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
+                                      : null,
+                                  onTap: () {
+                                    setState(() {
+                                      _activeLogin = login;
+                                      _activeAvatarUrl = avatarUrl;
+                                    });
+                                  },
+                                );
+                              }),
+                          ] else if (_overviewMode == 1) ...[
+                            ListTile(
+                              leading: const Icon(Icons.group_add),
+                              title: const Text('Vytvořit skupinu'),
+                              onTap: () async {
+                                final created = await Navigator.of(context).push<String>(
+                                  MaterialPageRoute(
+                                    builder: (_) => _CreateGroupPage(myGithubUsername: myGithub),
+                                  ),
+                                );
+                                if (!mounted) return;
+                                if (created != null && created.isNotEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Skupina vytvořena.')),
+                                  );
+                                }
+                              },
+                            ),
+                            ListTile(
+                              leading: const Icon(Icons.qr_code_scanner),
+                              title: const Text('Připojit se přes link / QR'),
+                              onTap: () async {
+                                final joined = await Navigator.of(context).push<String>(
+                                  MaterialPageRoute(builder: (_) => const JoinGroupViaLinkQrPage()),
+                                );
+                                if (!mounted) return;
+                                if (joined != null && joined.isNotEmpty) {
+                                  setState(() {
+                                    _activeGroupId = joined;
+                                    _activeLogin = null;
+                                    _activeVerifiedUid = null;
+                                  });
+                                }
+                              },
+                            ),
+                            const Divider(height: 1),
+                            StreamBuilder<DatabaseEvent>(
+                              stream: userGroupsRef.onValue,
+                              builder: (context, gSnap) {
+                                final gv = gSnap.data?.snapshot.value;
+                                final gmap = (gv is Map) ? gv : null;
+                                final groupIds = <String>[];
+                                if (gmap != null) {
+                                  for (final e in gmap.entries) {
+                                    if (e.value == true) groupIds.add(e.key.toString());
+                                  }
+                                }
+                                if (groupIds.isEmpty) {
+                                  return const Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                    child: Text('Zatím nejsi v žádné skupině.'),
+                                  );
+                                }
+
+                                return Column(
+                                  children: groupIds.map((gid) {
+                                    final gref = groupsRef.child(gid);
+                                    return StreamBuilder<DatabaseEvent>(
+                                      stream: gref.onValue,
+                                      builder: (context, meta) {
+                                        final v = meta.data?.snapshot.value;
+                                        final m = (v is Map) ? v : null;
+                                        final title = (m?['title'] ?? 'Skupina').toString();
+                                        final desc = (m?['description'] ?? '').toString();
+                                        return ListTile(
+                                          leading: const Icon(Icons.group),
+                                          title: Text(title),
+                                          subtitle: desc.isNotEmpty
+                                              ? Text(desc, maxLines: 1, overflow: TextOverflow.ellipsis)
+                                              : null,
+                                          onTap: () {
+                                            setState(() {
+                                              _activeGroupId = gid;
+                                              _activeLogin = null;
+                                              _activeVerifiedUid = null;
+                                            });
+                                          },
+                                        );
+                                      },
+                                    );
+                                  }).toList(growable: false),
+                                );
+                              },
+                            ),
+                          ] else ...[
                             const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              child: Text('Zatím žádné chaty. Napiš někomu zprávu.'),
-                            )
-                          else
-                            ...rows.map((r) {
-                              final login = (r['login'] ?? '').toString();
-                              final avatarUrl = (r['avatarUrl'] ?? '').toString();
-                              final lastText = (r['lastText'] ?? '').toString();
-                              return ListTile(
-                                leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
-                                title: Text('@$login'),
-                                subtitle: lastText.isNotEmpty
-                                    ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
-                                    : null,
-                                onTap: () {
-                                  setState(() {
-                                    _activeLogin = login;
-                                    _activeAvatarUrl = avatarUrl;
-                                  });
-                                },
-                              );
-                            }),
+                              child: Text('Složky: brzy.'),
+                            ),
+                          ],
                         ],
                       );
                             },
@@ -2518,205 +3709,379 @@ class _ChatsTabState extends State<_ChatsTab> {
       );
     }
 
+    // Group chat view
+    if (_activeGroupId != null) {
+      final groupId = _activeGroupId!;
+      final groupRef = rtdb().ref('groups/$groupId');
+      final memberRef = rtdb().ref('groupMembers/$groupId/${current.uid}');
+      final msgsRef = rtdb().ref('groupMessages/$groupId');
+
+      return StreamBuilder<DatabaseEvent>(
+        stream: currentUserRef.onValue,
+        builder: (context, userSnap) {
+          final uv = userSnap.data?.snapshot.value;
+          final um = (uv is Map) ? uv : null;
+          final myGithub = (um?['githubUsername'] ?? '').toString();
+          final myGithubLower = myGithub.toLowerCase();
+
+          return StreamBuilder<DatabaseEvent>(
+            stream: memberRef.onValue,
+            builder: (context, memSnap) {
+              final mv = memSnap.data?.snapshot.value;
+              final mm = (mv is Map) ? mv : null;
+              final role = (mm?['role'] ?? 'member').toString();
+              final isAdmin = role == 'admin';
+
+              return StreamBuilder<DatabaseEvent>(
+                stream: groupRef.onValue,
+                builder: (context, gSnap) {
+                  final gv = gSnap.data?.snapshot.value;
+                  final gm = (gv is Map) ? gv : null;
+                  final title = (gm?['title'] ?? 'Skupina').toString();
+                  final perms = (gm?['permissions'] is Map) ? (gm?['permissions'] as Map) : null;
+                  final canSend = (perms?['sendMessages'] != false) || isAdmin;
+
+                  Future<void> deleteMessage(String key) async {
+                    await msgsRef.child(key).remove();
+                  }
+
+                  Future<void> showAdminMenu(String key) async {
+                    if (!isAdmin) return;
+                    final action = await showModalBottomSheet<String>(
+                      context: context,
+                      builder: (context) {
+                        return SafeArea(
+                          child: ListView(
+                            shrinkWrap: true,
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.delete_outline),
+                                title: const Text('Smazat zprávu'),
+                                onTap: () => Navigator.of(context).pop('delete'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                    if (action == 'delete') {
+                      await deleteMessage(key);
+                    }
+                  }
+
+                  Future<void> send() async {
+                    final text = _messageController.text.trim();
+                    if (text.isEmpty || !canSend) return;
+                    _messageController.clear();
+                    await msgsRef.push().set({
+                      'text': text,
+                      'fromUid': current.uid,
+                      'fromGithub': myGithub,
+                      'createdAt': ServerValue.timestamp,
+                    });
+                    if (widget.settings.vibrationEnabled) {
+                      HapticFeedback.lightImpact();
+                    }
+                    if (widget.settings.soundsEnabled) {
+                      SystemSound.play(SystemSoundType.click);
+                    }
+                  }
+
+                  return Column(
+                    children: [
+                      ListTile(
+                        leading: IconButton(
+                          icon: const Icon(Icons.arrow_back),
+                          onPressed: () => setState(() => _activeGroupId = null),
+                        ),
+                        title: Text(title),
+                        subtitle: Text(isAdmin ? 'Admin' : 'Member'),
+                        trailing: const Icon(Icons.info_outline),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => _GroupInfoPage(groupId: groupId)),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: StreamBuilder<DatabaseEvent>(
+                          stream: msgsRef.onValue,
+                          builder: (context, msgSnap) {
+                            final v = msgSnap.data?.snapshot.value;
+                            if (v is! Map) {
+                              return const Center(child: Text('Zatím žádné zprávy.'));
+                            }
+                            final items = <Map<String, dynamic>>[];
+                            for (final e in v.entries) {
+                              if (e.value is! Map) continue;
+                              final m = Map<String, dynamic>.from(e.value as Map);
+                              m['__key'] = e.key.toString();
+                              items.add(m);
+                            }
+                            items.sort((a, b) {
+                              final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                              final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                              return at.compareTo(bt);
+                            });
+
+                            return ListView.builder(
+                              padding: const EdgeInsets.all(12),
+                              itemCount: items.length,
+                              itemBuilder: (context, i) {
+                                final m = items[i];
+                                final key = (m['__key'] ?? '').toString();
+                                final text = (m['text'] ?? '').toString();
+                                final fromUid = (m['fromUid'] ?? '').toString();
+                                final fromGh = (m['fromGithub'] ?? '').toString();
+                                final isMe = fromUid == current.uid;
+
+                                final mentioned = myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+
+                                final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
+                                final color = _bubbleColor(context, bubbleKey);
+                                final tcolor = _bubbleTextColor(context, bubbleKey);
+
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Column(
+                                    crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                    children: [
+                                      if (!isMe && fromGh.isNotEmpty)
+                                        Text('@$fromGh', style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                                      GestureDetector(
+                                        onLongPress: isAdmin ? () => showAdminMenu(key) : null,
+                                        child: Align(
+                                          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                            decoration: BoxDecoration(
+                                              color: color,
+                                              borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
+                                              border: mentioned ? Border.all(color: Colors.amber, width: 2) : null,
+                                            ),
+                                            child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _messageController,
+                                decoration: const InputDecoration(labelText: 'Zpráva'),
+                                enabled: canSend,
+                                onSubmitted: (_) => send(),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.send),
+                              onPressed: canSend ? send : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
+          );
+        },
+      );
+    }
+
     final login = _activeLogin!;
     final messagesRef = rtdb().ref('messages/${current.uid}/$login');
     final loginLower = login.trim().toLowerCase();
     final blockedRef = rtdb().ref('blocked/${current.uid}/$loginLower');
 
-    Color bubbleColor(BuildContext context, String key) {
-      final cs = Theme.of(context).colorScheme;
-      switch (key) {
-        case 'surfaceVariant':
-          return cs.surfaceVariant;
-        case 'primaryContainer':
-          return cs.primaryContainer;
-        case 'secondaryContainer':
-          return cs.secondaryContainer;
-        case 'surface':
-        default:
-          return cs.surface;
-      }
-    }
-
-    Color bubbleTextColor(BuildContext context, String key) {
-      final cs = Theme.of(context).colorScheme;
-      switch (key) {
-        case 'surfaceVariant':
-          return cs.onSurfaceVariant;
-        case 'primaryContainer':
-          return cs.onPrimaryContainer;
-        case 'secondaryContainer':
-          return cs.onSecondaryContainer;
-        case 'surface':
-        default:
-          return cs.onSurface;
-      }
-    }
-
     final bg = widget.settings.wallpaperUrl.trim();
-    return Column(
-      children: [
-        ListTile(
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => setState(() => _activeLogin = null),
-          ),
-          title: Text('@$login'),
-          trailing: _ChatLoginAvatar(
-            login: login,
-            avatarUrl: _activeAvatarUrl ?? '',
-            radius: 18,
-          ),
-          onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
-        ),
-        const Divider(height: 1),
-        StreamBuilder<DatabaseEvent>(
-          stream: blockedRef.onValue,
-          builder: (context, bSnap) {
-            final blocked = bSnap.data?.snapshot.value == true;
+    return StreamBuilder<DatabaseEvent>(
+      stream: currentUserRef.onValue,
+      builder: (context, uSnap) {
+        final uv = uSnap.data?.snapshot.value;
+        final um = (uv is Map) ? uv : null;
+        final myGithub = (um?['githubUsername'] ?? '').toString();
+        final myGithubLower = myGithub.toLowerCase();
 
-            return Expanded(
-              child: Column(
-                children: [
-                  if (blocked)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      color: Theme.of(context).colorScheme.surface,
-                      child: const Text('Uživatel je zablokovaný. Zprávy nelze odesílat.'),
-                    ),
-                  Expanded(
-                    child: Container(
-                      decoration: bg.isEmpty
-                          ? null
-                          : BoxDecoration(
-                              image: DecorationImage(
-                                image: NetworkImage(bg),
-                                fit: BoxFit.cover,
-                                opacity: 0.35,
-                              ),
-                            ),
-                      child: StreamBuilder<DatabaseEvent>(
-                        stream: messagesRef.onValue,
-                        builder: (context, snapshot) {
-                          final value = snapshot.data?.snapshot.value;
-                          if (value is! Map) {
-                            return const Center(child: Text('Napiš první zprávu.'));
-                          }
+        return Column(
+          children: [
+            ListTile(
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => setState(() => _activeLogin = null),
+              ),
+              title: Text('@$login'),
+              trailing: _ChatLoginAvatar(
+                login: login,
+                avatarUrl: _activeAvatarUrl ?? '',
+                radius: 18,
+              ),
+              onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
+            ),
+            const Divider(height: 1),
+            StreamBuilder<DatabaseEvent>(
+              stream: blockedRef.onValue,
+              builder: (context, bSnap) {
+                final blocked = bSnap.data?.snapshot.value == true;
 
-                          final now = DateTime.now().millisecondsSinceEpoch;
-                          final items = <Map<String, dynamic>>[];
-                          for (final e in value.entries) {
-                            if (e.value is! Map) continue;
-                            final msg = Map<String, dynamic>.from(e.value as Map);
-                            msg['__key'] = e.key.toString();
-                            final expiresAt = (msg['expiresAt'] is int) ? msg['expiresAt'] as int : null;
-                            if (expiresAt != null && expiresAt <= now) continue;
-                            items.add(msg);
-                          }
-
-                          items.sort((a, b) {
-                            final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
-                            final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
-                            return at.compareTo(bt);
-                          });
-
-                          return ListView.builder(
-                            padding: const EdgeInsets.all(12),
-                            itemCount: items.length,
-                            itemBuilder: (context, i) {
-                              final m = items[i];
-                              final key = (m['__key'] ?? '').toString();
-                              final text = (m['text'] ?? '').toString();
-                              final fromUid = (m['fromUid'] ?? '').toString();
-                              final isMe = fromUid == current.uid;
-
-                              final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
-                              final color = bubbleColor(context, bubbleKey);
-                              final tcolor = bubbleTextColor(context, bubbleKey);
-
-                              final reactions = (m['reactions'] is Map) ? (m['reactions'] as Map) : null;
-                              final reactionChips = <Widget>[];
-                              if (reactions != null) {
-                                for (final re in reactions.entries) {
-                                  final emoji = re.key.toString();
-                                  final voters = (re.value is Map) ? (re.value as Map) : null;
-                                  final count = voters?.length ?? 0;
-                                  if (count > 0) {
-                                    reactionChips.add(
-                                      Container(
-                                        margin: const EdgeInsets.only(top: 4, right: 6),
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context).colorScheme.surface,
-                                          borderRadius: BorderRadius.circular(999),
-                                        ),
-                                        child: Text('$emoji $count', style: TextStyle(fontSize: widget.settings.chatTextSize - 4)),
-                                      ),
-                                    );
-                                  }
-                                }
+                return Expanded(
+                  child: Column(
+                    children: [
+                      if (blocked)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          color: Theme.of(context).colorScheme.surface,
+                          child: const Text('Uživatel je zablokovaný. Zprávy nelze odesílat.'),
+                        ),
+                      Expanded(
+                        child: Container(
+                          decoration: bg.isEmpty
+                              ? null
+                              : BoxDecoration(
+                                  image: DecorationImage(
+                                    image: NetworkImage(bg),
+                                    fit: BoxFit.cover,
+                                    opacity: 0.35,
+                                  ),
+                                ),
+                          child: StreamBuilder<DatabaseEvent>(
+                            stream: messagesRef.onValue,
+                            builder: (context, snapshot) {
+                              final value = snapshot.data?.snapshot.value;
+                              if (value is! Map) {
+                                return const Center(child: Text('Napiš první zprávu.'));
                               }
 
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 6),
-                                child: Column(
-                                  crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                  children: [
-                                    GestureDetector(
-                                      onLongPress: blocked ? null : () => _showReactionsMenu(login: login, messageKey: key),
-                                      child: Align(
-                                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                          decoration: BoxDecoration(
-                                            color: color,
-                                            borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
+                              final now = DateTime.now().millisecondsSinceEpoch;
+                              final items = <Map<String, dynamic>>[];
+                              for (final e in value.entries) {
+                                if (e.value is! Map) continue;
+                                final msg = Map<String, dynamic>.from(e.value as Map);
+                                msg['__key'] = e.key.toString();
+                                final expiresAt = (msg['expiresAt'] is int) ? msg['expiresAt'] as int : null;
+                                if (expiresAt != null && expiresAt <= now) continue;
+                                items.add(msg);
+                              }
+
+                              items.sort((a, b) {
+                                final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                                final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                                return at.compareTo(bt);
+                              });
+
+                              return ListView.builder(
+                                padding: const EdgeInsets.all(12),
+                                itemCount: items.length,
+                                itemBuilder: (context, i) {
+                                  final m = items[i];
+                                  final key = (m['__key'] ?? '').toString();
+                                  final text = (m['text'] ?? '').toString();
+                                  final fromUid = (m['fromUid'] ?? '').toString();
+                                  final isMe = fromUid == current.uid;
+
+                                  final mentioned = myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+
+                                  final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
+                                  final color = _bubbleColor(context, bubbleKey);
+                                  final tcolor = _bubbleTextColor(context, bubbleKey);
+
+                                  final reactions = (m['reactions'] is Map) ? (m['reactions'] as Map) : null;
+                                  final reactionChips = <Widget>[];
+                                  if (reactions != null) {
+                                    for (final re in reactions.entries) {
+                                      final emoji = re.key.toString();
+                                      final voters = (re.value is Map) ? (re.value as Map) : null;
+                                      final count = voters?.length ?? 0;
+                                      if (count > 0) {
+                                        reactionChips.add(
+                                          Container(
+                                            margin: const EdgeInsets.only(top: 4, right: 6),
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context).colorScheme.surface,
+                                              borderRadius: BorderRadius.circular(999),
+                                            ),
+                                            child: Text('$emoji $count', style: TextStyle(fontSize: widget.settings.chatTextSize - 4)),
                                           ),
-                                          child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
+                                        );
+                                      }
+                                    }
+                                  }
+
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 6),
+                                    child: Column(
+                                      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                      children: [
+                                        GestureDetector(
+                                          onLongPress: blocked ? null : () => _showReactionsMenu(login: login, messageKey: key),
+                                          child: Align(
+                                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                              decoration: BoxDecoration(
+                                                color: color,
+                                                borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
+                                                border: mentioned ? Border.all(color: Colors.amber, width: 2) : null,
+                                              ),
+                                              child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                        if (reactionChips.isNotEmpty)
+                                          Wrap(
+                                            alignment: WrapAlignment.end,
+                                            children: reactionChips,
+                                          ),
+                                      ],
                                     ),
-                                    if (reactionChips.isNotEmpty)
-                                      Wrap(
-                                        alignment: WrapAlignment.end,
-                                        children: reactionChips,
-                                      ),
-                                  ],
-                                ),
+                                  );
+                                },
                               );
                             },
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _messageController,
-                            decoration: const InputDecoration(labelText: 'Zpráva'),
-                            enabled: !blocked,
-                            onSubmitted: blocked ? null : (_) => _send(),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.send),
-                          onPressed: blocked ? null : _send,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _messageController,
+                                decoration: const InputDecoration(labelText: 'Zpráva'),
+                                enabled: !blocked,
+                                onSubmitted: blocked ? null : (_) => _send(),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.send),
+                              onPressed: blocked ? null : _send,
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            );
-          },
-        ),
-      ],
+                );
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 }

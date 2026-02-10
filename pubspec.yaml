@@ -34,6 +34,11 @@ dependencies:
   firebase_core: ^2.25.4
   firebase_auth: ^4.17.4
   firebase_database: ^10.5.7
+  firebase_messaging: ^14.7.10
+  flutter_local_notifications: ^17.0.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.2.3
+  app_links: ^6.3.2
   http: ^1.2.2
   cupertino_icons: ^1.0.8
 
