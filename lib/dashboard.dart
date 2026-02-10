@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -17,12 +18,56 @@ import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 Future<String> _uploadGroupLogo({required String groupId, required Uint8List bytes}) async {
-  final ref = FirebaseStorage.instance.ref('groupLogos/$groupId.jpg');
-  await ref.putData(
-    bytes,
-    SettableMetadata(contentType: 'image/jpeg'),
-  );
-  return ref.getDownloadURL();
+  String normalizeBucket(String b) {
+    var bucket = b.trim();
+    if (bucket.startsWith('gs://')) bucket = bucket.substring(5);
+    return bucket;
+  }
+
+  final configured = normalizeBucket(Firebase.app().options.storageBucket ?? '');
+  final candidates = <String>[];
+  if (configured.isNotEmpty) candidates.add(configured);
+
+  if (configured.endsWith('.firebasestorage.app')) {
+    candidates.add(configured.replaceAll('.firebasestorage.app', '.appspot.com'));
+  } else if (configured.endsWith('.appspot.com')) {
+    candidates.add(configured.replaceAll('.appspot.com', '.firebasestorage.app'));
+  }
+
+  if (candidates.isEmpty) candidates.add('');
+
+  FirebaseException? lastFirebaseError;
+  Object? lastError;
+
+  for (final bucket in candidates.toSet()) {
+    try {
+      final storage = bucket.isEmpty
+          ? FirebaseStorage.instance
+          : FirebaseStorage.instanceFor(bucket: bucket.startsWith('gs://') ? bucket : 'gs://$bucket');
+
+      final ref = storage.ref().child('groupLogos').child('$groupId.jpg');
+      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+
+      for (var attempt = 0; attempt < 5; attempt++) {
+        try {
+          return await ref.getDownloadURL();
+        } on FirebaseException catch (e) {
+          lastFirebaseError = e;
+          if (e.code != 'object-not-found' || attempt == 4) rethrow;
+          await Future<void>.delayed(const Duration(milliseconds: 350));
+        }
+      }
+    } on FirebaseException catch (e) {
+      lastFirebaseError = e;
+      continue;
+    } catch (e) {
+      lastError = e;
+      continue;
+    }
+  }
+
+  if (lastFirebaseError != null) throw lastFirebaseError;
+  throw Exception('Logo upload failed: ${lastError ?? 'unknown error'}');
 }
 
 class DashboardPage extends StatefulWidget {
@@ -519,7 +564,17 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       String? logoUrl;
       final manualLogoUrl = _logoUrl.text.trim();
       if (_pickedLogoBytes != null) {
-        logoUrl = await _uploadGroupLogo(groupId: groupId, bytes: _pickedLogoBytes!);
+        try {
+          logoUrl = await _uploadGroupLogo(groupId: groupId, bytes: _pickedLogoBytes!);
+        } catch (e) {
+          // Don't fail group creation just because logo upload failed.
+          logoUrl = null;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Logo se nepodařilo nahrát (skupina se vytvoří i tak): $e')),
+            );
+          }
+        }
       } else if (manualLogoUrl.isNotEmpty) {
         logoUrl = manualLogoUrl;
       }
@@ -738,6 +793,43 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
     await rtdb().ref('groups/$groupId').update({...patch, 'updatedAt': ServerValue.timestamp});
   }
 
+  Future<void> _leaveGroupAsMember({required String groupId, required String uid}) async {
+    await rtdb().ref('groupMembers/$groupId/$uid').remove();
+    await rtdb().ref('userGroups/$uid/$groupId').remove();
+  }
+
+  Future<void> _transferAdminAndLeave({
+    required String groupId,
+    required String uid,
+    required String newAdminUid,
+  }) async {
+    await rtdb().ref('groupMembers/$groupId/$newAdminUid').update({'role': 'admin'});
+    await _leaveGroupAsMember(groupId: groupId, uid: uid);
+  }
+
+  Future<void> _deleteGroupAsAdmin({required String groupId}) async {
+    final membersSnap = await rtdb().ref('groupMembers/$groupId').get();
+    final mv = membersSnap.value;
+    final mm = (mv is Map) ? mv : null;
+
+    final updates = <String, Object?>{};
+    updates['groups/$groupId'] = null;
+    updates['groupMembers/$groupId'] = null;
+    updates['groupMessages/$groupId'] = null;
+    updates['groupJoinRequests/$groupId'] = null;
+
+    if (mm != null) {
+      for (final e in mm.entries) {
+        final memberUid = e.key.toString();
+        updates['userGroups/$memberUid/$groupId'] = null;
+        // also remove pending invite if it exists
+        updates['groupInvites/$memberUid/$groupId'] = null;
+      }
+    }
+
+    await rtdb().ref().update(updates);
+  }
+
   Future<String?> _loadOrEnsureInviteCode({
     required String groupId,
     required String existingCode,
@@ -811,21 +903,27 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
   }
 
   Future<void> _pickAndUploadLogo({required String groupId}) async {
-    final picker = ImagePicker();
-    final file = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 512,
-      maxHeight: 512,
-      imageQuality: 85,
-    );
-    if (file == null) return;
-    final bytes = await file.readAsBytes();
-    final url = await _uploadGroupLogo(groupId: groupId, bytes: bytes);
-    await _update(groupId, {'logoUrl': url});
-    if (mounted) {
-      setState(() {
-        _logoUrl.text = url;
-      });
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 85,
+      );
+      if (file == null) return;
+
+      final bytes = await file.readAsBytes();
+      final url = await _uploadGroupLogo(groupId: groupId, bytes: bytes);
+      await _update(groupId, {'logoUrl': url});
+      if (mounted) {
+        setState(() {
+          _logoUrl.text = url;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logo se nepodařilo nahrát: $e')));
     }
   }
 
@@ -843,11 +941,15 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
       builder: (context, gSnap) {
         final gv = gSnap.data?.snapshot.value;
         final gm = (gv is Map) ? gv : null;
-        final title = (gm?['title'] ?? 'Skupina').toString();
-        final desc = (gm?['description'] ?? '').toString();
-        final logo = (gm?['logoUrl'] ?? '').toString();
-        final inviteCode = (gm?['inviteCode'] ?? '').toString();
-        final perms = (gm?['permissions'] is Map) ? (gm?['permissions'] as Map) : null;
+        if (gm == null) {
+          return const Scaffold(body: SizedBox.shrink());
+        }
+
+        final title = (gm['title'] ?? '').toString();
+        final desc = (gm['description'] ?? '').toString();
+        final logo = (gm['logoUrl'] ?? '').toString();
+        final inviteCode = (gm['inviteCode'] ?? '').toString();
+        final perms = (gm['permissions'] is Map) ? (gm['permissions'] as Map) : null;
         final sendMessages = perms?['sendMessages'] != false;
         final allowMembersToAdd = perms?['allowMembersToAdd'] != false;
         final inviteLinkEnabled = perms?['inviteLinkEnabled'] == true;
@@ -1091,6 +1193,128 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 }
                               },
                       ),
+
+                      const Divider(height: 32),
+                      if (!isAdmin)
+                        FilledButton.tonalIcon(
+                          onPressed: () async {
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Odejít ze skupiny?'),
+                                content: const Text('Skupinu opustíš a zmizí ti ze seznamu.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
+                                  FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Odejít')),
+                                ],
+                              ),
+                            );
+                            if (ok != true) return;
+                            await _leaveGroupAsMember(groupId: widget.groupId, uid: current.uid);
+                            if (!mounted) return;
+                            Navigator.of(context).pop('left');
+                          },
+                          icon: const Icon(Icons.logout),
+                          label: const Text('Odejít ze skupiny'),
+                        )
+                      else
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: () async {
+                                // Admin must transfer admin or delete group.
+                                final action = await showDialog<String>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Jsi admin'),
+                                    content: const Text('Před odchodem musíš předat admina, nebo smazat celou skupinu.'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Zrušit')),
+                                      TextButton(onPressed: () => Navigator.pop(context, 'transfer'), child: const Text('Předat admina')),
+                                      FilledButton(onPressed: () => Navigator.pop(context, 'delete'), child: const Text('Smazat skupinu')),
+                                    ],
+                                  ),
+                                );
+                                if (action == null) return;
+                                if (action == 'delete') {
+                                  final ok = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('Smazat skupinu?'),
+                                      content: const Text('Tohle smaže skupinu pro všechny.'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
+                                        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Smazat')),
+                                      ],
+                                    ),
+                                  );
+                                  if (ok != true) return;
+                                  await _deleteGroupAsAdmin(groupId: widget.groupId);
+                                  if (!mounted) return;
+                                  Navigator.of(context).pop('deleted');
+                                  return;
+                                }
+
+                                final membersSnap = await rtdb().ref('groupMembers/${widget.groupId}').get();
+                                final mv = membersSnap.value;
+                                final m = (mv is Map) ? mv : null;
+                                final candidates = <String>[];
+                                if (m != null) {
+                                  for (final e in m.entries) {
+                                    final uid = e.key.toString();
+                                    if (uid == current.uid) continue;
+                                    candidates.add(uid);
+                                  }
+                                }
+                                if (candidates.isEmpty) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Ve skupině není nikdo další. Můžeš ji jen smazat.')),
+                                  );
+                                  return;
+                                }
+
+                                final pickedUid = await showModalBottomSheet<String>(
+                                  context: context,
+                                  builder: (context) {
+                                    return SafeArea(
+                                      child: ListView(
+                                        shrinkWrap: true,
+                                        children: [
+                                          const ListTile(
+                                            title: Text('Vyber nového admina', style: TextStyle(fontWeight: FontWeight.w700)),
+                                          ),
+                                          const Divider(height: 1),
+                                          ...candidates.map((uid) {
+                                            return FutureBuilder<DataSnapshot>(
+                                              future: rtdb().ref('users/$uid/githubUsername').get(),
+                                              builder: (context, snap) {
+                                                final gh = snap.data?.value?.toString() ?? uid;
+                                                return ListTile(
+                                                  leading: const Icon(Icons.admin_panel_settings_outlined),
+                                                  title: Text(gh.startsWith('@') ? gh : '@$gh'),
+                                                  subtitle: Text(uid, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                                  onTap: () => Navigator.of(context).pop(uid),
+                                                );
+                                              },
+                                            );
+                                          }),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                );
+                                if (pickedUid == null || pickedUid.isEmpty) return;
+                                await _transferAdminAndLeave(groupId: widget.groupId, uid: current.uid, newAdminUid: pickedUid);
+                                if (!mounted) return;
+                                Navigator.of(context).pop('left');
+                              },
+                              icon: const Icon(Icons.logout),
+                              label: const Text('Odejít / smazat'),
+                            ),
+                          ],
+                        ),
                     ],
                   ),
                 );
@@ -1224,6 +1448,9 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(999),
                             onTap: () {
+                              if (i != _index) {
+                                HapticFeedback.selectionClick();
+                              }
                               setState(() {
                                 if (i == 1 && _index != 1) {
                                   // Ruční přepnutí na Chaty vždy otevře přehled.
@@ -1665,33 +1892,35 @@ class _AvatarWithPresenceDot extends StatelessWidget {
 
         final Color dotColor;
         if (!enabled) {
-          dotColor = Theme.of(context).colorScheme.outlineVariant;
+          dotColor = Colors.white;
         } else if (status == 'dnd') {
-          dotColor = Theme.of(context).colorScheme.error;
+          dotColor = Colors.redAccent;
         } else if (status == 'hidden') {
-          dotColor = Theme.of(context).colorScheme.outlineVariant;
+          dotColor = Colors.transparent;
         } else {
-          dotColor = online ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.outlineVariant;
+          dotColor = online ? Colors.green : Colors.white;
         }
         final dotBorder = Theme.of(context).colorScheme.surface;
+        final showDot = dotColor.opacity > 0;
 
         return Stack(
           clipBehavior: Clip.none,
           children: [
             baseAvatar,
-            Positioned(
-              right: -1,
-              bottom: -1,
-              child: Container(
-                width: radius * 0.42,
-                height: radius * 0.42,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dotColor,
-                  border: Border.all(color: dotBorder, width: 2),
+            if (showDot)
+              Positioned(
+                right: -1,
+                bottom: -1,
+                child: Container(
+                  width: radius * 0.42,
+                  height: radius * 0.42,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: dotColor,
+                    border: Border.all(color: dotBorder, width: 2),
+                  ),
                 ),
               ),
-            ),
           ],
         );
       },
@@ -2005,7 +2234,7 @@ class _SettingsAccountPageState extends State<_SettingsAccountPage> {
           const SizedBox(height: 12),
           OutlinedButton(
             onPressed: widget.onLogout,
-            child: const Text('Přepnout GitHub účet'),
+            child: const Text('Odhlásit se'),
           ),
           const SizedBox(height: 12),
           OutlinedButton(
@@ -2572,6 +2801,13 @@ bool _isModeratorFromUserMap(Map? userMap) {
 
 Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
   if (username == null || username.isEmpty) return null;
+
+  String? extractFirstSvg(String html) {
+    final re = RegExp(r'(<svg[^>]*>[\s\S]*?<\/svg>)', caseSensitive: false);
+    final m = re.firstMatch(html);
+    return m?.group(1);
+  }
+
   try {
     // Avatar
     String? avatarUrl;
@@ -2591,10 +2827,28 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
     }
 
     // Aktivita SVG (contributions calendar)
-    final svgRes = await http.get(
-      Uri.parse('https://github-contributions-api.jogruber.de/v4/$username?format=svg'),
+    // Prefer GitHub official public endpoint to avoid relying on third-party services.
+    String? svg;
+    final ghSvgRes = await http.get(
+      Uri.parse('https://github.com/users/$username/contributions'),
+      headers: const {
+        'Accept': 'text/html',
+        'User-Agent': 'gitmit',
+      },
     );
-    final svg = svgRes.statusCode == 200 ? svgRes.body : null;
+    if (ghSvgRes.statusCode == 200) {
+      svg = extractFirstSvg(ghSvgRes.body);
+    }
+
+    // Fallback: legacy third-party API if GitHub endpoint changes or is blocked.
+    if (svg == null || svg.isEmpty) {
+      final svgRes = await http.get(
+        Uri.parse('https://github-contributions-api.jogruber.de/v4/$username?format=svg'),
+      );
+      if (svgRes.statusCode == 200 && svgRes.body.trim().startsWith('<svg')) {
+        svg = svgRes.body;
+      }
+    }
 
     // Top repozitáře (podle hvězdiček)
     final repoRes = await http.get(
@@ -2657,6 +2911,9 @@ class _ProfileTabState extends State<_ProfileTab> {
   final _verifiedReason = TextEditingController();
   bool _sending = false;
 
+  Future<Map<String, dynamic>?>? _ghFuture;
+  String? _ghUsername;
+
   @override
   void dispose() {
     _verifiedReason.dispose();
@@ -2684,8 +2941,13 @@ class _ProfileTabState extends State<_ProfileTab> {
         final verified = map?['verified'] == true;
         final githubAt = (githubUsername != null && githubUsername.isNotEmpty) ? '@$githubUsername' : '@(není nastaveno)';
 
+        if (githubUsername != _ghUsername) {
+          _ghUsername = githubUsername;
+          _ghFuture = _fetchGithubProfileData(githubUsername);
+        }
+
         return FutureBuilder<Map<String, dynamic>?>(
-          future: _fetchGithubProfileData(githubUsername),
+          future: _ghFuture,
           builder: (context, snap) {
             final gh = snap.data;
             final fetchedAvatar = gh?['avatarUrl'] as String?;
@@ -2727,10 +2989,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                   const Divider(height: 32),
                   const Text('Aktivita na GitHubu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  if (activitySvg != null)
-                    SizedBox(height: 120, child: _SvgWidget(svg: activitySvg))
-                  else
-                    const Text('Načítání aktivity...'),
+                  if (activitySvg != null) SizedBox(height: 120, child: _SvgWidget(svg: activitySvg)),
                   const SizedBox(height: 24),
                   const Text('Top repozitáře', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -2757,7 +3016,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                       }).toList(growable: false),
                     )
                   else
-                    const Text('Načítání repozitářů...'),
+                    const SizedBox.shrink(),
                   const SizedBox(height: 24),
 
                   // Žádost o ověření
@@ -2903,6 +3162,17 @@ class _ContactsTabState extends State<_ContactsTab> {
   String? _error;
   List<GithubUser> _results = const [];
 
+  bool _recoLoading = false;
+  String? _recoError;
+  List<_RecommendedUser> _friends = const [];
+  List<_RecommendedUser> _recommended = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshLocalRecommendations());
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -2921,6 +3191,7 @@ class _ContactsTabState extends State<_ContactsTab> {
           _error = null;
           _loading = false;
         });
+        await _refreshLocalRecommendations();
         return;
       }
 
@@ -2951,8 +3222,111 @@ class _ContactsTabState extends State<_ContactsTab> {
     widget.onStartChat(login: user.login, avatarUrl: user.avatarUrl);
   }
 
+  Future<void> _refreshLocalRecommendations() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+
+    if (_recoLoading) return;
+    if (!mounted) return;
+    setState(() {
+      _recoLoading = true;
+      _recoError = null;
+    });
+
+    try {
+      final myUid = current.uid;
+
+      final savedSnap = await rtdb().ref('savedChats/$myUid').get();
+      final sv = savedSnap.value;
+      final sm = (sv is Map) ? sv : null;
+      final friends = <_RecommendedUser>[];
+      final friendLoginsLower = <String>{};
+      if (sm != null) {
+        for (final e in sm.entries) {
+          if (e.value is! Map) continue;
+          final m = Map<String, dynamic>.from(e.value as Map);
+          final login = (m['login'] ?? e.key.toString()).toString().trim();
+          final lower = login.toLowerCase();
+          if (lower.isEmpty) continue;
+          friendLoginsLower.add(lower);
+          friends.add(
+            _RecommendedUser(
+              login: login,
+              avatarUrl: (m['avatarUrl'] ?? '').toString(),
+              score: 9999,
+            ),
+          );
+        }
+      }
+      friends.sort((a, b) => a.login.toLowerCase().compareTo(b.login.toLowerCase()));
+
+      final ugSnap = await rtdb().ref('userGroups/$myUid').get();
+      final ugv = ugSnap.value;
+      final ugm = (ugv is Map) ? ugv : null;
+      final groupIds = <String>[];
+      if (ugm != null) {
+        for (final e in ugm.entries) {
+          if (e.value == null || e.value == false) continue;
+          groupIds.add(e.key.toString());
+        }
+      }
+
+      final mutualCounts = <String, int>{};
+      for (final gid in groupIds) {
+        final membersSnap = await rtdb().ref('groupMembers/$gid').get();
+        final mv = membersSnap.value;
+        final mm = (mv is Map) ? mv : null;
+        if (mm == null) continue;
+        for (final entry in mm.entries) {
+          final uid = entry.key.toString();
+          if (uid == myUid) continue;
+          mutualCounts[uid] = (mutualCounts[uid] ?? 0) + 1;
+        }
+      }
+
+      final recos = <_RecommendedUser>[];
+      for (final uid in mutualCounts.keys) {
+        final userSnap = await rtdb().ref('users/$uid').get();
+        final uv = userSnap.value;
+        final um = (uv is Map) ? uv : null;
+        if (um == null) continue;
+        final login = (um['githubUsername'] ?? '').toString().trim();
+        final lower = login.toLowerCase();
+        if (lower.isEmpty) continue;
+        if (friendLoginsLower.contains(lower)) continue;
+        recos.add(
+          _RecommendedUser(
+            login: login,
+            avatarUrl: (um['avatarUrl'] ?? '').toString(),
+            score: mutualCounts[uid] ?? 0,
+          ),
+        );
+      }
+
+      recos.sort((a, b) {
+        final s = b.score.compareTo(a.score);
+        if (s != 0) return s;
+        return a.login.toLowerCase().compareTo(b.login.toLowerCase());
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _friends = friends;
+        _recommended = recos.take(25).toList(growable: false);
+        _recoLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _recoError = e.toString();
+        _recoLoading = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final query = _controller.text.trim();
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -2972,26 +3346,94 @@ class _ContactsTabState extends State<_ContactsTab> {
             Text(_error!, style: const TextStyle(color: Colors.redAccent)),
           ],
           const SizedBox(height: 12),
+          if (query.isEmpty) ...[
+            if (_recoLoading) const LinearProgressIndicator(),
+            if (_recoError != null) ...[
+              const SizedBox(height: 12),
+              Text(_recoError!, style: const TextStyle(color: Colors.redAccent)),
+            ],
+          ],
           Expanded(
-            child: ListView.separated(
-              itemCount: _results.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, i) {
-                final u = _results[i];
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
+            child: query.isEmpty
+                ? ListView(
+                    children: [
+                      if (_friends.isNotEmpty) ...[
+                        const Text('Kamarádi', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 8),
+                        ..._friends.map(
+                          (u) => _recommendedTile(
+                            u,
+                            onTap: () => widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl),
+                          ),
+                        ),
+                        const Divider(height: 24),
+                      ],
+                      if (_recommended.isNotEmpty) ...[
+                        const Text('Doporučené', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Lidi z tvých skupin (podle počtu společných skupin).',
+                          style: TextStyle(color: Colors.white60),
+                        ),
+                        const SizedBox(height: 8),
+                        ..._recommended.map(
+                          (u) => _recommendedTile(
+                            u,
+                            subtitle: 'Společné skupiny: ${u.score}',
+                            onTap: () => widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl),
+                          ),
+                        ),
+                      ],
+                      if (_friends.isEmpty && _recommended.isEmpty && !_recoLoading)
+                        const SizedBox.shrink(),
+                    ],
+                  )
+                : ListView.separated(
+                    itemCount: _results.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final u = _results[i];
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
+                        ),
+                        title: Text('@${u.login}'),
+                        onTap: () => _addToChats(u),
+                      );
+                    },
                   ),
-                  title: Text('@${u.login}'),
-                  onTap: () => _addToChats(u),
-                );
-              },
-            ),
           ),
         ],
       ),
     );
   }
+}
+
+class _RecommendedUser {
+  const _RecommendedUser({required this.login, required this.avatarUrl, required this.score});
+
+  final String login;
+  final String avatarUrl;
+  final int score;
+}
+
+Widget _recommendedTile(
+  _RecommendedUser u, {
+  String? subtitle,
+  VoidCallback? onTap,
+}) {
+  return ListTile(
+    dense: true,
+    contentPadding: EdgeInsets.zero,
+    leading: CircleAvatar(
+      radius: 16,
+      backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
+      child: u.avatarUrl.isEmpty ? const Icon(Icons.person, size: 16) : null,
+    ),
+    title: Text('@${u.login}', maxLines: 1, overflow: TextOverflow.ellipsis),
+    subtitle: subtitle == null ? null : Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+    onTap: onTap,
+  );
 }
 
 class _ChatsTab extends StatefulWidget {
@@ -3221,7 +3663,23 @@ class _ChatsTabState extends State<_ChatsTab> {
   Future<void> _reactToMessage({required String login, required String messageKey, required String emoji}) async {
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) return;
-    await rtdb().ref('messages/${current.uid}/$login/$messageKey/reactions/$emoji/${current.uid}').set(true);
+
+    // Enforce: one reaction per user per message.
+    final basePath = 'messages/${current.uid}/$login/$messageKey/reactions';
+    final reactionsSnap = await rtdb().ref(basePath).get();
+    final v = reactionsSnap.value;
+    final updates = <String, Object?>{};
+    if (v is Map) {
+      for (final e in v.entries) {
+        final existingEmoji = e.key.toString();
+        final voters = e.value;
+        if (voters is Map && voters.containsKey(current.uid)) {
+          updates['$basePath/$existingEmoji/${current.uid}'] = null;
+        }
+      }
+    }
+    updates['$basePath/$emoji/${current.uid}'] = true;
+    await rtdb().ref().update(updates);
   }
 
   Future<void> _showReactionsMenu({required String login, required String messageKey}) async {
@@ -3606,7 +4064,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 final gSnap = await rtdb().ref('groups/$groupId').get();
                                 final gv = gSnap.value;
                                 final gm = (gv is Map) ? gv : null;
-                                final title = (gm?['title'] ?? 'Skupina').toString();
+                                final title = (gm?['title'] ?? '').toString();
                                 final logo = (gm?['logoUrl'] ?? '').toString();
 
                                 await rtdb().ref('groupInvites/$targetUid/$groupId').set({
@@ -3653,7 +4111,8 @@ class _ChatsTabState extends State<_ChatsTab> {
                                       builder: (context, gSnap) {
                                         final gv = gSnap.data?.snapshot.value;
                                         final gm = (gv is Map) ? gv : null;
-                                        final title = (gm?['title'] ?? 'Skupina').toString();
+                                        if (gm == null) return const SizedBox.shrink();
+                                        final title = (gm['title'] ?? '').toString();
                                         return ListTile(
                                           leading: const Icon(Icons.group),
                                           title: Text(title),
@@ -3840,9 +4299,10 @@ class _ChatsTabState extends State<_ChatsTab> {
                                       builder: (context, meta) {
                                         final v = meta.data?.snapshot.value;
                                         final m = (v is Map) ? v : null;
-                                        final title = (m?['title'] ?? 'Skupina').toString();
-                                        final desc = (m?['description'] ?? '').toString();
-                                        final logo = (m?['logoUrl'] ?? '').toString();
+                                        if (m == null) return const SizedBox.shrink();
+                                        final title = (m['title'] ?? '').toString();
+                                        final desc = (m['description'] ?? '').toString();
+                                        final logo = (m['logoUrl'] ?? '').toString();
                                         return ListTile(
                                           leading: CircleAvatar(
                                             radius: 18,
@@ -3891,138 +4351,417 @@ class _ChatsTabState extends State<_ChatsTab> {
                                     final cv = cfSnap.data?.snapshot.value;
                                     final cfm = (cv is Map) ? cv : null;
 
-                                    int countForFolder(String? folderId) {
-                                      var c = 0;
-                                      for (final r in rows) {
-                                        final login = (r['login'] ?? '').toString();
-                                        final key = login.trim().toLowerCase();
-                                        final mapped = cfm?[key]?.toString();
-                                        if (folderId == null) {
-                                          if (mapped == null || mapped.isEmpty) c++;
-                                        } else {
-                                          if (mapped == folderId) c++;
+                                    return StreamBuilder<DatabaseEvent>(
+                                      stream: rtdb().ref('userGroups/${current.uid}').onValue,
+                                      builder: (context, ugSnap) {
+                                        final ugv = ugSnap.data?.snapshot.value;
+                                        final ugm = (ugv is Map) ? ugv : null;
+                                        final allGroupIds = <String>[];
+                                        if (ugm != null) {
+                                          for (final e in ugm.entries) {
+                                            if (e.value == true) allGroupIds.add(e.key.toString());
+                                          }
                                         }
-                                      }
-                                      return c;
-                                    }
 
-                                    Future<void> createFolder() async {
-                                      final ctrl = TextEditingController();
-                                      final name = await showDialog<String>(
-                                        context: context,
-                                        builder: (context) {
-                                          return AlertDialog(
-                                            title: const Text('Nová složka'),
-                                            content: TextField(
-                                              controller: ctrl,
-                                              decoration: const InputDecoration(labelText: 'Název'),
-                                            ),
-                                            actions: [
-                                              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
-                                              FilledButton(
-                                                onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
-                                                child: const Text('Vytvořit'),
-                                              ),
-                                            ],
-                                          );
-                                        },
-                                      );
-                                      final n = (name ?? '').trim();
-                                      if (n.isEmpty) return;
-                                      final push = rtdb().ref('folders/${current.uid}').push();
-                                      await push.set({'name': n, 'createdAt': ServerValue.timestamp});
-                                    }
+                                        return StreamBuilder<DatabaseEvent>(
+                                          stream: rtdb().ref('groupFolders/${current.uid}').onValue,
+                                          builder: (context, gfSnap) {
+                                            final gfv = gfSnap.data?.snapshot.value;
+                                            final gfm = (gfv is Map) ? gfv : null;
 
-                                    if (_activeFolderId != null) {
-                                      final fid = _activeFolderId;
-                                      final title = (fid == '__privates__')
-                                          ? 'Priváty'
-                                          : (folders.firstWhere(
-                                                  (e) => e['id'] == fid,
-                                                  orElse: () => {'name': 'Složka'},
-                                                )['name'] as String);
+                                            int countChatsForFolder(String? folderId) {
+                                              var c = 0;
+                                              for (final r in rows) {
+                                                final login = (r['login'] ?? '').toString();
+                                                final key = login.trim().toLowerCase();
+                                                final mapped = cfm?[key]?.toString();
+                                                if (folderId == null) {
+                                                  if (mapped == null || mapped.isEmpty) c++;
+                                                } else {
+                                                  if (mapped == folderId) c++;
+                                                }
+                                              }
+                                              return c;
+                                            }
 
-                                      final filtered = rows.where((r) {
-                                        final login = (r['login'] ?? '').toString();
-                                        final key = login.trim().toLowerCase();
-                                        final mapped = cfm?[key]?.toString();
-                                        if (fid == '__privates__') {
-                                          return mapped == null || mapped.isEmpty;
-                                        }
-                                        return mapped == fid;
-                                      }).toList(growable: false);
+                                            int countGroupsForFolder(String? folderId) {
+                                              if (folderId == null) return 0;
+                                              var c = 0;
+                                              for (final gid in allGroupIds) {
+                                                final mapped = gfm?[gid]?.toString();
+                                                if (mapped == folderId) c++;
+                                              }
+                                              return c;
+                                            }
 
-                                      return Column(
-                                        children: [
-                                          ListTile(
-                                            leading: IconButton(
-                                              icon: const Icon(Icons.arrow_back),
-                                              onPressed: () => setState(() => _activeFolderId = null),
-                                            ),
-                                            title: Text(title),
-                                            subtitle: Text('Chaty: ${filtered.length}'),
-                                          ),
-                                          const Divider(height: 1),
-                                          if (filtered.isEmpty)
-                                            const Padding(
-                                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                              child: Text('Ve složce zatím nic není.'),
-                                            )
-                                          else
-                                            ...filtered.map((r) {
-                                              final login = (r['login'] ?? '').toString();
-                                              final avatarUrl = (r['avatarUrl'] ?? '').toString();
-                                              final lastText = (r['lastText'] ?? '').toString();
-                                              return ListTile(
-                                                leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
-                                                title: Text('@$login'),
-                                                subtitle: lastText.isNotEmpty
-                                                    ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
-                                                    : null,
-                                                onLongPress: () => _moveChatToFolder(myUid: current.uid, login: login),
-                                                onTap: () {
-                                                  setState(() {
-                                                    _activeLogin = login;
-                                                    _activeAvatarUrl = avatarUrl;
-                                                  });
+                                            Future<void> createFolder() async {
+                                              final ctrl = TextEditingController();
+                                              final name = await showDialog<String>(
+                                                context: context,
+                                                builder: (context) {
+                                                  return AlertDialog(
+                                                    title: const Text('Nová složka'),
+                                                    content: TextField(
+                                                      controller: ctrl,
+                                                      decoration: const InputDecoration(labelText: 'Název'),
+                                                    ),
+                                                    actions: [
+                                                      TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
+                                                      FilledButton(
+                                                        onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
+                                                        child: const Text('Vytvořit'),
+                                                      ),
+                                                    ],
+                                                  );
                                                 },
                                               );
-                                            }),
-                                        ],
-                                      );
-                                    }
+                                              final n = (name ?? '').trim();
+                                              if (n.isEmpty) return;
+                                              final push = rtdb().ref('folders/${current.uid}').push();
+                                              await push.set({'name': n, 'createdAt': ServerValue.timestamp});
+                                            }
 
-                                    return Column(
-                                      children: [
-                                        ListTile(
-                                          leading: const Icon(Icons.create_new_folder_outlined),
-                                          title: const Text('Vytvořit složku'),
-                                          onTap: createFolder,
-                                        ),
-                                        ListTile(
-                                          leading: const Icon(Icons.inbox_outlined),
-                                          title: const Text('Priváty'),
-                                          subtitle: Text('Chaty: ${countForFolder(null)}'),
-                                          onTap: () => setState(() => _activeFolderId = '__privates__'),
-                                        ),
-                                        const Divider(height: 1),
-                                        if (folders.isEmpty)
-                                          const Padding(
-                                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                            child: Text('Zatím nemáš žádné složky.'),
-                                          )
-                                        else
-                                          ...folders.map((f) {
-                                            final fid = (f['id'] ?? '').toString();
-                                            final name = (f['name'] ?? 'Složka').toString();
-                                            return ListTile(
-                                              leading: const Icon(Icons.folder_outlined),
-                                              title: Text(name),
-                                              subtitle: Text('Chaty: ${countForFolder(fid)}'),
-                                              onTap: () => setState(() => _activeFolderId = fid),
+                                            Future<void> deleteFolder(String folderId, {required String folderName}) async {
+                                              final ok = await showDialog<bool>(
+                                                context: context,
+                                                builder: (context) => AlertDialog(
+                                                  title: const Text('Smazat složku?'),
+                                                  content: Text('Složka "$folderName" se smaže a všechny položky se vrátí zpět do privátů/skupin.'),
+                                                  actions: [
+                                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
+                                                    FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Smazat')),
+                                                  ],
+                                                ),
+                                              );
+                                              if (ok != true) return;
+
+                                              final updates = <String, Object?>{};
+                                              updates['folders/${current.uid}/$folderId'] = null;
+
+                                              if (cfm != null) {
+                                                for (final e in cfm.entries) {
+                                                  final key = e.key.toString();
+                                                  final mapped = e.value?.toString();
+                                                  if (mapped == folderId) {
+                                                    updates['chatFolders/${current.uid}/$key'] = null;
+                                                  }
+                                                }
+                                              }
+                                              if (gfm != null) {
+                                                for (final e in gfm.entries) {
+                                                  final gid = e.key.toString();
+                                                  final mapped = e.value?.toString();
+                                                  if (mapped == folderId) {
+                                                    updates['groupFolders/${current.uid}/$gid'] = null;
+                                                  }
+                                                }
+                                              }
+
+                                              await rtdb().ref().update(updates);
+                                              if (mounted) {
+                                                setState(() => _activeFolderId = null);
+                                              }
+                                            }
+
+                                            Future<void> addToFolder(String folderId) async {
+                                              final kind = await showModalBottomSheet<String>(
+                                                context: context,
+                                                builder: (context) {
+                                                  return SafeArea(
+                                                    child: ListView(
+                                                      shrinkWrap: true,
+                                                      children: [
+                                                        ListTile(
+                                                          leading: const Icon(Icons.person_add_alt_1),
+                                                          title: const Text('Přidat privát'),
+                                                          onTap: () => Navigator.of(context).pop('chat'),
+                                                        ),
+                                                        ListTile(
+                                                          leading: const Icon(Icons.group_add),
+                                                          title: const Text('Přidat skupinu'),
+                                                          onTap: () => Navigator.of(context).pop('group'),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                },
+                                              );
+                                              if (kind == null) return;
+
+                                              if (kind == 'chat') {
+                                                final candidates = rows.where((r) {
+                                                  final login = (r['login'] ?? '').toString();
+                                                  final key = login.trim().toLowerCase();
+                                                  final mapped = cfm?[key]?.toString();
+                                                  return mapped != folderId;
+                                                }).toList(growable: false);
+
+                                                final pickedLogin = await showModalBottomSheet<String>(
+                                                  context: context,
+                                                  isScrollControlled: true,
+                                                  builder: (context) {
+                                                    return SafeArea(
+                                                      child: ListView(
+                                                        shrinkWrap: true,
+                                                        children: [
+                                                          const ListTile(
+                                                            title: Text('Vyber privát', style: TextStyle(fontWeight: FontWeight.w700)),
+                                                          ),
+                                                          const Divider(height: 1),
+                                                          ...candidates.map((r) {
+                                                            final login = (r['login'] ?? '').toString();
+                                                            final avatarUrl = (r['avatarUrl'] ?? '').toString();
+                                                            return ListTile(
+                                                              leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 18),
+                                                              title: Text('@$login'),
+                                                              onTap: () => Navigator.of(context).pop(login),
+                                                            );
+                                                          }),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                );
+                                                if (pickedLogin == null || pickedLogin.isEmpty) return;
+                                                final key = pickedLogin.trim().toLowerCase();
+                                                await rtdb().ref('chatFolders/${current.uid}/$key').set(folderId);
+                                              } else {
+                                                final candidates = allGroupIds.where((gid) {
+                                                  final mapped = gfm?[gid]?.toString();
+                                                  return mapped != folderId;
+                                                }).toList(growable: false);
+
+                                                final pickedGid = await showModalBottomSheet<String>(
+                                                  context: context,
+                                                  isScrollControlled: true,
+                                                  builder: (context) {
+                                                    return SafeArea(
+                                                      child: ListView(
+                                                        shrinkWrap: true,
+                                                        children: [
+                                                          const ListTile(
+                                                            title: Text('Vyber skupinu', style: TextStyle(fontWeight: FontWeight.w700)),
+                                                          ),
+                                                          const Divider(height: 1),
+                                                          ...candidates.map((gid) {
+                                                            return StreamBuilder<DatabaseEvent>(
+                                                              stream: rtdb().ref('groups/$gid').onValue,
+                                                              builder: (context, snap) {
+                                                                final v = snap.data?.snapshot.value;
+                                                                final m = (v is Map) ? v : null;
+                                                                if (m == null) return const SizedBox.shrink();
+                                                                final title = (m['title'] ?? '').toString();
+                                                                final logo = (m['logoUrl'] ?? '').toString();
+                                                                return ListTile(
+                                                                  leading: CircleAvatar(
+                                                                    radius: 18,
+                                                                    backgroundImage: logo.isNotEmpty ? NetworkImage(logo) : null,
+                                                                    child: logo.isEmpty ? const Icon(Icons.group) : null,
+                                                                  ),
+                                                                  title: Text(title),
+                                                                  subtitle: Text(gid, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                                                  onTap: () => Navigator.of(context).pop(gid),
+                                                                );
+                                                              },
+                                                            );
+                                                          }),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                );
+                                                if (pickedGid == null || pickedGid.isEmpty) return;
+                                                await rtdb().ref('groupFolders/${current.uid}/$pickedGid').set(folderId);
+                                              }
+                                            }
+
+                                            Widget buildFolderView(String fid) {
+                                              final folderName = (fid == '__privates__')
+                                                  ? 'Priváty'
+                                                  : (folders.firstWhere(
+                                                          (e) => e['id'] == fid,
+                                                          orElse: () => {'name': 'Složka'},
+                                                        )['name'] as String);
+
+                                              final filteredChats = rows.where((r) {
+                                                final login = (r['login'] ?? '').toString();
+                                                final key = login.trim().toLowerCase();
+                                                final mapped = cfm?[key]?.toString();
+                                                if (fid == '__privates__') {
+                                                  return mapped == null || mapped.isEmpty;
+                                                }
+                                                return mapped == fid;
+                                              }).toList(growable: false);
+
+                                              final filteredGroups = (fid == '__privates__')
+                                                  ? const <String>[]
+                                                  : allGroupIds.where((gid) => (gfm?[gid]?.toString() == fid)).toList(growable: false);
+
+                                              return Column(
+                                                key: ValueKey('folder:$fid'),
+                                                children: [
+                                                  ListTile(
+                                                    leading: IconButton(
+                                                      icon: const Icon(Icons.arrow_back),
+                                                      onPressed: () => setState(() => _activeFolderId = null),
+                                                    ),
+                                                    title: Text(folderName),
+                                                    subtitle: Text(
+                                                      fid == '__privates__'
+                                                          ? 'Chaty: ${filteredChats.length}'
+                                                          : 'Chaty: ${filteredChats.length} • Skupiny: ${filteredGroups.length}',
+                                                    ),
+                                                    trailing: (fid == '__privates__')
+                                                        ? null
+                                                        : Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              IconButton(
+                                                                tooltip: 'Přidat',
+                                                                icon: const Icon(Icons.add),
+                                                                onPressed: () => addToFolder(fid),
+                                                              ),
+                                                              IconButton(
+                                                                tooltip: 'Smazat složku',
+                                                                icon: const Icon(Icons.delete_outline),
+                                                                onPressed: () => deleteFolder(fid, folderName: folderName),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                  ),
+                                                  const Divider(height: 1),
+
+                                                  if (filteredChats.isEmpty && filteredGroups.isEmpty)
+                                                    const Padding(
+                                                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                                      child: Text('Ve složce zatím nic není.'),
+                                                    ),
+
+                                                  ...filteredChats.map((r) {
+                                                    final login = (r['login'] ?? '').toString();
+                                                    final avatarUrl = (r['avatarUrl'] ?? '').toString();
+                                                    final lastText = (r['lastText'] ?? '').toString();
+                                                    return ListTile(
+                                                      leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
+                                                      title: Text('@$login'),
+                                                      subtitle: lastText.isNotEmpty
+                                                          ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
+                                                          : null,
+                                                      onLongPress: () => _moveChatToFolder(myUid: current.uid, login: login),
+                                                      onTap: () {
+                                                        setState(() {
+                                                          _activeLogin = login;
+                                                          _activeAvatarUrl = avatarUrl;
+                                                        });
+                                                      },
+                                                    );
+                                                  }),
+
+                                                  if (filteredGroups.isNotEmpty) ...[
+                                                    const Divider(height: 1),
+                                                    const Padding(
+                                                      padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                                                      child: Align(
+                                                        alignment: Alignment.centerLeft,
+                                                        child: Text('Skupiny', style: TextStyle(fontWeight: FontWeight.w700)),
+                                                      ),
+                                                    ),
+                                                    ...filteredGroups.map((gid) {
+                                                      return StreamBuilder<DatabaseEvent>(
+                                                        stream: rtdb().ref('groups/$gid').onValue,
+                                                        builder: (context, snap) {
+                                                          final v = snap.data?.snapshot.value;
+                                                          final m = (v is Map) ? v : null;
+                                                          if (m == null) return const SizedBox.shrink();
+                                                          final title = (m['title'] ?? '').toString();
+                                                          final logo = (m['logoUrl'] ?? '').toString();
+                                                          final desc = (m['description'] ?? '').toString();
+                                                          return ListTile(
+                                                            leading: CircleAvatar(
+                                                              radius: 18,
+                                                              backgroundImage: logo.isNotEmpty ? NetworkImage(logo) : null,
+                                                              child: logo.isEmpty ? const Icon(Icons.group) : null,
+                                                            ),
+                                                            title: Text(title),
+                                                            subtitle: desc.isNotEmpty
+                                                                ? Text(desc, maxLines: 1, overflow: TextOverflow.ellipsis)
+                                                                : null,
+                                                            onTap: () {
+                                                              setState(() {
+                                                                _activeGroupId = gid;
+                                                                _activeLogin = null;
+                                                                _activeVerifiedUid = null;
+                                                              });
+                                                            },
+                                                          );
+                                                        },
+                                                      );
+                                                    }),
+                                                  ],
+                                                ],
+                                              );
+                                            }
+
+                                            Widget buildFolderList() {
+                                              return Column(
+                                                key: const ValueKey('folders:list'),
+                                                children: [
+                                                  ListTile(
+                                                    leading: const Icon(Icons.create_new_folder_outlined),
+                                                    title: const Text('Vytvořit složku'),
+                                                    onTap: createFolder,
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(Icons.inbox_outlined),
+                                                    title: const Text('Priváty'),
+                                                    subtitle: Text('Chaty: ${countChatsForFolder(null)}'),
+                                                    onTap: () => setState(() => _activeFolderId = '__privates__'),
+                                                  ),
+                                                  const Divider(height: 1),
+                                                  if (folders.isEmpty)
+                                                    const Padding(
+                                                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                                      child: Text('Zatím nemáš žádné složky.'),
+                                                    )
+                                                  else
+                                                    ...folders.map((f) {
+                                                      final fid = (f['id'] ?? '').toString();
+                                                      final name = (f['name'] ?? 'Složka').toString();
+                                                      return ListTile(
+                                                        leading: const Icon(Icons.folder_outlined),
+                                                        title: Text(name),
+                                                        subtitle: Text('Chaty: ${countChatsForFolder(fid)} • Skupiny: ${countGroupsForFolder(fid)}'),
+                                                        trailing: IconButton(
+                                                          icon: const Icon(Icons.delete_outline),
+                                                          onPressed: () => deleteFolder(fid, folderName: name),
+                                                        ),
+                                                        onTap: () => setState(() => _activeFolderId = fid),
+                                                      );
+                                                    }),
+                                                ],
+                                              );
+                                            }
+
+                                            final body = (_activeFolderId != null)
+                                                ? buildFolderView(_activeFolderId!)
+                                                : buildFolderList();
+
+                                            return AnimatedSwitcher(
+                                              duration: const Duration(milliseconds: 220),
+                                              switchInCurve: Curves.easeOut,
+                                              switchOutCurve: Curves.easeIn,
+                                              transitionBuilder: (child, anim) {
+                                                return SizeTransition(
+                                                  sizeFactor: anim,
+                                                  axisAlignment: -1,
+                                                  child: FadeTransition(opacity: anim, child: child),
+                                                );
+                                              },
+                                              child: body,
                                             );
-                                          }),
-                                      ],
+                                          },
+                                        );
+                                      },
                                     );
                                   },
                                 );
@@ -4283,8 +5022,9 @@ class _ChatsTabState extends State<_ChatsTab> {
                 builder: (context, gSnap) {
                   final gv = gSnap.data?.snapshot.value;
                   final gm = (gv is Map) ? gv : null;
-                  final title = (gm?['title'] ?? 'Skupina').toString();
-                  final perms = (gm?['permissions'] is Map) ? (gm?['permissions'] as Map) : null;
+                  if (gm == null) return const SizedBox.shrink();
+                  final title = (gm['title'] ?? '').toString();
+                  final perms = (gm['permissions'] is Map) ? (gm['permissions'] as Map) : null;
                   final canSend = (perms?['sendMessages'] != false) || isAdmin;
 
                   Future<void> deleteMessage(String key) async {
@@ -4343,9 +5083,15 @@ class _ChatsTabState extends State<_ChatsTab> {
                         title: Text(title),
                         subtitle: Text(isAdmin ? 'Admin' : 'Member'),
                         trailing: const Icon(Icons.info_outline),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => _GroupInfoPage(groupId: groupId)),
-                        ),
+                        onTap: () async {
+                          final res = await Navigator.of(context).push<String>(
+                            MaterialPageRoute(builder: (_) => _GroupInfoPage(groupId: groupId)),
+                          );
+                          if (!mounted) return;
+                          if (res == 'left' || res == 'deleted') {
+                            setState(() => _activeGroupId = null);
+                          }
+                        },
                       ),
                       const Divider(height: 1),
                       Expanded(
