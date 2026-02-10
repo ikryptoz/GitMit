@@ -2,16 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'firebase_options.dart';
 import 'package:gitmit/register.dart';
 import 'package:gitmit/dashboard.dart';
 import 'package:gitmit/rtdb.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp();
   runApp(const MyApp());
 }
 
@@ -120,30 +117,10 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
   String? _errorMessage;
-
   bool _loading = false;
 
-  Future<void> _login() async {
-    setState(() => _loading = true);
-    try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/dashboard');
-      }
-    } on FirebaseAuthException catch (e) {
-      setState(() => _errorMessage = e.message);
-    } catch (e) {
-      setState(() => _errorMessage = e.toString());
-    } finally {
-      setState(() => _loading = false);
-    }
-  }
+  // ...existing code...
 
   Future<void> _loginWithGitHub() async {
     setState(() {
@@ -181,77 +158,45 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Center(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 32),
-                Center(
-                  child: Text(
-                    'Sign in to GitMit',
-                    style: TextStyle(
-                      color: Color(0xFF08872B),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 28,
-                      letterSpacing: 1.2,
-                    ),
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 32),
+              Center(
+                child: Text(
+                  'Sign in to GitMit',
+                  style: TextStyle(
+                    color: Color(0xFF08872B),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 28,
+                    letterSpacing: 1.2,
                   ),
                 ),
-                const SizedBox(height: 40),
-                TextField(
-                  controller: _emailController,
-                  decoration: const InputDecoration(labelText: 'Email'),
-                  keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 40),
+              OutlinedButton(
+                onPressed: _loading ? null : _loginWithGitHub,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF08872B),
+                  side: const BorderSide(color: Color(0xFF0A241B)),
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                  ),
                 ),
+                child: const Text(
+                  'Sign in with GitHub',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              if (_errorMessage != null) ...[
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _passwordController,
-                  decoration: const InputDecoration(labelText: 'Heslo'),
-                  obscureText: true,
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _loading ? null : _login,
-                  child: _loading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Sign in'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF0A241B),
-                    foregroundColor: Colors.white,
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: _loading ? null : _loginWithGitHub,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF08872B),
-                    side: const BorderSide(color: Color(0xFF0A241B)),
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(8)),
-                    ),
-                  ),
-                  child: const Text(
-                    'Sign in with GitHub',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 16),
-                  Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent)),
-                ],
-                const SizedBox(height: 24),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pushReplacementNamed('/register'),
-                  child: const Text('Nemáte účet? Zaregistrujte se'),
-                  style: TextButton.styleFrom(foregroundColor: Color(0xFF08872B)),
-                ),
+                Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent)),
               ],
-            ),
+            ],
           ),
         ),
       ),
