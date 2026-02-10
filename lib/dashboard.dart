@@ -1394,7 +1394,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _pillBottomNav(BuildContext context) {
+  Widget _pillBottomNav(BuildContext context, {required bool vibrationEnabled}) {
     final cs = Theme.of(context).colorScheme;
     const items = <({IconData icon, String label})>[
       (icon: Icons.dashboard, label: 'Jobs'),
@@ -1449,7 +1449,9 @@ class _DashboardPageState extends State<DashboardPage> {
                             borderRadius: BorderRadius.circular(999),
                             onTap: () {
                               if (i != _index) {
-                                HapticFeedback.selectionClick();
+                                if (vibrationEnabled) {
+                                  HapticFeedback.selectionClick();
+                                }
                               }
                               setState(() {
                                 if (i == 1 && _index != 1) {
@@ -1625,9 +1627,9 @@ class _DashboardPageState extends State<DashboardPage> {
             openChatToken: _openChatToken,
             overviewToken: _chatsOverviewToken,
           ),
-          _ContactsTab(onStartChat: _openChat),
+          _ContactsTab(onStartChat: _openChat, vibrationEnabled: settings.vibrationEnabled),
           _SettingsTab(onLogout: _logout, settings: settings),
-          const _ProfileTab(),
+          _ProfileTab(vibrationEnabled: settings.vibrationEnabled),
         ];
 
         return WillPopScope(
@@ -1635,7 +1637,7 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Scaffold(
             appBar: _pillAppBar(context),
             body: pages[_index],
-            bottomNavigationBar: _pillBottomNav(context),
+            bottomNavigationBar: _pillBottomNav(context, vibrationEnabled: settings.vibrationEnabled),
           ),
         );
       },
@@ -2808,6 +2810,15 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
     return m?.group(1);
   }
 
+  String sanitizeContributionsSvg(String svg) {
+    // GitHub's SVG often includes dark text labels that are unreadable on dark background.
+    // Keep only the grid; remove <text> and <title> elements.
+    var s = svg;
+    s = s.replaceAll(RegExp(r'<text[^>]*>[\s\S]*?<\/text>', caseSensitive: false), '');
+    s = s.replaceAll(RegExp(r'<title[^>]*>[\s\S]*?<\/title>', caseSensitive: false), '');
+    return s;
+  }
+
   try {
     // Avatar
     String? avatarUrl;
@@ -2832,12 +2843,20 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
     final ghSvgRes = await http.get(
       Uri.parse('https://github.com/users/$username/contributions'),
       headers: const {
-        'Accept': 'text/html',
+        'Accept': 'image/svg+xml,text/html;q=0.9,*/*;q=0.8',
         'User-Agent': 'gitmit',
       },
     );
     if (ghSvgRes.statusCode == 200) {
-      svg = extractFirstSvg(ghSvgRes.body);
+      final body = ghSvgRes.body.trim();
+      if (body.startsWith('<svg')) {
+        svg = sanitizeContributionsSvg(body);
+      } else {
+        final extracted = extractFirstSvg(body);
+        if (extracted != null && extracted.isNotEmpty) {
+          svg = sanitizeContributionsSvg(extracted);
+        }
+      }
     }
 
     // Fallback: legacy third-party API if GitHub endpoint changes or is blocked.
@@ -2846,7 +2865,7 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
         Uri.parse('https://github-contributions-api.jogruber.de/v4/$username?format=svg'),
       );
       if (svgRes.statusCode == 200 && svgRes.body.trim().startsWith('<svg')) {
-        svg = svgRes.body;
+        svg = sanitizeContributionsSvg(svgRes.body);
       }
     }
 
@@ -2896,12 +2915,36 @@ class _SvgWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SvgPicture.string(svg, fit: BoxFit.contain);
+    final cs = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: cs.surface,
+          border: Border.all(color: cs.outlineVariant),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: SvgPicture.string(
+              svg,
+              height: 120,
+              fit: BoxFit.none,
+              alignment: Alignment.centerLeft,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
 class _ProfileTab extends StatefulWidget {
-  const _ProfileTab();
+  const _ProfileTab({required this.vibrationEnabled});
+
+  final bool vibrationEnabled;
 
   @override
   State<_ProfileTab> createState() => _ProfileTabState();
@@ -2989,7 +3032,9 @@ class _ProfileTabState extends State<_ProfileTab> {
                   const Divider(height: 32),
                   const Text('Aktivita na GitHubu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  if (activitySvg != null) SizedBox(height: 120, child: _SvgWidget(svg: activitySvg)),
+                  if (activitySvg != null && activitySvg.trim().isNotEmpty) _SvgWidget(svg: activitySvg),
+                  if (snap.connectionState == ConnectionState.done && (activitySvg == null || activitySvg.trim().isEmpty))
+                    const Text('Aktivitu se nepodařilo načíst.', style: TextStyle(color: Colors.white60)),
                   const SizedBox(height: 24),
                   const Text('Top repozitáře', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -3148,8 +3193,9 @@ class _ProfileTabState extends State<_ProfileTab> {
 }
 
 class _ContactsTab extends StatefulWidget {
-  const _ContactsTab({required this.onStartChat});
+  const _ContactsTab({required this.onStartChat, required this.vibrationEnabled});
   final void Function({required String login, required String avatarUrl}) onStartChat;
+  final bool vibrationEnabled;
 
   @override
   State<_ContactsTab> createState() => _ContactsTabState();
@@ -3363,7 +3409,12 @@ class _ContactsTabState extends State<_ContactsTab> {
                         ..._friends.map(
                           (u) => _recommendedTile(
                             u,
-                            onTap: () => widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl),
+                            onTap: () {
+                              if (widget.vibrationEnabled) {
+                                HapticFeedback.selectionClick();
+                              }
+                              widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl);
+                            },
                           ),
                         ),
                         const Divider(height: 24),
@@ -3380,7 +3431,12 @@ class _ContactsTabState extends State<_ContactsTab> {
                           (u) => _recommendedTile(
                             u,
                             subtitle: 'Společné skupiny: ${u.score}',
-                            onTap: () => widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl),
+                            onTap: () {
+                              if (widget.vibrationEnabled) {
+                                HapticFeedback.selectionClick();
+                              }
+                              widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl);
+                            },
                           ),
                         ),
                       ],
@@ -3398,7 +3454,12 @@ class _ContactsTabState extends State<_ContactsTab> {
                           backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
                         ),
                         title: Text('@${u.login}'),
-                        onTap: () => _addToChats(u),
+                        onTap: () {
+                          if (widget.vibrationEnabled) {
+                            HapticFeedback.selectionClick();
+                          }
+                          _addToChats(u);
+                        },
                       );
                     },
                   ),
@@ -3541,6 +3602,18 @@ class _ChatsTabState extends State<_ChatsTab> {
   void dispose() {
     _messageController.dispose();
     super.dispose();
+  }
+
+  void _hapticSelect() {
+    if (widget.settings.vibrationEnabled) {
+      HapticFeedback.selectionClick();
+    }
+  }
+
+  void _hapticMedium() {
+    if (widget.settings.vibrationEnabled) {
+      HapticFeedback.mediumImpact();
+    }
   }
 
   Future<void> _moveChatToFolder({required String myUid, required String login}) async {
@@ -4200,6 +4273,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   title: Text('@$gh'),
                                   subtitle: Text(reason, maxLines: 1, overflow: TextOverflow.ellipsis),
                                   onTap: () {
+                                    _hapticSelect();
                                     setState(() {
                                       _activeVerifiedUid = uid;
                                       _activeVerifiedGithub = gh;
@@ -4228,8 +4302,12 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   subtitle: lastText.isNotEmpty
                                       ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
                                       : null,
-                                  onLongPress: () => _moveChatToFolder(myUid: current.uid, login: login),
+                                  onLongPress: () {
+                                    _hapticMedium();
+                                    _moveChatToFolder(myUid: current.uid, login: login);
+                                  },
                                   onTap: () {
+                                    _hapticSelect();
                                     setState(() {
                                       _activeLogin = login;
                                       _activeAvatarUrl = avatarUrl;
@@ -4242,6 +4320,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                               leading: const Icon(Icons.group_add),
                               title: const Text('Vytvořit skupinu'),
                               onTap: () async {
+                                _hapticSelect();
                                 final created = await Navigator.of(context).push<String>(
                                   MaterialPageRoute(
                                     builder: (_) => _CreateGroupPage(myGithubUsername: myGithub),
@@ -4259,6 +4338,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                               leading: const Icon(Icons.qr_code_scanner),
                               title: const Text('Připojit se přes link / QR'),
                               onTap: () async {
+                                _hapticSelect();
                                 final joined = await Navigator.of(context).push<String>(
                                   MaterialPageRoute(builder: (_) => const JoinGroupViaLinkQrPage()),
                                 );
@@ -4603,7 +4683,10 @@ class _ChatsTabState extends State<_ChatsTab> {
                                                   ListTile(
                                                     leading: IconButton(
                                                       icon: const Icon(Icons.arrow_back),
-                                                      onPressed: () => setState(() => _activeFolderId = null),
+                                                      onPressed: () {
+                                                        _hapticSelect();
+                                                        setState(() => _activeFolderId = null);
+                                                      },
                                                     ),
                                                     title: Text(folderName),
                                                     subtitle: Text(
@@ -4619,12 +4702,18 @@ class _ChatsTabState extends State<_ChatsTab> {
                                                               IconButton(
                                                                 tooltip: 'Přidat',
                                                                 icon: const Icon(Icons.add),
-                                                                onPressed: () => addToFolder(fid),
+                                                                onPressed: () {
+                                                                  _hapticSelect();
+                                                                  addToFolder(fid);
+                                                                },
                                                               ),
                                                               IconButton(
                                                                 tooltip: 'Smazat složku',
                                                                 icon: const Icon(Icons.delete_outline),
-                                                                onPressed: () => deleteFolder(fid, folderName: folderName),
+                                                                onPressed: () {
+                                                                  _hapticMedium();
+                                                                  deleteFolder(fid, folderName: folderName);
+                                                                },
                                                               ),
                                                             ],
                                                           ),
@@ -4647,8 +4736,12 @@ class _ChatsTabState extends State<_ChatsTab> {
                                                       subtitle: lastText.isNotEmpty
                                                           ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
                                                           : null,
-                                                      onLongPress: () => _moveChatToFolder(myUid: current.uid, login: login),
+                                                      onLongPress: () {
+                                                        _hapticMedium();
+                                                        _moveChatToFolder(myUid: current.uid, login: login);
+                                                      },
                                                       onTap: () {
+                                                        _hapticSelect();
                                                         setState(() {
                                                           _activeLogin = login;
                                                           _activeAvatarUrl = avatarUrl;
@@ -4687,6 +4780,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                                                 ? Text(desc, maxLines: 1, overflow: TextOverflow.ellipsis)
                                                                 : null,
                                                             onTap: () {
+                                                              _hapticSelect();
                                                               setState(() {
                                                                 _activeGroupId = gid;
                                                                 _activeLogin = null;
