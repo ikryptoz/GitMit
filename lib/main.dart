@@ -5,6 +5,8 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:gitmit/register.dart';
 import 'package:gitmit/dashboard.dart';
 import 'package:gitmit/rtdb.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,7 +25,6 @@ class MyApp extends StatelessWidget {
     const gray6 = Color(0xFF101411); // #101411
     const green3 = Color(0xFF08872B); // #08872B (GREEN 5, tmavší)
     const green4 = Color(0xFF0A241B); // #0A241B (GREEN 6, tmavší)
-    const green6 = Color(0xFF0A241B); // #0A241B
 
     return MaterialApp(
       title: 'GitMit',
@@ -133,12 +134,31 @@ class _LoginPageState extends State<LoginPage> {
 
       final user = credential.user;
       final githubUsername = credential.additionalUserInfo?.username;
+      String? avatarUrl;
+
+      // Fetch avatar and verification from GitHub API
+      if (githubUsername != null && githubUsername.isNotEmpty) {
+        final uri = Uri.https('api.github.com', '/users/$githubUsername');
+        final res = await http.get(uri, headers: {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'gitmit',
+        });
+        if (res.statusCode == 200) {
+          final data = Map<String, dynamic>.from(jsonDecode(res.body));
+          avatarUrl = data['avatar_url']?.toString();
+        }
+      }
+
+      // Fallback: když GitHub API avatar nevrátí, vezmi photoURL z Firebase (pokud existuje)
+      avatarUrl ??= user?.photoURL;
+
       if (user != null && githubUsername != null && githubUsername.isNotEmpty) {
         await rtdb().ref('users/${user.uid}').update({
           'githubUsername': githubUsername,
           'provider': 'github',
           'email': user.email,
           'lastLoginAt': ServerValue.timestamp,
+          if (avatarUrl != null) 'avatarUrl': avatarUrl,
         });
       }
       if (mounted) {

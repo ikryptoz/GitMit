@@ -28,6 +28,8 @@ class _RegisterPageState extends State<RegisterPage> {
         await rtdb().ref('users/${user.uid}').set({
           'email': _emailController.text.trim(),
           'createdAt': ServerValue.timestamp,
+          'avatarUrl': '',
+          'verified': false,
         });
       }
       if (mounted) {
