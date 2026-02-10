@@ -1,0 +1,112 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:gitmit/rtdb.dart';
+
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+
+  @override
+  State<RegisterPage> createState() => _RegisterPageState();
+}
+
+class _RegisterPageState extends State<RegisterPage> {
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  String? _errorMessage;
+  bool _loading = false;
+
+  Future<void> _register() async {
+    setState(() => _loading = true);
+    try {
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+      final user = credential.user;
+      if (user != null) {
+        await rtdb().ref('users/${user.uid}').set({
+          'email': _emailController.text.trim(),
+          'createdAt': ServerValue.timestamp,
+        });
+      }
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/dashboard');
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() => _errorMessage = e.message);
+    } on FirebaseException catch (e) {
+      setState(() => _errorMessage = e.message ?? e.code);
+    } catch (e) {
+      setState(() => _errorMessage = e.toString());
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 32),
+                Center(
+                  child: Text(
+                    'Register to GitMit',
+                    style: TextStyle(
+                      color: Color(0xFF08872B),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 28,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 40),
+                TextField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _passwordController,
+                  decoration: const InputDecoration(labelText: 'Password'),
+                  obscureText: true,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _loading ? null : _register,
+                  child: _loading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('Register'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Color(0xFF0A241B),
+                    foregroundColor: Colors.white,
+                    textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent)),
+                ],
+                const SizedBox(height: 24),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pushReplacementNamed('/login'),
+                  child: const Text('Already have an account? Sign in'),
+                  style: TextButton.styleFrom(foregroundColor: Color(0xFF08872B)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
