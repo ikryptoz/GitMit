@@ -15,11 +15,265 @@ class DashboardPage extends StatefulWidget {
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
+    
+class _UserProfilePage extends StatefulWidget {
+  const _UserProfilePage({required this.login, required this.avatarUrl});
+
+  final String login;
+  final String avatarUrl;
+
+  @override
+  State<_UserProfilePage> createState() => _UserProfilePageState();
+}
+
+class _UserProfilePageState extends State<_UserProfilePage> {
+  String _loginLower() => widget.login.trim().toLowerCase();
+
+  Future<String?> _myGithubUsername(String myUid) async {
+    final snap = await rtdb().ref('users/$myUid/githubUsername').get();
+    final v = snap.value;
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  Future<String?> _lookupUidForLogin(String loginLower) async {
+    final snap = await rtdb().ref('usernames/$loginLower').get();
+    final v = snap.value;
+    if (v == null) return null;
+    return v.toString();
+  }
+
+  Future<void> _toggleBlock({required String myUid, required bool currentlyBlocked}) async {
+    final key = _loginLower();
+    final ref = rtdb().ref('blocked/$myUid/$key');
+    if (currentlyBlocked) {
+      await ref.remove();
+    } else {
+      await ref.set(true);
+    }
+  }
+
+  Future<void> _deleteChatForMe({required String myUid}) async {
+    final login = widget.login;
+    await rtdb().ref('messages/$myUid/$login').remove();
+    await rtdb().ref('savedChats/$myUid/$login').remove();
+  }
+
+  Future<void> _deleteChatForBoth({required String myUid}) async {
+    final otherUid = await _lookupUidForLogin(_loginLower());
+    if (otherUid == null) {
+      throw Exception('Uživatel nemá propojený účet v databázi.');
+    }
+
+    final myLogin = await _myGithubUsername(myUid);
+    if (myLogin == null) {
+      throw Exception('Nepodařilo se zjistit tvůj GitHub username.');
+    }
+
+    await _deleteChatForMe(myUid: myUid);
+    await rtdb().ref('messages/$otherUid/$myLogin').remove();
+    await rtdb().ref('savedChats/$otherUid/$myLogin').remove();
+  }
+
+  Future<void> _confirmAndRun({
+    required String title,
+    required String message,
+    required Future<void> Function() action,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Pokračovat')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await action();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hotovo.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) {
+      return const Scaffold(body: Center(child: Text('Nejsi přihlášen.')));
+    }
+
+    final myUid = current.uid;
+    final loginLower = _loginLower();
+    final blockedRef = rtdb().ref('blocked/$myUid/$loginLower');
+    final otherUidRef = rtdb().ref('usernames/$loginLower');
+    final otherUserRef = rtdb().ref('users');
+
+    return Scaffold(
+      appBar: AppBar(title: Text('@${widget.login}')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          StreamBuilder<DatabaseEvent>(
+            stream: otherUidRef.onValue,
+            builder: (context, uidSnap) {
+              final otherUid = uidSnap.data?.snapshot.value?.toString();
+              final hasOtherUid = otherUid != null && otherUid.isNotEmpty;
+
+              return FutureBuilder<Map<String, dynamic>?>
+                  (
+                future: _fetchGithubProfileData(widget.login),
+                builder: (context, ghSnap) {
+                  final gh = ghSnap.data;
+                  final fetchedAvatar = gh?['avatarUrl'] as String?;
+                  final activitySvg = gh?['contributions'] as String?;
+                  final topRepos = gh?['topRepos'] as List<Map<String, dynamic>>?;
+
+                  final avatar = (widget.avatarUrl.trim().isNotEmpty)
+                      ? widget.avatarUrl.trim()
+                      : (fetchedAvatar ?? '');
+
+                  Widget avatarWidget;
+                  if (hasOtherUid) {
+                    avatarWidget = _AvatarWithPresenceDot(
+                      uid: otherUid,
+                      avatarUrl: avatar.isEmpty ? null : avatar,
+                      radius: 48,
+                    );
+                  } else {
+                    avatarWidget = CircleAvatar(
+                      radius: 48,
+                      backgroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+                      child: avatar.isEmpty ? const Icon(Icons.person, size: 40) : null,
+                    );
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Center(child: avatarWidget),
+                      const SizedBox(height: 16),
+                      StreamBuilder<DatabaseEvent>(
+                        stream: hasOtherUid ? otherUserRef.child(otherUid).onValue : const Stream.empty(),
+                        builder: (context, userSnap) {
+                          final v = userSnap.data?.snapshot.value;
+                          final m = (v is Map) ? v : null;
+                          final verified = m?['verified'] == true;
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('@${widget.login}',
+                                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                              const SizedBox(width: 8),
+                              if (verified) const Icon(Icons.verified, color: Colors.grey, size: 28),
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      if (!hasOtherUid) const Text('Účet není propojený v databázi.'),
+                      const Divider(height: 32),
+                      const Text('Aktivita na GitHubu',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      if (activitySvg != null)
+                        SizedBox(height: 120, child: _SvgWidget(svg: activitySvg))
+                      else
+                        const Text('Načítání aktivity...'),
+                      const SizedBox(height: 24),
+                      const Text('Top repozitáře',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      if (topRepos != null && topRepos.isNotEmpty)
+                        Column(
+                          children: topRepos.take(3).map((repo) {
+                            final name = (repo['name'] ?? '').toString();
+                            final desc = (repo['description'] ?? '').toString();
+                            final stars = repo['stargazers_count'] ?? 0;
+                            final url = (repo['html_url'] ?? '').toString();
+                            return ListTile(
+                              leading: const Icon(Icons.book),
+                              title: Text(name),
+                              subtitle: desc.isNotEmpty ? Text(desc) : null,
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.star, size: 16, color: Colors.amber),
+                                  Text(' $stars'),
+                                ],
+                              ),
+                              onTap: () => _openRepoUrl(context, url),
+                            );
+                          }).toList(growable: false),
+                        )
+                      else
+                        const Text('Načítání repozitářů...'),
+                      const SizedBox(height: 24),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+
+          StreamBuilder<DatabaseEvent>(
+            stream: blockedRef.onValue,
+            builder: (context, bSnap) {
+              final blocked = bSnap.data?.snapshot.value == true;
+              return FilledButton.tonal(
+                onPressed: () => _confirmAndRun(
+                  title: blocked ? 'Odblokovat uživatele?' : 'Zablokovat uživatele?',
+                  message: blocked
+                      ? 'Znovu povolíš zprávy a zobrazování chatu.'
+                      : 'Zabráníš odesílání zpráv a chat se skryje v přehledu.',
+                  action: () => _toggleBlock(myUid: myUid, currentlyBlocked: blocked),
+                ),
+                child: Text(blocked ? 'Odblokovat' : 'Zablokovat'),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+
+          FilledButton.tonal(
+            onPressed: () => _confirmAndRun(
+              title: 'Smazat chat u mě?',
+              message: 'Smaže zprávy a přehled konverzace jen u tebe.',
+              action: () => _deleteChatForMe(myUid: myUid),
+            ),
+            child: const Text('Smazat chat u mě'),
+          ),
+          const SizedBox(height: 12),
+
+          FilledButton.tonal(
+            onPressed: () => _confirmAndRun(
+              title: 'Smazat chat u obou?',
+              message: 'Pokusí se smazat konverzaci u obou uživatelů. Funguje jen pokud je druhá strana propojená v databázi.',
+              action: () => _deleteChatForBoth(myUid: myUid),
+            ),
+            child: const Text('Smazat chat u obou'),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _DashboardPageState extends State<DashboardPage> {
   int _index = 0;
   String? _openChatLogin;
   String? _openChatAvatarUrl;
+  int _openChatToken = 0;
+  int _chatsOverviewToken = 0;
 
   StreamSubscription<DatabaseEvent>? _connectedSub;
   StreamSubscription<DatabaseEvent>? _presenceEnabledSub;
@@ -48,6 +302,7 @@ class _DashboardPageState extends State<DashboardPage> {
       _index = 1; // Chaty tab
       _openChatLogin = login;
       _openChatAvatarUrl = avatarUrl;
+      _openChatToken++;
     });
   }
 
@@ -159,6 +414,8 @@ class _DashboardPageState extends State<DashboardPage> {
             initialOpenLogin: _openChatLogin,
             initialOpenAvatarUrl: _openChatAvatarUrl,
             settings: settings,
+            openChatToken: _openChatToken,
+            overviewToken: _chatsOverviewToken,
           ),
           _ContactsTab(onStartChat: _openChat),
           _SettingsTab(onLogout: _logout, settings: settings),
@@ -170,7 +427,17 @@ class _DashboardPageState extends State<DashboardPage> {
           body: pages[_index],
           bottomNavigationBar: BottomNavigationBar(
             currentIndex: _index,
-            onTap: (value) => setState(() => _index = value),
+            onTap: (value) {
+              setState(() {
+                if (value == 1 && _index != 1) {
+                  // Ruční přepnutí na Chaty vždy otevře přehled.
+                  _openChatLogin = null;
+                  _openChatAvatarUrl = null;
+                  _chatsOverviewToken++;
+                }
+                _index = value;
+              });
+            },
             type: BottomNavigationBarType.fixed,
             items: const [
               BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
@@ -1580,17 +1847,7 @@ class _ContactsTabState extends State<_ContactsTab> {
   }
 
   Future<void> _addToChats(GithubUser user) async {
-    final current = FirebaseAuth.instance.currentUser;
-    if (current == null) return;
-
-    final savedRef = rtdb().ref('savedChats/${current.uid}/${user.login}');
-    await savedRef.set({
-      'login': user.login,
-      'avatarUrl': user.avatarUrl,
-      'savedAt': ServerValue.timestamp,
-    });
-
-    if (!mounted) return;
+    // Neukládej chat jen klikem z kontaktů – uloží se až při první zprávě.
     widget.onStartChat(login: user.login, avatarUrl: user.avatarUrl);
   }
 
@@ -1638,10 +1895,18 @@ class _ContactsTabState extends State<_ContactsTab> {
 }
 
 class _ChatsTab extends StatefulWidget {
-  const _ChatsTab({required this.initialOpenLogin, required this.initialOpenAvatarUrl, required this.settings});
+  const _ChatsTab({
+    required this.initialOpenLogin,
+    required this.initialOpenAvatarUrl,
+    required this.settings,
+    required this.openChatToken,
+    required this.overviewToken,
+  });
   final String? initialOpenLogin;
   final String? initialOpenAvatarUrl;
   final UserSettings settings;
+  final int openChatToken;
+  final int overviewToken;
 
   @override
   State<_ChatsTab> createState() => _ChatsTabState();
@@ -1665,6 +1930,25 @@ class _ChatsTabState extends State<_ChatsTab> {
   @override
   void didUpdateWidget(covariant _ChatsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    if (widget.overviewToken != oldWidget.overviewToken) {
+      setState(() {
+        _activeLogin = null;
+        _activeAvatarUrl = null;
+        _activeVerifiedUid = null;
+        _activeVerifiedGithub = null;
+      });
+      return;
+    }
+
+    if (widget.openChatToken != oldWidget.openChatToken && widget.initialOpenLogin != null) {
+      setState(() {
+        _activeLogin = widget.initialOpenLogin;
+        _activeAvatarUrl = widget.initialOpenAvatarUrl;
+      });
+      return;
+    }
+
     if (widget.initialOpenLogin != null && widget.initialOpenLogin != oldWidget.initialOpenLogin) {
       setState(() {
         _activeLogin = widget.initialOpenLogin;
@@ -1694,6 +1978,15 @@ class _ChatsTabState extends State<_ChatsTab> {
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
       if (expiresAt != null) 'expiresAt': expiresAt,
+    });
+
+    // Chat se "uloží" až po první zprávě.
+    await rtdb().ref('savedChats/${current.uid}/$login').update({
+      'login': login,
+      if (_activeAvatarUrl != null && _activeAvatarUrl!.isNotEmpty) 'avatarUrl': _activeAvatarUrl,
+      'lastMessageText': text,
+      'lastMessageAt': ServerValue.timestamp,
+      'savedAt': ServerValue.timestamp,
     });
   }
 
@@ -1729,6 +2022,14 @@ class _ChatsTabState extends State<_ChatsTab> {
     );
     if (emoji == null) return;
     await _reactToMessage(login: login, messageKey: messageKey, emoji: emoji);
+  }
+
+  void _openUserProfile({required String login, required String avatarUrl}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _UserProfilePage(login: login, avatarUrl: avatarUrl),
+      ),
+    );
   }
 
   Future<void> _sendVerified({required bool asModerator, required String moderatorGithub}) async {
@@ -1771,7 +2072,9 @@ class _ChatsTabState extends State<_ChatsTab> {
 
     // Seznam chatů + ověření
     if (_activeLogin == null && _activeVerifiedUid == null) {
-      final chatsRef = rtdb().ref('savedChats/${current.uid}');
+      final chatsMetaRef = rtdb().ref('savedChats/${current.uid}');
+      final chatsMessagesRef = rtdb().ref('messages/${current.uid}');
+      final blockedRef = rtdb().ref('blocked/${current.uid}');
       final myVerifyReqRef = _verifiedRequestRef(current.uid);
       final allVerifyReqsRef = rtdb().ref('verifiedRequests');
 
@@ -1816,14 +2119,62 @@ class _ChatsTabState extends State<_ChatsTab> {
                   }
 
                   return StreamBuilder<DatabaseEvent>(
-                    stream: chatsRef.onValue,
-                    builder: (context, snapshot) {
-                      final value = snapshot.data?.snapshot.value;
-                      final map = (value is Map) ? value : null;
-                      final entries = map?.entries.toList() ?? const [];
+                    stream: blockedRef.onValue,
+                    builder: (context, blockedSnap) {
+                      final bv = blockedSnap.data?.snapshot.value;
+                      final blockedMap = (bv is Map) ? bv : null;
 
-                      return ListView(
-                        children: [
+                      return StreamBuilder<DatabaseEvent>(
+                        stream: chatsMetaRef.onValue,
+                        builder: (context, metaSnap) {
+                          final mv = metaSnap.data?.snapshot.value;
+                          final metaMap = (mv is Map) ? mv : null;
+
+                          return StreamBuilder<DatabaseEvent>(
+                            stream: chatsMessagesRef.onValue,
+                            builder: (context, msgSnap) {
+                              final vv = msgSnap.data?.snapshot.value;
+                              final root = (vv is Map) ? vv : null;
+
+                              final rows = <Map<String, Object?>>[];
+                              if (root != null) {
+                                for (final entry in root.entries) {
+                                  final login = entry.key.toString();
+                                  final lower = login.trim().toLowerCase();
+                                  final blocked = (blockedMap != null && blockedMap[lower] == true);
+                                  if (blocked) continue;
+
+                                  final thread = (entry.value is Map) ? (entry.value as Map) : null;
+                                  if (thread == null || thread.isEmpty) continue;
+
+                                  int lastAt = 0;
+                                  String lastText = '';
+                                  for (final me in thread.entries) {
+                                    if (me.value is! Map) continue;
+                                    final mm = Map<String, dynamic>.from(me.value as Map);
+                                    final createdAt = (mm['createdAt'] is int) ? mm['createdAt'] as int : 0;
+                                    if (createdAt >= lastAt) {
+                                      lastAt = createdAt;
+                                      lastText = (mm['text'] ?? '').toString();
+                                    }
+                                  }
+
+                                  final meta = (metaMap != null && metaMap[login] is Map) ? (metaMap[login] as Map) : null;
+                                  final avatarUrl = (meta?['avatarUrl'] ?? '').toString();
+
+                                  rows.add({
+                                    'login': login,
+                                    'avatarUrl': avatarUrl,
+                                    'lastAt': lastAt,
+                                    'lastText': lastText,
+                                  });
+                                }
+                              }
+
+                              rows.sort((a, b) => ((b['lastAt'] as int?) ?? 0).compareTo(((a['lastAt'] as int?) ?? 0)));
+
+                              return ListView(
+                                children: [
                           if (myStatus != null) ...[
                             ListTile(
                               leading: const Icon(Icons.verified_user),
@@ -1873,22 +2224,35 @@ class _ChatsTabState extends State<_ChatsTab> {
                             const Divider(height: 1),
                           ],
 
-                          ...entries.map((e) {
-                            final login = e.key.toString();
-                            final data = (e.value is Map) ? (e.value as Map) : null;
-                            final avatarUrl = data?['avatarUrl']?.toString() ?? '';
-                            return ListTile(
-                              leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
-                              title: Text('@$login'),
-                              onTap: () {
-                                setState(() {
-                                  _activeLogin = login;
-                                  _activeAvatarUrl = avatarUrl;
-                                });
-                              },
-                            );
-                          }),
+                          if (rows.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              child: Text('Zatím žádné chaty. Napiš někomu zprávu.'),
+                            )
+                          else
+                            ...rows.map((r) {
+                              final login = (r['login'] ?? '').toString();
+                              final avatarUrl = (r['avatarUrl'] ?? '').toString();
+                              final lastText = (r['lastText'] ?? '').toString();
+                              return ListTile(
+                                leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
+                                title: Text('@$login'),
+                                subtitle: lastText.isNotEmpty
+                                    ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
+                                    : null,
+                                onTap: () {
+                                  setState(() {
+                                    _activeLogin = login;
+                                    _activeAvatarUrl = avatarUrl;
+                                  });
+                                },
+                              );
+                            }),
                         ],
+                      );
+                            },
+                          );
+                        },
                       );
                     },
                   );
@@ -2112,6 +2476,8 @@ class _ChatsTabState extends State<_ChatsTab> {
 
     final login = _activeLogin!;
     final messagesRef = rtdb().ref('messages/${current.uid}/$login');
+    final loginLower = login.trim().toLowerCase();
+    final blockedRef = rtdb().ref('blocked/${current.uid}/$loginLower');
 
     Color bubbleColor(BuildContext context, String key) {
       final cs = Theme.of(context).colorScheme;
@@ -2157,132 +2523,154 @@ class _ChatsTabState extends State<_ChatsTab> {
             avatarUrl: _activeAvatarUrl ?? '',
             radius: 18,
           ),
+          onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
         ),
         const Divider(height: 1),
-        Expanded(
-          child: Container(
-            decoration: bg.isEmpty
-                ? null
-                : BoxDecoration(
-                    image: DecorationImage(
-                      image: NetworkImage(bg),
-                      fit: BoxFit.cover,
-                      opacity: 0.35,
+        StreamBuilder<DatabaseEvent>(
+          stream: blockedRef.onValue,
+          builder: (context, bSnap) {
+            final blocked = bSnap.data?.snapshot.value == true;
+
+            return Expanded(
+              child: Column(
+                children: [
+                  if (blocked)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      color: Theme.of(context).colorScheme.surface,
+                      child: const Text('Uživatel je zablokovaný. Zprávy nelze odesílat.'),
+                    ),
+                  Expanded(
+                    child: Container(
+                      decoration: bg.isEmpty
+                          ? null
+                          : BoxDecoration(
+                              image: DecorationImage(
+                                image: NetworkImage(bg),
+                                fit: BoxFit.cover,
+                                opacity: 0.35,
+                              ),
+                            ),
+                      child: StreamBuilder<DatabaseEvent>(
+                        stream: messagesRef.onValue,
+                        builder: (context, snapshot) {
+                          final value = snapshot.data?.snapshot.value;
+                          if (value is! Map) {
+                            return const Center(child: Text('Napiš první zprávu.'));
+                          }
+
+                          final now = DateTime.now().millisecondsSinceEpoch;
+                          final items = <Map<String, dynamic>>[];
+                          for (final e in value.entries) {
+                            if (e.value is! Map) continue;
+                            final msg = Map<String, dynamic>.from(e.value as Map);
+                            msg['__key'] = e.key.toString();
+                            final expiresAt = (msg['expiresAt'] is int) ? msg['expiresAt'] as int : null;
+                            if (expiresAt != null && expiresAt <= now) continue;
+                            items.add(msg);
+                          }
+
+                          items.sort((a, b) {
+                            final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                            final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                            return at.compareTo(bt);
+                          });
+
+                          return ListView.builder(
+                            padding: const EdgeInsets.all(12),
+                            itemCount: items.length,
+                            itemBuilder: (context, i) {
+                              final m = items[i];
+                              final key = (m['__key'] ?? '').toString();
+                              final text = (m['text'] ?? '').toString();
+                              final fromUid = (m['fromUid'] ?? '').toString();
+                              final isMe = fromUid == current.uid;
+
+                              final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
+                              final color = bubbleColor(context, bubbleKey);
+                              final tcolor = bubbleTextColor(context, bubbleKey);
+
+                              final reactions = (m['reactions'] is Map) ? (m['reactions'] as Map) : null;
+                              final reactionChips = <Widget>[];
+                              if (reactions != null) {
+                                for (final re in reactions.entries) {
+                                  final emoji = re.key.toString();
+                                  final voters = (re.value is Map) ? (re.value as Map) : null;
+                                  final count = voters?.length ?? 0;
+                                  if (count > 0) {
+                                    reactionChips.add(
+                                      Container(
+                                        margin: const EdgeInsets.only(top: 4, right: 6),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context).colorScheme.surface,
+                                          borderRadius: BorderRadius.circular(999),
+                                        ),
+                                        child: Text('$emoji $count', style: TextStyle(fontSize: widget.settings.chatTextSize - 4)),
+                                      ),
+                                    );
+                                  }
+                                }
+                              }
+
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                child: Column(
+                                  crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                  children: [
+                                    GestureDetector(
+                                      onLongPress: blocked ? null : () => _showReactionsMenu(login: login, messageKey: key),
+                                      child: Align(
+                                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: color,
+                                            borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
+                                          ),
+                                          child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
+                                        ),
+                                      ),
+                                    ),
+                                    if (reactionChips.isNotEmpty)
+                                      Wrap(
+                                        alignment: WrapAlignment.end,
+                                        children: reactionChips,
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
                     ),
                   ),
-            child: StreamBuilder<DatabaseEvent>(
-              stream: messagesRef.onValue,
-              builder: (context, snapshot) {
-                final value = snapshot.data?.snapshot.value;
-                if (value is! Map) {
-                  return const Center(child: Text('Napiš první zprávu.'));
-                }
-
-                final now = DateTime.now().millisecondsSinceEpoch;
-                final items = <Map<String, dynamic>>[];
-                for (final e in value.entries) {
-                  if (e.value is! Map) continue;
-                  final msg = Map<String, dynamic>.from(e.value as Map);
-                  msg['__key'] = e.key.toString();
-                  final expiresAt = (msg['expiresAt'] is int) ? msg['expiresAt'] as int : null;
-                  if (expiresAt != null && expiresAt <= now) continue;
-                  items.add(msg);
-                }
-
-                items.sort((a, b) {
-                  final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
-                  final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
-                  return at.compareTo(bt);
-                });
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final m = items[i];
-                    final key = (m['__key'] ?? '').toString();
-                    final text = (m['text'] ?? '').toString();
-                    final fromUid = (m['fromUid'] ?? '').toString();
-                    final isMe = fromUid == current.uid;
-
-                    final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
-                    final color = bubbleColor(context, bubbleKey);
-                    final tcolor = bubbleTextColor(context, bubbleKey);
-
-                    final reactions = (m['reactions'] is Map) ? (m['reactions'] as Map) : null;
-                    final reactionChips = <Widget>[];
-                    if (reactions != null) {
-                      for (final re in reactions.entries) {
-                        final emoji = re.key.toString();
-                        final voters = (re.value is Map) ? (re.value as Map) : null;
-                        final count = voters?.length ?? 0;
-                        if (count > 0) {
-                          reactionChips.add(
-                            Container(
-                              margin: const EdgeInsets.only(top: 4, right: 6),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surface,
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text('$emoji $count', style: TextStyle(fontSize: widget.settings.chatTextSize - 4)),
-                            ),
-                          );
-                        }
-                      }
-                    }
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                        children: [
-                          GestureDetector(
-                            onLongPress: () => _showReactionsMenu(login: login, messageKey: key),
-                            child: Align(
-                              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
-                                ),
-                                child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
-                              ),
-                            ),
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _messageController,
+                            decoration: const InputDecoration(labelText: 'Zpráva'),
+                            enabled: !blocked,
+                            onSubmitted: blocked ? null : (_) => _send(),
                           ),
-                          if (reactionChips.isNotEmpty)
-                            Wrap(
-                              alignment: WrapAlignment.end,
-                              children: reactionChips,
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _messageController,
-                  decoration: const InputDecoration(labelText: 'Zpráva'),
-                  onSubmitted: (_) => _send(),
-                ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.send),
+                          onPressed: blocked ? null : _send,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.send),
-                onPressed: _send,
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ],
     );
