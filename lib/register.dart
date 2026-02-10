@@ -64,7 +64,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   child: Text(
                     'Register to GitMit',
                     style: TextStyle(
-                      color: Color(0xFF08872B),
+                      color: Colors.white,
                       fontWeight: FontWeight.bold,
                       fontSize: 28,
                       letterSpacing: 1.2,
@@ -87,11 +87,11 @@ class _RegisterPageState extends State<RegisterPage> {
                 ElevatedButton(
                   onPressed: _loading ? null : _register,
                   child: _loading
-                      ? const CircularProgressIndicator(color: Colors.white)
+                      ? const CircularProgressIndicator(color: Colors.black)
                       : const Text('Register'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF0A241B),
-                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
                     textStyle: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -103,7 +103,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 TextButton(
                   onPressed: () => Navigator.of(context).pushReplacementNamed('/login'),
                   child: const Text('Already have an account? Sign in'),
-                  style: TextButton.styleFrom(foregroundColor: Color(0xFF08872B)),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white),
                 ),
               ],
             ),

@@ -28,8 +28,6 @@ class MyApp extends StatelessWidget {
     // Barvy z palety
     const gray5 = Color(0xFF232925); // #232925
     const gray6 = Color(0xFF101411); // #101411
-    const green3 = Color(0xFF08872B); // #08872B (GREEN 5, tmavší)
-    const green4 = Color(0xFF0A241B); // #0A241B (GREEN 6, tmavší)
 
     return MaterialApp(
       navigatorKey: DeepLinks.navigatorKey,
@@ -45,10 +43,10 @@ class MyApp extends StatelessWidget {
         ),
         colorScheme: const ColorScheme(
           brightness: Brightness.dark,
-          primary: green4,
-          onPrimary: Colors.white,
-          secondary: green3,
-          onSecondary: Colors.white,
+          primary: Colors.white,
+          onPrimary: Colors.black,
+          secondary: Colors.white,
+          onSecondary: Colors.black,
           error: Colors.redAccent,
           onError: Colors.white,
           background: gray6,
@@ -62,22 +60,45 @@ class MyApp extends StatelessWidget {
           labelStyle: TextStyle(color: Colors.white),
           border: OutlineInputBorder(),
           enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: green4),
+            borderSide: BorderSide(color: Colors.white24),
           ),
           focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: green3, width: 2),
+            borderSide: BorderSide(color: Colors.white, width: 2),
           ),
+        ),
+        switchTheme: SwitchThemeData(
+          thumbColor: MaterialStateProperty.resolveWith((states) {
+            if (states.contains(MaterialState.disabled)) return Colors.white24;
+            return states.contains(MaterialState.selected) ? Colors.white : Colors.white70;
+          }),
+          trackColor: MaterialStateProperty.resolveWith((states) {
+            if (states.contains(MaterialState.disabled)) return Colors.white10;
+            return states.contains(MaterialState.selected) ? Colors.white38 : Colors.white24;
+          }),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ButtonStyle(
-            backgroundColor: MaterialStatePropertyAll(green4),
-            foregroundColor: MaterialStatePropertyAll(Colors.white),
+            backgroundColor: MaterialStatePropertyAll(Colors.white),
+            foregroundColor: MaterialStatePropertyAll(Colors.black),
             textStyle: MaterialStatePropertyAll(TextStyle(fontWeight: FontWeight.bold)),
             shape: MaterialStatePropertyAll(RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(8)),
             )),
             padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
           ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: ButtonStyle(
+            foregroundColor: const MaterialStatePropertyAll(Colors.white),
+            side: MaterialStatePropertyAll(BorderSide(color: Colors.white38)),
+            shape: MaterialStatePropertyAll(RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(8)),
+            )),
+            padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: Colors.white),
         ),
       ),
       routes: {
@@ -222,7 +243,7 @@ class _LoginPageState extends State<LoginPage> {
                 child: Text(
                   'Sign in to GitMit',
                   style: TextStyle(
-                    color: Color(0xFF08872B),
+                    color: Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize: 28,
                     letterSpacing: 1.2,
@@ -234,7 +255,7 @@ class _LoginPageState extends State<LoginPage> {
                 onPressed: _loading ? null : _loginWithGitHub,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  side: const BorderSide(color: Color(0xFF0A241B)),
+                  side: const BorderSide(color: Colors.white38),
                   padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                   shape: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.all(Radius.circular(8)),

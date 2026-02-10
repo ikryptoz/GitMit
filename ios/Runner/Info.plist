@@ -56,6 +56,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is needed to scan group invite QR codes.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo access is needed to pick a group logo.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 </dict>

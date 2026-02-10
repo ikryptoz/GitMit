@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
 import 'package:gitmit/group_invites.dart';
@@ -11,7 +13,17 @@ import 'package:gitmit/github_api.dart';
 import 'package:gitmit/join_group_via_link_qr_page.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+
+Future<String> _uploadGroupLogo({required String groupId, required Uint8List bytes}) async {
+  final ref = FirebaseStorage.instance.ref('groupLogos/$groupId.jpg');
+  await ref.putData(
+    bytes,
+    SettableMetadata(contentType: 'image/jpeg'),
+  );
+  return ref.getDownloadURL();
+}
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -322,13 +334,18 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
 
   Timer? _membersDebounce;
   String _membersLastQuery = '';
-  List<String> _membersSuggestions = const [];
+  bool _membersLoading = false;
+  String? _membersError;
+  List<GithubUser> _membersSuggestions = const [];
 
   bool _sendMessages = true;
   bool _allowMembersToAdd = true;
   bool _inviteLinkEnabled = false;
 
   bool _saving = false;
+
+  Uint8List? _pickedLogoBytes;
+  bool _pickingLogo = false;
 
   @override
   void initState() {
@@ -347,9 +364,34 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
     super.dispose();
   }
 
+  Future<void> _pickLogo() async {
+    if (_pickingLogo) return;
+    setState(() => _pickingLogo = true);
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 85,
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _pickedLogoBytes = bytes;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+    } finally {
+      if (mounted) setState(() => _pickingLogo = false);
+    }
+  }
+
   static final _memberDelim = RegExp(r'[\s,;]+');
 
-  String? _currentMentionQueryLower() {
+  String? _currentMentionQuery() {
     final text = _members.text;
     var cursor = _members.selection.baseOffset;
     if (cursor < 0 || cursor > text.length) cursor = text.length;
@@ -361,50 +403,54 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
     if (!token.startsWith('@')) return null;
     final q = token.substring(1).trim();
     if (q.isEmpty) return null;
-    return q.toLowerCase();
-  }
-
-  Future<List<String>> _queryUsernameSuggestions(String prefixLower) async {
-    final snap = await rtdb()
-        .ref('usernames')
-        .orderByKey()
-        .startAt(prefixLower)
-        .endAt('$prefixLower\uf8ff')
-        .limitToFirst(8)
-        .get();
-    final v = snap.value;
-    final m = (v is Map) ? v : null;
-    if (m == null) return const [];
-    return m.keys.map((e) => e.toString()).toList(growable: false);
+    return q;
   }
 
   void _onMembersChanged() {
     _membersDebounce?.cancel();
-    _membersDebounce = Timer(const Duration(milliseconds: 150), () async {
-      final q = _currentMentionQueryLower();
+    _membersDebounce = Timer(const Duration(milliseconds: 350), () async {
+      final q = _currentMentionQuery();
       if (q == null) {
-        if (_membersSuggestions.isNotEmpty && mounted) {
-          setState(() => _membersSuggestions = const []);
+        if (mounted) {
+          setState(() {
+            _membersSuggestions = const [];
+            _membersLoading = false;
+            _membersError = null;
+          });
         }
         _membersLastQuery = '';
         return;
       }
 
-      if (q == _membersLastQuery) return;
-      _membersLastQuery = q;
-
       try {
-        final res = await _queryUsernameSuggestions(q);
+        if (q == _membersLastQuery) return;
+        _membersLastQuery = q;
+
+        if (mounted) {
+          setState(() {
+            _membersLoading = true;
+            _membersError = null;
+          });
+        }
+
+        final users = await searchGithubUsers(q);
         if (!mounted) return;
-        setState(() => _membersSuggestions = res);
-      } catch (_) {
+        setState(() {
+          _membersSuggestions = users.take(8).toList(growable: false);
+          _membersLoading = false;
+        });
+      } catch (e) {
         if (!mounted) return;
-        setState(() => _membersSuggestions = const []);
+        setState(() {
+          _membersSuggestions = const [];
+          _membersLoading = false;
+          _membersError = e.toString();
+        });
       }
     });
   }
 
-  void _applyMemberSuggestion(String loginLower) {
+  void _applyMemberSuggestion(String login) {
     final text = _members.text;
     var cursor = _members.selection.baseOffset;
     if (cursor < 0 || cursor > text.length) cursor = text.length;
@@ -419,7 +465,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       end++;
     }
 
-    final replacement = '@$loginLower';
+    final replacement = '@$login';
     final nextText = text.replaceRange(start, end, replacement);
     final withComma = (end >= text.length) ? '$nextText, ' : nextText;
 
@@ -428,7 +474,11 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       selection: TextSelection.collapsed(offset: (start + replacement.length) + ((end >= text.length) ? 2 : 0)),
     );
 
-    setState(() => _membersSuggestions = const []);
+    setState(() {
+      _membersSuggestions = const [];
+      _membersLoading = false;
+      _membersError = null;
+    });
   }
 
   List<String> _parseUsernames(String raw) {
@@ -453,7 +503,6 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
 
     final title = _title.text.trim();
     final desc = _description.text.trim();
-    final logo = _logoUrl.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vyplň název skupiny.')));
       return;
@@ -467,10 +516,18 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
 
       final inviteCode = _inviteLinkEnabled ? generateInviteCode() : '';
 
+      String? logoUrl;
+      final manualLogoUrl = _logoUrl.text.trim();
+      if (_pickedLogoBytes != null) {
+        logoUrl = await _uploadGroupLogo(groupId: groupId, bytes: _pickedLogoBytes!);
+      } else if (manualLogoUrl.isNotEmpty) {
+        logoUrl = manualLogoUrl;
+      }
+
       await groupPush.set({
         'title': title,
         'description': desc,
-        if (logo.isNotEmpty) 'logoUrl': logo,
+        if (logoUrl != null && logoUrl.isNotEmpty) 'logoUrl': logoUrl,
         if (inviteCode.isNotEmpty) 'inviteCode': inviteCode,
         'createdByUid': current.uid,
         'createdByGithub': widget.myGithubUsername,
@@ -504,7 +561,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
         await rtdb().ref('groupInvites/$uid/$groupId').set({
           'groupId': groupId,
           'groupTitle': title,
-          if (logo.isNotEmpty) 'groupLogoUrl': logo,
+          if (logoUrl != null && logoUrl.isNotEmpty) 'groupLogoUrl': logoUrl,
           'invitedByUid': current.uid,
           'invitedByGithub': widget.myGithubUsername,
           'createdAt': ServerValue.timestamp,
@@ -550,6 +607,38 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
             controller: _logoUrl,
             decoration: const InputDecoration(labelText: 'Logo URL (volitelné)'),
           ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: (_saving || _pickingLogo) ? null : _pickLogo,
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: Text(_pickedLogoBytes == null ? 'Vybrat logo z galerie' : 'Změnit logo'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (_pickedLogoBytes != null)
+                OutlinedButton(
+                  onPressed: _saving ? null : () => setState(() => _pickedLogoBytes = null),
+                  child: const Text('Odebrat'),
+                ),
+            ],
+          ),
+          if (_pickedLogoBytes != null) ...[
+            const SizedBox(height: 12),
+            Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.memory(
+                  _pickedLogoBytes!,
+                  width: 96,
+                  height: 96,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           const Text('Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
           SwitchListTile(
@@ -576,6 +665,14 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
             ),
             maxLines: 3,
           ),
+          if (_membersLoading) ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(),
+          ],
+          if (_membersError != null) ...[
+            const SizedBox(height: 8),
+            Text(_membersError!, style: const TextStyle(color: Colors.redAccent)),
+          ],
           if (_membersSuggestions.isNotEmpty) ...[
             const SizedBox(height: 8),
             Container(
@@ -586,12 +683,16 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                children: _membersSuggestions.map((loginLower) {
+                children: _membersSuggestions.map((u) {
                   return ListTile(
                     dense: true,
-                    leading: const Icon(Icons.alternate_email, size: 18),
-                    title: Text('@$loginLower'),
-                    onTap: () => _applyMemberSuggestion(loginLower),
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
+                      child: u.avatarUrl.isEmpty ? const Icon(Icons.person, size: 16) : null,
+                    ),
+                    title: Text('@${u.login}'),
+                    onTap: () => _applyMemberSuggestion(u.login),
                   );
                 }).toList(growable: false),
               ),
@@ -709,6 +810,25 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
     }
   }
 
+  Future<void> _pickAndUploadLogo({required String groupId}) async {
+    final picker = ImagePicker();
+    final file = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 512,
+      maxHeight: 512,
+      imageQuality: 85,
+    );
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    final url = await _uploadGroupLogo(groupId: groupId, bytes: bytes);
+    await _update(groupId, {'logoUrl': url});
+    if (mounted) {
+      setState(() {
+        _logoUrl.text = url;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = FirebaseAuth.instance.currentUser;
@@ -797,6 +917,12 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                         TextField(controller: _description, decoration: const InputDecoration(labelText: 'Popis'), maxLines: 3),
                         const SizedBox(height: 12),
                         TextField(controller: _logoUrl, decoration: const InputDecoration(labelText: 'Logo URL')),
+                        const SizedBox(height: 10),
+                        FilledButton.tonalIcon(
+                          onPressed: () => _pickAndUploadLogo(groupId: widget.groupId),
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Vybrat logo z galerie'),
+                        ),
                         const SizedBox(height: 12),
                         FilledButton(
                           onPressed: () => _update(widget.groupId, {
@@ -887,9 +1013,16 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                   ),
                                 ),
                                 Center(
-                                  child: QrImageView(
-                                    data: qrPayload,
-                                    size: 220,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: QrImageView(
+                                      data: qrPayload,
+                                      size: 220,
+                                    ),
                                   ),
                                 ),
                                 if (isAdmin) ...[
@@ -916,20 +1049,13 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                         onTap: (!allowMembersToAdd && !isAdmin)
                             ? null
                             : () async {
-                                final ctrl = TextEditingController();
-                                final login = await showDialog<String>(
+                                final picked = await showModalBottomSheet<GithubUser>(
                                   context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Přidat @username'),
-                                    content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '@username')),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Zrušit')),
-                                      FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('OK')),
-                                    ],
-                                  ),
+                                  isScrollControlled: true,
+                                  builder: (context) => const _GithubUserSearchSheet(title: 'Přidat uživatele'),
                                 );
-                                if (login == null || login.trim().isEmpty) return;
-                                final normalized = login.startsWith('@') ? login.substring(1) : login;
+                                final normalized = (picked?.login ?? '').trim();
+                                if (normalized.isEmpty) return;
 
                                 try {
                                   if (isAdmin) {
@@ -991,18 +1117,43 @@ class _DashboardPageState extends State<DashboardPage> {
   String _presenceStatus = 'online';
   late final _AppLifecycleObserver _lifecycleObserver;
 
+  final GlobalKey<_ChatsTabState> _chatsKey = GlobalKey<_ChatsTabState>();
+
   static const _titles = <String>[
-    'Dashboard',
+    'Jobs',
     'Chaty',
     'Kontakty',
     'Nastavení',
     'Profil',
   ];
 
+  Future<bool> _onWillPop() async {
+    // Never exit the app from a nested step; step back instead.
+    if (_index != 1) {
+      setState(() {
+        // Back from other tabs goes to Chaty overview.
+        _openChatLogin = null;
+        _openChatAvatarUrl = null;
+        _chatsOverviewToken++;
+        _index = 1;
+      });
+      return false;
+    }
+
+    final handled = _chatsKey.currentState?.handleBack() == true;
+    if (handled) return false;
+    return true;
+  }
+
   PreferredSizeWidget _pillAppBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final title = _titles[_index];
     return AppBar(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
       centerTitle: true,
       title: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1022,7 +1173,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _pillBottomNav(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     const items = <({IconData icon, String label})>[
-      (icon: Icons.dashboard, label: 'Dashboard'),
+      (icon: Icons.dashboard, label: 'Jobs'),
       (icon: Icons.chat_bubble_outline, label: 'Chaty'),
       (icon: Icons.people_outline, label: 'Kontakty'),
       (icon: Icons.settings_outlined, label: 'Nastavení'),
@@ -1038,7 +1189,7 @@ class _DashboardPageState extends State<DashboardPage> {
             final w = c.maxWidth;
             final itemW = w / items.length;
             const h = 64.0;
-            const inset = 6.0;
+            const inset = 4.0;
 
             return SizedBox(
               height: h,
@@ -1060,8 +1211,9 @@ class _DashboardPageState extends State<DashboardPage> {
                     height: h - inset * 2,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: cs.primary,
+                        color: cs.secondary,
                         borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: cs.outlineVariant),
                       ),
                     ),
                   ),
@@ -1090,7 +1242,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                   Icon(
                                     items[i].icon,
                                     size: 22,
-                                    color: (i == _index) ? cs.onPrimary : cs.onSurface,
+                                    color: (i == _index) ? cs.onSecondary : cs.onSurface,
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
@@ -1098,7 +1250,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                          color: (i == _index) ? cs.onPrimary : cs.onSurface,
+                                          color: (i == _index) ? cs.onSecondary : cs.onSurface,
                                           fontWeight: (i == _index) ? FontWeight.w700 : FontWeight.w500,
                                         ),
                                   ),
@@ -1237,8 +1389,9 @@ class _DashboardPageState extends State<DashboardPage> {
         final settings = UserSettings.fromSnapshot(snapshot.data?.snapshot.value);
 
         final pages = <Widget>[
-          const _PlaceholderTab(text: 'Dashboard'),
+          const _PlaceholderTab(text: 'Jobs'),
           _ChatsTab(
+            key: _chatsKey,
             initialOpenLogin: _openChatLogin,
             initialOpenAvatarUrl: _openChatAvatarUrl,
             settings: settings,
@@ -1250,12 +1403,142 @@ class _DashboardPageState extends State<DashboardPage> {
           const _ProfileTab(),
         ];
 
-        return Scaffold(
-          appBar: _pillAppBar(context),
-          body: pages[_index],
-          bottomNavigationBar: _pillBottomNav(context),
+        return WillPopScope(
+          onWillPop: _onWillPop,
+          child: Scaffold(
+            appBar: _pillAppBar(context),
+            body: pages[_index],
+            bottomNavigationBar: _pillBottomNav(context),
+          ),
         );
       },
+    );
+  }
+}
+
+class _GithubUserSearchSheet extends StatefulWidget {
+  const _GithubUserSearchSheet({required this.title});
+
+  final String title;
+
+  @override
+  State<_GithubUserSearchSheet> createState() => _GithubUserSearchSheetState();
+}
+
+class _GithubUserSearchSheetState extends State<_GithubUserSearchSheet> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+  bool _loading = false;
+  String? _error;
+  List<GithubUser> _results = const [];
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () async {
+      final query = value.trim();
+      if (query.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _results = const [];
+          _error = null;
+          _loading = false;
+        });
+        return;
+      }
+
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+
+      try {
+        final users = await searchGithubUsers(query);
+        if (!mounted) return;
+        setState(() {
+          _results = users;
+          _loading = false;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: viewInsets.bottom),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.75,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(widget.title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: TextField(
+                  controller: _controller,
+                  onChanged: _onChanged,
+                  decoration: const InputDecoration(
+                    labelText: 'Hledat na GitHubu',
+                    prefixText: '@',
+                  ),
+                ),
+              ),
+              if (_loading) const LinearProgressIndicator(),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: _results.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final u = _results[i];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
+                      ),
+                      title: Text('@${u.login}'),
+                      onTap: () => Navigator.of(context).pop(u),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2459,7 +2742,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                         final stars = repo['stargazers_count'] ?? 0;
                         final url = (repo['html_url'] ?? '').toString();
                         return ListTile(
-                          leading: const Icon(Icons.book, color: Colors.green),
+                          leading: const Icon(Icons.book, color: Colors.white70),
                           title: Text(name),
                           subtitle: desc.isNotEmpty ? Text(desc) : null,
                           trailing: Row(
@@ -2713,6 +2996,7 @@ class _ContactsTabState extends State<_ContactsTab> {
 
 class _ChatsTab extends StatefulWidget {
   const _ChatsTab({
+    super.key,
     required this.initialOpenLogin,
     required this.initialOpenAvatarUrl,
     required this.settings,
@@ -2739,6 +3023,37 @@ class _ChatsTabState extends State<_ChatsTab> {
   final _messageController = TextEditingController();
 
   int _overviewMode = 0; // 0=priváty, 1=skupiny, 2=složky
+  String? _activeFolderId; // when _overviewMode==2
+
+  bool handleBack() {
+    if (_activeLogin != null) {
+      setState(() {
+        _activeLogin = null;
+        _activeAvatarUrl = null;
+      });
+      return true;
+    }
+    if (_activeGroupId != null) {
+      setState(() => _activeGroupId = null);
+      return true;
+    }
+    if (_activeVerifiedUid != null) {
+      setState(() {
+        _activeVerifiedUid = null;
+        _activeVerifiedGithub = null;
+      });
+      return true;
+    }
+    if (_overviewMode == 2) {
+      if (_activeFolderId != null) {
+        setState(() => _activeFolderId = null);
+        return true;
+      }
+      setState(() => _overviewMode = 0);
+      return true;
+    }
+    return false;
+  }
 
   @override
   void initState() {
@@ -2758,6 +3073,8 @@ class _ChatsTabState extends State<_ChatsTab> {
         _activeGroupId = null;
         _activeVerifiedUid = null;
         _activeVerifiedGithub = null;
+        _activeFolderId = null;
+        _overviewMode = 0;
       });
       return;
     }
@@ -2782,6 +3099,59 @@ class _ChatsTabState extends State<_ChatsTab> {
   void dispose() {
     _messageController.dispose();
     super.dispose();
+  }
+
+  Future<void> _moveChatToFolder({required String myUid, required String login}) async {
+    final foldersSnap = await rtdb().ref('folders/$myUid').get();
+    final fv = foldersSnap.value;
+    final fm = (fv is Map) ? fv : null;
+    final folders = <Map<String, String>>[];
+    if (fm != null) {
+      for (final e in fm.entries) {
+        if (e.value is! Map) continue;
+        final mm = Map<String, dynamic>.from(e.value as Map);
+        final name = (mm['name'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        folders.add({'id': e.key.toString(), 'name': name});
+      }
+      folders.sort((a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''));
+    }
+
+    final picked = await showModalBottomSheet<String?>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text('Přesunout do složky', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.inbox_outlined),
+                title: const Text('Priváty'),
+                onTap: () => Navigator.of(context).pop(null),
+              ),
+              const Divider(height: 1),
+              ...folders.map((f) {
+                return ListTile(
+                  leading: const Icon(Icons.folder_outlined),
+                  title: Text(f['name'] ?? 'Složka'),
+                  onTap: () => Navigator.of(context).pop(f['id']),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+
+    final key = login.trim().toLowerCase();
+    if (picked == null) {
+      await rtdb().ref('chatFolders/$myUid/$key').remove();
+    } else {
+      await rtdb().ref('chatFolders/$myUid/$key').set(picked);
+    }
   }
 
   Color _bubbleColor(BuildContext context, String key) {
@@ -3151,8 +3521,13 @@ class _ChatsTabState extends State<_ChatsTab> {
                                     final groupTitle = (inv['groupTitle'] ?? 'Skupina').toString();
                                     final groupId = (inv['groupId'] ?? '').toString();
                                     final invitedBy = (inv['invitedByGithub'] ?? '').toString();
+                                    final groupLogo = (inv['groupLogoUrl'] ?? '').toString();
                                     return ListTile(
-                                      leading: const Icon(Icons.group),
+                                      leading: CircleAvatar(
+                                        radius: 18,
+                                        backgroundImage: groupLogo.isNotEmpty ? NetworkImage(groupLogo) : null,
+                                        child: groupLogo.isEmpty ? const Icon(Icons.group) : null,
+                                      ),
                                       title: Text(groupTitle),
                                       subtitle: invitedBy.isNotEmpty ? Text('Pozval: @$invitedBy') : (groupId.isNotEmpty ? Text(groupId) : null),
                                       trailing: Row(
@@ -3320,17 +3695,26 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 ChoiceChip(
                                   label: const Text('Priváty'),
                                   selected: _overviewMode == 0,
-                                  onSelected: (_) => setState(() => _overviewMode = 0),
+                                  onSelected: (_) => setState(() {
+                                    _overviewMode = 0;
+                                    _activeFolderId = null;
+                                  }),
                                 ),
                                 ChoiceChip(
                                   label: const Text('Skupiny'),
                                   selected: _overviewMode == 1,
-                                  onSelected: (_) => setState(() => _overviewMode = 1),
+                                  onSelected: (_) => setState(() {
+                                    _overviewMode = 1;
+                                    _activeFolderId = null;
+                                  }),
                                 ),
                                 ChoiceChip(
                                   label: const Text('Složky'),
                                   selected: _overviewMode == 2,
-                                  onSelected: (_) => setState(() => _overviewMode = 2),
+                                  onSelected: (_) => setState(() {
+                                    _overviewMode = 2;
+                                    _activeFolderId = null;
+                                  }),
                                 ),
                               ],
                             ),
@@ -3385,6 +3769,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   subtitle: lastText.isNotEmpty
                                       ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
                                       : null,
+                                  onLongPress: () => _moveChatToFolder(myUid: current.uid, login: login),
                                   onTap: () {
                                     setState(() {
                                       _activeLogin = login;
@@ -3457,8 +3842,13 @@ class _ChatsTabState extends State<_ChatsTab> {
                                         final m = (v is Map) ? v : null;
                                         final title = (m?['title'] ?? 'Skupina').toString();
                                         final desc = (m?['description'] ?? '').toString();
+                                        final logo = (m?['logoUrl'] ?? '').toString();
                                         return ListTile(
-                                          leading: const Icon(Icons.group),
+                                          leading: CircleAvatar(
+                                            radius: 18,
+                                            backgroundImage: logo.isNotEmpty ? NetworkImage(logo) : null,
+                                            child: logo.isEmpty ? const Icon(Icons.group) : null,
+                                          ),
                                           title: Text(title),
                                           subtitle: desc.isNotEmpty
                                               ? Text(desc, maxLines: 1, overflow: TextOverflow.ellipsis)
@@ -3478,9 +3868,165 @@ class _ChatsTabState extends State<_ChatsTab> {
                               },
                             ),
                           ] else ...[
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              child: Text('Složky: brzy.'),
+                            StreamBuilder<DatabaseEvent>(
+                              stream: rtdb().ref('folders/${current.uid}').onValue,
+                              builder: (context, fSnap) {
+                                final fv = fSnap.data?.snapshot.value;
+                                final fm = (fv is Map) ? fv : null;
+                                final folders = <Map<String, dynamic>>[];
+                                if (fm != null) {
+                                  for (final e in fm.entries) {
+                                    if (e.value is! Map) continue;
+                                    final mm = Map<String, dynamic>.from(e.value as Map);
+                                    final name = (mm['name'] ?? '').toString();
+                                    if (name.trim().isEmpty) continue;
+                                    folders.add({'id': e.key.toString(), 'name': name});
+                                  }
+                                  folders.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+                                }
+
+                                return StreamBuilder<DatabaseEvent>(
+                                  stream: rtdb().ref('chatFolders/${current.uid}').onValue,
+                                  builder: (context, cfSnap) {
+                                    final cv = cfSnap.data?.snapshot.value;
+                                    final cfm = (cv is Map) ? cv : null;
+
+                                    int countForFolder(String? folderId) {
+                                      var c = 0;
+                                      for (final r in rows) {
+                                        final login = (r['login'] ?? '').toString();
+                                        final key = login.trim().toLowerCase();
+                                        final mapped = cfm?[key]?.toString();
+                                        if (folderId == null) {
+                                          if (mapped == null || mapped.isEmpty) c++;
+                                        } else {
+                                          if (mapped == folderId) c++;
+                                        }
+                                      }
+                                      return c;
+                                    }
+
+                                    Future<void> createFolder() async {
+                                      final ctrl = TextEditingController();
+                                      final name = await showDialog<String>(
+                                        context: context,
+                                        builder: (context) {
+                                          return AlertDialog(
+                                            title: const Text('Nová složka'),
+                                            content: TextField(
+                                              controller: ctrl,
+                                              decoration: const InputDecoration(labelText: 'Název'),
+                                            ),
+                                            actions: [
+                                              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
+                                              FilledButton(
+                                                onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
+                                                child: const Text('Vytvořit'),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                      final n = (name ?? '').trim();
+                                      if (n.isEmpty) return;
+                                      final push = rtdb().ref('folders/${current.uid}').push();
+                                      await push.set({'name': n, 'createdAt': ServerValue.timestamp});
+                                    }
+
+                                    if (_activeFolderId != null) {
+                                      final fid = _activeFolderId;
+                                      final title = (fid == '__privates__')
+                                          ? 'Priváty'
+                                          : (folders.firstWhere(
+                                                  (e) => e['id'] == fid,
+                                                  orElse: () => {'name': 'Složka'},
+                                                )['name'] as String);
+
+                                      final filtered = rows.where((r) {
+                                        final login = (r['login'] ?? '').toString();
+                                        final key = login.trim().toLowerCase();
+                                        final mapped = cfm?[key]?.toString();
+                                        if (fid == '__privates__') {
+                                          return mapped == null || mapped.isEmpty;
+                                        }
+                                        return mapped == fid;
+                                      }).toList(growable: false);
+
+                                      return Column(
+                                        children: [
+                                          ListTile(
+                                            leading: IconButton(
+                                              icon: const Icon(Icons.arrow_back),
+                                              onPressed: () => setState(() => _activeFolderId = null),
+                                            ),
+                                            title: Text(title),
+                                            subtitle: Text('Chaty: ${filtered.length}'),
+                                          ),
+                                          const Divider(height: 1),
+                                          if (filtered.isEmpty)
+                                            const Padding(
+                                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                              child: Text('Ve složce zatím nic není.'),
+                                            )
+                                          else
+                                            ...filtered.map((r) {
+                                              final login = (r['login'] ?? '').toString();
+                                              final avatarUrl = (r['avatarUrl'] ?? '').toString();
+                                              final lastText = (r['lastText'] ?? '').toString();
+                                              return ListTile(
+                                                leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
+                                                title: Text('@$login'),
+                                                subtitle: lastText.isNotEmpty
+                                                    ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
+                                                    : null,
+                                                onLongPress: () => _moveChatToFolder(myUid: current.uid, login: login),
+                                                onTap: () {
+                                                  setState(() {
+                                                    _activeLogin = login;
+                                                    _activeAvatarUrl = avatarUrl;
+                                                  });
+                                                },
+                                              );
+                                            }),
+                                        ],
+                                      );
+                                    }
+
+                                    return Column(
+                                      children: [
+                                        ListTile(
+                                          leading: const Icon(Icons.create_new_folder_outlined),
+                                          title: const Text('Vytvořit složku'),
+                                          onTap: createFolder,
+                                        ),
+                                        ListTile(
+                                          leading: const Icon(Icons.inbox_outlined),
+                                          title: const Text('Priváty'),
+                                          subtitle: Text('Chaty: ${countForFolder(null)}'),
+                                          onTap: () => setState(() => _activeFolderId = '__privates__'),
+                                        ),
+                                        const Divider(height: 1),
+                                        if (folders.isEmpty)
+                                          const Padding(
+                                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                            child: Text('Zatím nemáš žádné složky.'),
+                                          )
+                                        else
+                                          ...folders.map((f) {
+                                            final fid = (f['id'] ?? '').toString();
+                                            final name = (f['name'] ?? 'Složka').toString();
+                                            return ListTile(
+                                              leading: const Icon(Icons.folder_outlined),
+                                              title: Text(name),
+                                              subtitle: Text('Chaty: ${countForFolder(fid)}'),
+                                              onTap: () => setState(() => _activeFolderId = fid),
+                                            );
+                                          }),
+                                      ],
+                                    );
+                                  },
+                                );
+                              },
                             ),
                           ],
                         ],
