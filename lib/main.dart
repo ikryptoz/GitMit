@@ -160,6 +160,16 @@ class _LoginPageState extends State<LoginPage> {
           'lastLoginAt': ServerValue.timestamp,
           if (avatarUrl != null) 'avatarUrl': avatarUrl,
         });
+
+        // Mapování @username -> uid (pro lookup kontaktů, statusů a presence)
+        final lower = githubUsername.toLowerCase();
+        await rtdb().ref('usernames/$lower').set(user.uid);
+
+        // Pokud chybí `isModerator`, nastav default false (bez přepsání existující true)
+        final modSnap = await rtdb().ref('users/${user.uid}/isModerator').get();
+        if (!modSnap.exists) {
+          await rtdb().ref('users/${user.uid}').update({'isModerator': false});
+        }
       }
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/dashboard');
@@ -200,7 +210,7 @@ class _LoginPageState extends State<LoginPage> {
               OutlinedButton(
                 onPressed: _loading ? null : _loginWithGitHub,
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF08872B),
+                  foregroundColor: Colors.white,
                   side: const BorderSide(color: Color(0xFF0A241B)),
                   padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                   shape: const RoundedRectangleBorder(

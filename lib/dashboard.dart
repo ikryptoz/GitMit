@@ -21,6 +21,13 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _openChatLogin;
   String? _openChatAvatarUrl;
 
+  StreamSubscription<DatabaseEvent>? _connectedSub;
+  StreamSubscription<DatabaseEvent>? _presenceEnabledSub;
+  bool _presenceInitialized = false;
+  bool _presenceEnabled = true;
+  String _presenceStatus = 'online';
+  late final _AppLifecycleObserver _lifecycleObserver;
+
   static const _titles = <String>[
     'Dashboard',
     'Chaty',
@@ -45,34 +52,343 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final pages = <Widget>[
-      const _PlaceholderTab(text: 'Dashboard'),
-      _ChatsTab(
-        initialOpenLogin: _openChatLogin,
-        initialOpenAvatarUrl: _openChatAvatarUrl,
-      ),
-      _ContactsTab(onStartChat: _openChat),
-      _SettingsTab(onLogout: _logout),
-      const _ProfileTab(),
-    ];
+  void initState() {
+    super.initState();
+    _lifecycleObserver = _AppLifecycleObserver(onChanged: _onLifecycle);
+    WidgetsBinding.instance.addObserver(_lifecycleObserver);
+    _listenPresenceSettings();
+  }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(_titles[_index])),
-      body: pages[_index],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (value) => setState(() => _index = value),
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Chaty'),
-          BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: 'Kontakty'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'Nastavení'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Profil'),
-        ],
-      ),
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(_lifecycleObserver);
+    _connectedSub?.cancel();
+    _presenceEnabledSub?.cancel();
+    super.dispose();
+  }
+
+  void _onLifecycle(AppLifecycleState state) {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    if (!_presenceEnabled) return;
+    final presenceRef = rtdb().ref('presence/${current.uid}');
+
+    if (state == AppLifecycleState.resumed) {
+      final online = _presenceStatus != 'hidden';
+      presenceRef.update({'enabled': true, 'status': _presenceStatus, 'online': online, 'lastChangedAt': ServerValue.timestamp});
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) {
+      presenceRef.update({'enabled': true, 'status': _presenceStatus, 'online': false, 'lastChangedAt': ServerValue.timestamp});
+    }
+  }
+
+  void _listenPresenceSettings() {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final settingsRef = rtdb().ref('settings/${current.uid}');
+
+    _presenceEnabledSub = settingsRef.onValue.listen((event) {
+      final v = event.snapshot.value;
+      final m = (v is Map) ? v : null;
+      final presenceEnabledValue = (m == null) ? null : m['presenceEnabled'];
+      final enabled = (presenceEnabledValue is bool) ? presenceEnabledValue : true;
+      final status = ((m == null) ? 'online' : (m['presenceStatus'] ?? 'online')).toString();
+
+      _presenceEnabled = enabled;
+      _presenceStatus = (status == 'dnd' || status == 'hidden') ? status : 'online';
+
+      if (!_presenceEnabled) {
+        _connectedSub?.cancel();
+        _connectedSub = null;
+        _presenceInitialized = false;
+        rtdb().ref('presence/${current.uid}').set({
+          'enabled': false,
+          'status': _presenceStatus,
+          'online': false,
+          'lastChangedAt': ServerValue.timestamp,
+        });
+      } else {
+        _initPresence();
+      }
+    });
+  }
+
+  void _initPresence() {
+    if (_presenceInitialized) return;
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    if (!_presenceEnabled) return;
+    _presenceInitialized = true;
+
+    final connectedRef = rtdb().ref('.info/connected');
+    final presenceRef = rtdb().ref('presence/${current.uid}');
+
+    _connectedSub = connectedRef.onValue.listen((event) async {
+      final connected = event.snapshot.value == true;
+      if (!connected) return;
+
+      final online = _presenceStatus != 'hidden';
+
+      await presenceRef.onDisconnect().set({
+        'enabled': true,
+        'status': _presenceStatus,
+        'online': false,
+        'lastChangedAt': ServerValue.timestamp,
+      });
+      await presenceRef.set({
+        'enabled': true,
+        'status': _presenceStatus,
+        'online': online,
+        'lastChangedAt': ServerValue.timestamp,
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = FirebaseAuth.instance.currentUser;
+    final settingsRef = (current == null) ? null : rtdb().ref('settings/${current.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: settingsRef?.onValue,
+      builder: (context, snapshot) {
+        final settings = UserSettings.fromSnapshot(snapshot.data?.snapshot.value);
+
+        final pages = <Widget>[
+          const _PlaceholderTab(text: 'Dashboard'),
+          _ChatsTab(
+            initialOpenLogin: _openChatLogin,
+            initialOpenAvatarUrl: _openChatAvatarUrl,
+            settings: settings,
+          ),
+          _ContactsTab(onStartChat: _openChat),
+          _SettingsTab(onLogout: _logout, settings: settings),
+          const _ProfileTab(),
+        ];
+
+        return Scaffold(
+          appBar: AppBar(title: Text(_titles[_index])),
+          body: pages[_index],
+          bottomNavigationBar: BottomNavigationBar(
+            currentIndex: _index,
+            onTap: (value) => setState(() => _index = value),
+            type: BottomNavigationBarType.fixed,
+            items: const [
+              BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+              BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Chaty'),
+              BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: 'Kontakty'),
+              BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'Nastavení'),
+              BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Profil'),
+            ],
+          ),
+        );
+      },
     );
+  }
+}
+
+class UserSettings {
+  const UserSettings({
+    required this.chatTextSize,
+    required this.bubbleRadius,
+    required this.bubbleIncoming,
+    required this.bubbleOutgoing,
+    required this.wallpaperUrl,
+    required this.reactionsEnabled,
+    required this.stickersEnabled,
+    required this.autoDeleteSeconds,
+    required this.presenceEnabled,
+    required this.presenceStatus,
+    required this.giftsVisible,
+    required this.vibrationEnabled,
+    required this.soundsEnabled,
+    required this.language,
+  });
+
+  final double chatTextSize;
+  final double bubbleRadius;
+  final String bubbleIncoming;
+  final String bubbleOutgoing;
+  final String wallpaperUrl;
+  final bool reactionsEnabled;
+  final bool stickersEnabled;
+  final int autoDeleteSeconds;
+  final bool presenceEnabled;
+  final String presenceStatus; // online | dnd | hidden
+  final bool giftsVisible;
+  final bool vibrationEnabled;
+  final bool soundsEnabled;
+  final String language;
+
+  static UserSettings fromSnapshot(Object? value) {
+    final m = (value is Map) ? value : null;
+    double readDouble(String k, double d) {
+      final v = m?[k];
+      if (v is num) return v.toDouble();
+      return d;
+    }
+
+    int readInt(String k, int d) {
+      final v = m?[k];
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return d;
+    }
+
+    bool readBool(String k, bool d) {
+      final v = m?[k];
+      if (v is bool) return v;
+      return d;
+    }
+
+    String readString(String k, String d) {
+      final v = m?[k];
+      if (v == null) return d;
+      return v.toString();
+    }
+
+    final status = readString('presenceStatus', 'online');
+    final normalizedStatus = (status == 'dnd' || status == 'hidden') ? status : 'online';
+
+    return UserSettings(
+      chatTextSize: readDouble('chatTextSize', 16),
+      bubbleRadius: readDouble('bubbleRadius', 12),
+      bubbleIncoming: readString('bubbleIncoming', 'surface'),
+      bubbleOutgoing: readString('bubbleOutgoing', 'secondaryContainer'),
+      wallpaperUrl: readString('wallpaperUrl', ''),
+      reactionsEnabled: readBool('reactionsEnabled', true),
+      stickersEnabled: readBool('stickersEnabled', false),
+      autoDeleteSeconds: readInt('autoDeleteSeconds', 0),
+      presenceEnabled: readBool('presenceEnabled', true),
+      presenceStatus: normalizedStatus,
+      giftsVisible: readBool('giftsVisible', true),
+      vibrationEnabled: readBool('vibrationEnabled', true),
+      soundsEnabled: readBool('soundsEnabled', true),
+      language: readString('language', 'cs'),
+    );
+  }
+}
+
+class _AppLifecycleObserver extends WidgetsBindingObserver {
+  _AppLifecycleObserver({required this.onChanged});
+
+  final void Function(AppLifecycleState state) onChanged;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    onChanged(state);
+  }
+}
+
+class _AvatarWithPresenceDot extends StatelessWidget {
+  const _AvatarWithPresenceDot({required this.uid, required this.avatarUrl, required this.radius});
+
+  final String uid;
+  final String? avatarUrl;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final baseAvatar = (avatarUrl != null && avatarUrl!.isNotEmpty)
+        ? CircleAvatar(radius: radius, backgroundImage: NetworkImage(avatarUrl!))
+        : CircleAvatar(radius: radius, child: Icon(Icons.person, size: radius));
+
+    final presenceRef = rtdb().ref('presence/$uid');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: presenceRef.onValue,
+      builder: (context, snap) {
+        final v = snap.data?.snapshot.value;
+        final m = (v is Map) ? v : null;
+        final enabled = m?['enabled'] != false;
+        final status = (m?['status'] ?? 'online').toString();
+        final online = enabled && (m?['online'] == true);
+
+        final Color dotColor;
+        if (!enabled) {
+          dotColor = Theme.of(context).colorScheme.outlineVariant;
+        } else if (status == 'dnd') {
+          dotColor = Theme.of(context).colorScheme.error;
+        } else if (status == 'hidden') {
+          dotColor = Theme.of(context).colorScheme.outlineVariant;
+        } else {
+          dotColor = online ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.outlineVariant;
+        }
+        final dotBorder = Theme.of(context).colorScheme.surface;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            baseAvatar,
+            Positioned(
+              right: -1,
+              bottom: -1,
+              child: Container(
+                width: radius * 0.42,
+                height: radius * 0.42,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: dotColor,
+                  border: Border.all(color: dotBorder, width: 2),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ChatLoginAvatar extends StatefulWidget {
+  const _ChatLoginAvatar({required this.login, required this.avatarUrl, required this.radius});
+
+  final String login;
+  final String avatarUrl;
+  final double radius;
+
+  @override
+  State<_ChatLoginAvatar> createState() => _ChatLoginAvatarState();
+}
+
+class _ChatLoginAvatarState extends State<_ChatLoginAvatar> {
+  String? _uid;
+
+  @override
+  void initState() {
+    super.initState();
+    _lookupUid();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatLoginAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.login.trim().toLowerCase() != widget.login.trim().toLowerCase()) {
+      _uid = null;
+      _lookupUid();
+    }
+  }
+
+  Future<void> _lookupUid() async {
+    final key = widget.login.trim().toLowerCase();
+    if (key.isEmpty) return;
+
+    final snap = await rtdb().ref('usernames/$key').get();
+    final val = snap.value;
+    if (!mounted) return;
+    setState(() {
+      _uid = (val == null) ? null : val.toString();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_uid == null) {
+      return (widget.avatarUrl.isNotEmpty)
+          ? CircleAvatar(radius: widget.radius, backgroundImage: NetworkImage(widget.avatarUrl))
+          : CircleAvatar(radius: widget.radius, child: Icon(Icons.person, size: widget.radius));
+    }
+
+    return _AvatarWithPresenceDot(uid: _uid!, avatarUrl: widget.avatarUrl, radius: widget.radius);
   }
 }
 
@@ -87,15 +403,706 @@ class _PlaceholderTab extends StatelessWidget {
 }
 
 class _SettingsTab extends StatelessWidget {
-  const _SettingsTab({required this.onLogout});
+  const _SettingsTab({required this.onLogout, required this.settings});
+  final VoidCallback onLogout;
+  final UserSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsHome(onLogout: onLogout);
+  }
+}
+
+class _Debouncer {
+  _Debouncer(this.delay);
+  final Duration delay;
+  Timer? _t;
+
+  void run(VoidCallback action) {
+    _t?.cancel();
+    _t = Timer(delay, action);
+  }
+
+  void dispose() {
+    _t?.cancel();
+  }
+}
+
+class _SettingsHome extends StatelessWidget {
+  const _SettingsHome({required this.onLogout});
+  final VoidCallback onLogout;
+
+  void _open(BuildContext context, Widget page) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    final userRef = rtdb().ref('users/${u.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: userRef.onValue,
+      builder: (context, snap) {
+        final v = snap.data?.snapshot.value;
+        final m = (v is Map) ? v : null;
+        final gh = (m?['githubUsername'] ?? '').toString();
+        final avatar = (m?['avatarUrl'] ?? '').toString();
+
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          children: [
+            Center(
+              child: Column(
+                children: [
+                  _AvatarWithPresenceDot(uid: u.uid, avatarUrl: avatar, radius: 44),
+                  const SizedBox(height: 12),
+                  Text(
+                    gh.isNotEmpty ? gh : 'GitMit',
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            _SettingsSectionTile(
+              icon: Icons.person_outline,
+              title: 'Účet',
+              subtitle: 'Telefon, narozeniny, bio, účty',
+              onTap: () => _open(context, _SettingsAccountPage(onLogout: onLogout)),
+            ),
+            _SettingsSectionTile(
+              icon: Icons.chat_bubble_outline,
+              title: 'Nastavení chatů',
+              subtitle: 'Obrázek na pozadí, barvy, velikost textu',
+              onTap: () => _open(context, const _SettingsChatPage()),
+            ),
+            _SettingsSectionTile(
+              icon: Icons.lock_outline,
+              title: 'Soukromí',
+              subtitle: 'Auto-delete, status, presence, dárky',
+              onTap: () => _open(context, const _SettingsPrivacyPage()),
+            ),
+            _SettingsSectionTile(
+              icon: Icons.notifications_none,
+              title: 'Upozornění',
+              subtitle: 'Zvuky a vibrace',
+              onTap: () => _open(context, const _SettingsNotificationsPage()),
+            ),
+            _SettingsSectionTile(
+              icon: Icons.storage_outlined,
+              title: 'Data a paměť',
+              subtitle: 'Zatím základní',
+              onTap: () => _open(context, const _SettingsDataPage()),
+            ),
+            _SettingsSectionTile(
+              icon: Icons.devices_outlined,
+              title: 'Zařízení',
+              subtitle: 'Aktivní sezení (brzy)',
+              onTap: () => _open(context, _SettingsDevicesPage(onLogout: onLogout)),
+            ),
+            _SettingsSectionTile(
+              icon: Icons.language,
+              title: 'Jazyk',
+              subtitle: 'Čeština / English',
+              onTap: () => _open(context, const _SettingsLanguagePage()),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SettingsSectionTile extends StatelessWidget {
+  const _SettingsSectionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: ListTile(
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _SettingsAccountPage extends StatefulWidget {
+  const _SettingsAccountPage({required this.onLogout});
+  final VoidCallback onLogout;
+
+  @override
+  State<_SettingsAccountPage> createState() => _SettingsAccountPageState();
+}
+
+class _SettingsAccountPageState extends State<_SettingsAccountPage> {
+  final _phone = TextEditingController();
+  final _birthday = TextEditingController();
+  final _bio = TextEditingController();
+  final _debouncer = _Debouncer(const Duration(milliseconds: 500));
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _debouncer.dispose();
+    _phone.dispose();
+    _birthday.dispose();
+    _bio.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return;
+    final snap = await rtdb().ref('users/${u.uid}').get();
+    final v = snap.value;
+    final m = (v is Map) ? v : null;
+    if (!mounted) return;
+    setState(() {
+      _phone.text = (m?['phone'] ?? '').toString();
+      _birthday.text = (m?['birthday'] ?? '').toString();
+      _bio.text = (m?['bio'] ?? '').toString();
+    });
+  }
+
+  void _autoSave() {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return;
+    _debouncer.run(() {
+      rtdb().ref('users/${u.uid}').update({
+        'phone': _phone.text.trim(),
+        'birthday': _birthday.text.trim(),
+        'bio': _bio.text.trim(),
+        'accountUpdatedAt': ServerValue.timestamp,
+      });
+    });
+  }
+
+  Future<void> _reset() async {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return;
+    setState(() {
+      _phone.clear();
+      _birthday.clear();
+      _bio.clear();
+    });
+    await rtdb().ref('users/${u.uid}').update({
+      'phone': '',
+      'birthday': '',
+      'bio': '',
+      'accountUpdatedAt': ServerValue.timestamp,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Účet')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(
+            controller: _phone,
+            decoration: const InputDecoration(labelText: 'Telefon (volitelné)'),
+            onChanged: (_) => _autoSave(),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _birthday,
+            decoration: const InputDecoration(labelText: 'Narozeniny (např. 2000-01-31)'),
+            onChanged: (_) => _autoSave(),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _bio,
+            minLines: 2,
+            maxLines: 5,
+            decoration: const InputDecoration(labelText: 'Bio'),
+            onChanged: (_) => _autoSave(),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: widget.onLogout,
+            child: const Text('Přepnout GitHub účet'),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: _reset,
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsChatPage extends StatefulWidget {
+  const _SettingsChatPage();
+
+  @override
+  State<_SettingsChatPage> createState() => _SettingsChatPageState();
+}
+
+class _SettingsChatPageState extends State<_SettingsChatPage> {
+  final _wallpaper = TextEditingController();
+  final _debouncer = _Debouncer(const Duration(milliseconds: 600));
+
+  @override
+  void dispose() {
+    _debouncer.dispose();
+    _wallpaper.dispose();
+    super.dispose();
+  }
+
+  Future<void> _updateSetting(String uid, Map<String, Object?> patch) async {
+    await rtdb().ref('settings/$uid').update({
+      ...patch,
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
+  Future<void> _reset(String uid) async {
+    await _updateSetting(uid, {
+      'chatTextSize': 16,
+      'bubbleRadius': 12,
+      'bubbleIncoming': 'surface',
+      'bubbleOutgoing': 'secondaryContainer',
+      'wallpaperUrl': '',
+      'reactionsEnabled': true,
+      'stickersEnabled': false,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+    final settingsRef = rtdb().ref('settings/${u.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: settingsRef.onValue,
+      builder: (context, snap) {
+        final settings = UserSettings.fromSnapshot(snap.data?.snapshot.value);
+        if (_wallpaper.text != settings.wallpaperUrl) {
+          _wallpaper.text = settings.wallpaperUrl;
+          _wallpaper.selection = TextSelection.fromPosition(TextPosition(offset: _wallpaper.text.length));
+        }
+
+        return Scaffold(
+          appBar: AppBar(title: const Text('Nastavení chatů')),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              ListTile(
+                title: const Text('Velikost textu'),
+                subtitle: Slider(
+                  min: 12,
+                  max: 24,
+                  value: settings.chatTextSize.clamp(12, 24),
+                  onChanged: (v) => _updateSetting(u.uid, {'chatTextSize': v}),
+                ),
+                trailing: Text(settings.chatTextSize.toStringAsFixed(0)),
+              ),
+              ListTile(
+                title: const Text('Zaoblení bublin'),
+                subtitle: Slider(
+                  min: 4,
+                  max: 28,
+                  value: settings.bubbleRadius.clamp(4, 28),
+                  onChanged: (v) => _updateSetting(u.uid, {'bubbleRadius': v}),
+                ),
+                trailing: Text(settings.bubbleRadius.toStringAsFixed(0)),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _wallpaper,
+                decoration: const InputDecoration(labelText: 'Wallpaper URL (volitelné)'),
+                onChanged: (_) => _debouncer.run(() => _updateSetting(u.uid, {'wallpaperUrl': _wallpaper.text.trim()})),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: settings.bubbleIncoming,
+                      decoration: const InputDecoration(labelText: 'Příchozí bublina'),
+                      items: const [
+                        DropdownMenuItem(value: 'surface', child: Text('Surface')),
+                        DropdownMenuItem(value: 'surfaceVariant', child: Text('Surface Variant')),
+                        DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
+                      ],
+                      onChanged: (v) => _updateSetting(u.uid, {'bubbleIncoming': v ?? 'surface'}),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: settings.bubbleOutgoing,
+                      decoration: const InputDecoration(labelText: 'Odchozí bublina'),
+                      items: const [
+                        DropdownMenuItem(value: 'secondaryContainer', child: Text('Secondary Container')),
+                        DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
+                        DropdownMenuItem(value: 'surface', child: Text('Surface')),
+                      ],
+                      onChanged: (v) => _updateSetting(u.uid, {'bubbleOutgoing': v ?? 'secondaryContainer'}),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _ChatPreview(settings: settings),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                value: settings.reactionsEnabled,
+                onChanged: (v) => _updateSetting(u.uid, {'reactionsEnabled': v}),
+                title: const Text('Reakce na zprávy'),
+                subtitle: const Text('Dlouhé podržení na zprávě'),
+              ),
+              SwitchListTile(
+                value: settings.stickersEnabled,
+                onChanged: (v) => _updateSetting(u.uid, {'stickersEnabled': v}),
+                title: const Text('Stickers'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () => _reset(u.uid),
+                child: const Text('Reset'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SettingsPrivacyPage extends StatelessWidget {
+  const _SettingsPrivacyPage();
+
+  Future<void> _update(String uid, Map<String, Object?> patch) async {
+    await rtdb().ref('settings/$uid').update({
+      ...patch,
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
+  Future<void> _reset(String uid) async {
+    await _update(uid, {
+      'autoDeleteSeconds': 0,
+      'presenceEnabled': true,
+      'presenceStatus': 'online',
+      'giftsVisible': true,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    final settingsRef = rtdb().ref('settings/${u.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: settingsRef.onValue,
+      builder: (context, snap) {
+        final s = UserSettings.fromSnapshot(snap.data?.snapshot.value);
+        return Scaffold(
+          appBar: AppBar(title: const Text('Soukromí')),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              DropdownButtonFormField<int>(
+                value: s.autoDeleteSeconds,
+                decoration: const InputDecoration(labelText: 'Auto-delete zpráv'),
+                items: const [
+                  DropdownMenuItem(value: 0, child: Text('Vypnuto')),
+                  DropdownMenuItem(value: 86400, child: Text('24 hodin')),
+                  DropdownMenuItem(value: 604800, child: Text('7 dní')),
+                  DropdownMenuItem(value: 2592000, child: Text('30 dní')),
+                ],
+                onChanged: (v) => _update(u.uid, {'autoDeleteSeconds': v ?? 0}),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                value: s.presenceEnabled,
+                onChanged: (v) => _update(u.uid, {'presenceEnabled': v}),
+                title: const Text('Presence (online/offline)'),
+              ),
+              DropdownButtonFormField<String>(
+                value: s.presenceStatus,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: const [
+                  DropdownMenuItem(value: 'online', child: Text('Online')),
+                  DropdownMenuItem(value: 'dnd', child: Text('DND')),
+                  DropdownMenuItem(value: 'hidden', child: Text('Hidden')),
+                ],
+                onChanged: (v) => _update(u.uid, {'presenceStatus': v ?? 'online'}),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                value: s.giftsVisible,
+                onChanged: (v) => _update(u.uid, {'giftsVisible': v}),
+                title: const Text('Dárky viditelné'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () => _reset(u.uid),
+                child: const Text('Reset'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SettingsNotificationsPage extends StatelessWidget {
+  const _SettingsNotificationsPage();
+
+  Future<void> _update(String uid, Map<String, Object?> patch) async {
+    await rtdb().ref('settings/$uid').update({
+      ...patch,
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
+  Future<void> _reset(String uid) async {
+    await _update(uid, {
+      'vibrationEnabled': true,
+      'soundsEnabled': true,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    final settingsRef = rtdb().ref('settings/${u.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: settingsRef.onValue,
+      builder: (context, snap) {
+        final s = UserSettings.fromSnapshot(snap.data?.snapshot.value);
+        return Scaffold(
+          appBar: AppBar(title: const Text('Upozornění')),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              SwitchListTile(
+                value: s.vibrationEnabled,
+                onChanged: (v) => _update(u.uid, {'vibrationEnabled': v}),
+                title: const Text('Vibrace'),
+              ),
+              SwitchListTile(
+                value: s.soundsEnabled,
+                onChanged: (v) => _update(u.uid, {'soundsEnabled': v}),
+                title: const Text('Zvuky'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () => _reset(u.uid),
+                child: const Text('Reset'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SettingsDataPage extends StatelessWidget {
+  const _SettingsDataPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Data a paměť')),
+      body: const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('Zatím tu nejsou další volby. (Nechám připravené pro další funkce.)'),
+      ),
+    );
+  }
+}
+
+class _SettingsDevicesPage extends StatelessWidget {
+  const _SettingsDevicesPage({required this.onLogout});
   final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ElevatedButton(
-        onPressed: onLogout,
-        child: const Text('Odhlásit se'),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Zařízení')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Aktivní sezení zatím není implementované.'),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: onLogout,
+              child: const Text('Odhlásit se'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsLanguagePage extends StatelessWidget {
+  const _SettingsLanguagePage();
+
+  Future<void> _update(String uid, Map<String, Object?> patch) async {
+    await rtdb().ref('settings/$uid').update({
+      ...patch,
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
+  Future<void> _reset(String uid) async {
+    await _update(uid, {'language': 'cs'});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    final settingsRef = rtdb().ref('settings/${u.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: settingsRef.onValue,
+      builder: (context, snap) {
+        final s = UserSettings.fromSnapshot(snap.data?.snapshot.value);
+        return Scaffold(
+          appBar: AppBar(title: const Text('Jazyk')),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              DropdownButtonFormField<String>(
+                value: s.language,
+                decoration: const InputDecoration(labelText: 'Jazyk'),
+                items: const [
+                  DropdownMenuItem(value: 'cs', child: Text('Čeština')),
+                  DropdownMenuItem(value: 'en', child: Text('English')),
+                ],
+                onChanged: (v) => _update(u.uid, {'language': v ?? 'cs'}),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () => _reset(u.uid),
+                child: const Text('Reset'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ChatPreview extends StatelessWidget {
+  const _ChatPreview({required this.settings});
+
+  final UserSettings settings;
+
+  Color _bubbleColor(BuildContext context, String key, {required bool outgoing}) {
+    final cs = Theme.of(context).colorScheme;
+    switch (key) {
+      case 'surfaceVariant':
+        return cs.surfaceVariant;
+      case 'primaryContainer':
+        return cs.primaryContainer;
+      case 'secondaryContainer':
+        return cs.secondaryContainer;
+      case 'surface':
+      default:
+        return cs.surface;
+    }
+  }
+
+  Color _bubbleTextColor(BuildContext context, String key) {
+    final cs = Theme.of(context).colorScheme;
+    switch (key) {
+      case 'surfaceVariant':
+        return cs.onSurfaceVariant;
+      case 'primaryContainer':
+        return cs.onPrimaryContainer;
+      case 'secondaryContainer':
+        return cs.onSecondaryContainer;
+      case 'surface':
+      default:
+        return cs.onSurface;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = settings.wallpaperUrl.trim();
+    final decoration = (bg.isEmpty)
+        ? null
+        : BoxDecoration(
+            image: DecorationImage(
+              image: NetworkImage(bg),
+              fit: BoxFit.cover,
+              opacity: 0.35,
+            ),
+          );
+
+    final inColor = _bubbleColor(context, settings.bubbleIncoming, outgoing: false);
+    final outColor = _bubbleColor(context, settings.bubbleOutgoing, outgoing: true);
+    final inText = _bubbleTextColor(context, settings.bubbleIncoming);
+    final outText = _bubbleTextColor(context, settings.bubbleOutgoing);
+
+    Widget bubble({required bool outgoing, required String text}) {
+      final color = outgoing ? outColor : inColor;
+      final tcolor = outgoing ? outText : inText;
+      return Align(
+        alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(settings.bubbleRadius),
+          ),
+          child: Text(text, style: TextStyle(fontSize: settings.chatTextSize, color: tcolor)),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: decoration,
+      child: Column(
+        children: [
+          bubble(outgoing: false, text: 'Ahoj! Tohle je preview.'),
+          bubble(outgoing: true, text: 'Super, vidím změny hned.'),
+        ],
       ),
     );
   }
@@ -193,9 +1200,7 @@ String _statusText(String? status) {
 }
 
 bool _isModeratorFromUserMap(Map? userMap) {
-  final flag = userMap?['isModerator'] == true;
-  final gh = userMap?['githubUsername']?.toString() ?? '';
-  return flag || gh.toLowerCase() == 'ikryptoz';
+  return userMap?['isModerator'] == true;
 }
 
 Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
@@ -337,10 +1342,11 @@ class _ProfileTabState extends State<_ProfileTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  if (avatar != null && avatar.isNotEmpty)
-                    CircleAvatar(radius: 48, backgroundImage: NetworkImage(avatar))
-                  else
-                    const CircleAvatar(radius: 48, child: Icon(Icons.person, size: 48)),
+                  _AvatarWithPresenceDot(
+                    uid: user.uid,
+                    avatarUrl: avatar,
+                    radius: 48,
+                  ),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -632,9 +1638,10 @@ class _ContactsTabState extends State<_ContactsTab> {
 }
 
 class _ChatsTab extends StatefulWidget {
-  const _ChatsTab({required this.initialOpenLogin, required this.initialOpenAvatarUrl});
+  const _ChatsTab({required this.initialOpenLogin, required this.initialOpenAvatarUrl, required this.settings});
   final String? initialOpenLogin;
   final String? initialOpenAvatarUrl;
+  final UserSettings settings;
 
   @override
   State<_ChatsTab> createState() => _ChatsTabState();
@@ -679,11 +1686,49 @@ class _ChatsTabState extends State<_ChatsTab> {
     if (current == null || login == null || text.isEmpty) return;
 
     _messageController.clear();
+    final expiresAt = (widget.settings.autoDeleteSeconds > 0)
+        ? DateTime.now().millisecondsSinceEpoch + (widget.settings.autoDeleteSeconds * 1000)
+        : null;
     await rtdb().ref('messages/${current.uid}/$login').push().set({
       'text': text,
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
+      if (expiresAt != null) 'expiresAt': expiresAt,
     });
+  }
+
+  Future<void> _reactToMessage({required String login, required String messageKey, required String emoji}) async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    await rtdb().ref('messages/${current.uid}/$login/$messageKey/reactions/$emoji/${current.uid}').set(true);
+  }
+
+  Future<void> _showReactionsMenu({required String login, required String messageKey}) async {
+    if (!widget.settings.reactionsEnabled) return;
+    final emoji = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) {
+        const items = ['👍', '❤️', '😂', '😮', '😢'];
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: items
+                  .map(
+                    (e) => TextButton(
+                      onPressed: () => Navigator.of(context).pop(e),
+                      child: Text(e, style: const TextStyle(fontSize: 22)),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ),
+        );
+      },
+    );
+    if (emoji == null) return;
+    await _reactToMessage(login: login, messageKey: messageKey, emoji: emoji);
   }
 
   Future<void> _sendVerified({required bool asModerator, required String moderatorGithub}) async {
@@ -813,9 +1858,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 final reason = (r['reason'] ?? '').toString();
                                 final avatar = (r['avatarUrl'] ?? '').toString();
                                 return ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundImage: avatar.isNotEmpty ? NetworkImage(avatar) : null,
-                                  ),
+                                  leading: _AvatarWithPresenceDot(uid: uid, avatarUrl: avatar, radius: 20),
                                   title: Text('@$gh'),
                                   subtitle: Text(reason, maxLines: 1, overflow: TextOverflow.ellipsis),
                                   onTap: () {
@@ -835,9 +1878,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                             final data = (e.value is Map) ? (e.value as Map) : null;
                             final avatarUrl = data?['avatarUrl']?.toString() ?? '';
                             return ListTile(
-                              leading: CircleAvatar(
-                                backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
-                              ),
+                              leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
                               title: Text('@$login'),
                               onTap: () {
                                 setState(() {
@@ -903,6 +1944,10 @@ class _ChatsTabState extends State<_ChatsTab> {
                         children: [
                           Expanded(
                             child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Theme.of(context).colorScheme.secondary,
+                                foregroundColor: Theme.of(context).colorScheme.onSecondary,
+                              ),
                               onPressed: status == 'approved'
                                   ? null
                                   : () async {
@@ -929,6 +1974,10 @@ class _ChatsTabState extends State<_ChatsTab> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Theme.of(context).colorScheme.onError,
+                                side: BorderSide(color: Theme.of(context).colorScheme.error),
+                              ),
                               onPressed: status == 'declined'
                                   ? null
                                   : () async {
@@ -959,7 +2008,11 @@ class _ChatsTabState extends State<_ChatsTab> {
                       value: _moderatorAnonymous,
                       onChanged: (v) => setState(() => _moderatorAnonymous = v),
                       title: const Text('Odpovídat anonymně'),
-                      subtitle: Text(_moderatorAnonymous ? 'U druhé strany bude „Moderátor“' : 'U druhé strany bude @ikryptoz'),
+                      subtitle: Text(
+                        _moderatorAnonymous
+                            ? 'U druhé strany bude „Moderátor“'
+                            : 'U druhé strany bude @$myGithub',
+                      ),
                     ),
                     const Divider(height: 1),
                   ],
@@ -1059,6 +2112,38 @@ class _ChatsTabState extends State<_ChatsTab> {
 
     final login = _activeLogin!;
     final messagesRef = rtdb().ref('messages/${current.uid}/$login');
+
+    Color bubbleColor(BuildContext context, String key) {
+      final cs = Theme.of(context).colorScheme;
+      switch (key) {
+        case 'surfaceVariant':
+          return cs.surfaceVariant;
+        case 'primaryContainer':
+          return cs.primaryContainer;
+        case 'secondaryContainer':
+          return cs.secondaryContainer;
+        case 'surface':
+        default:
+          return cs.surface;
+      }
+    }
+
+    Color bubbleTextColor(BuildContext context, String key) {
+      final cs = Theme.of(context).colorScheme;
+      switch (key) {
+        case 'surfaceVariant':
+          return cs.onSurfaceVariant;
+        case 'primaryContainer':
+          return cs.onPrimaryContainer;
+        case 'secondaryContainer':
+          return cs.onSecondaryContainer;
+        case 'surface':
+        default:
+          return cs.onSurface;
+      }
+    }
+
+    final bg = widget.settings.wallpaperUrl.trim();
     return Column(
       children: [
         ListTile(
@@ -1067,55 +2152,117 @@ class _ChatsTabState extends State<_ChatsTab> {
             onPressed: () => setState(() => _activeLogin = null),
           ),
           title: Text('@$login'),
-          trailing: CircleAvatar(
-            backgroundImage:
-                (_activeAvatarUrl != null && _activeAvatarUrl!.isNotEmpty) ? NetworkImage(_activeAvatarUrl!) : null,
+          trailing: _ChatLoginAvatar(
+            login: login,
+            avatarUrl: _activeAvatarUrl ?? '',
+            radius: 18,
           ),
         ),
         const Divider(height: 1),
         Expanded(
-          child: StreamBuilder<DatabaseEvent>(
-            stream: messagesRef.onValue,
-            builder: (context, snapshot) {
-              final value = snapshot.data?.snapshot.value;
-              if (value is! Map) {
-                return const Center(child: Text('Napiš první zprávu.'));
-              }
-
-              final items = value.entries
-                  .where((e) => e.value is Map)
-                  .map((e) => Map<String, dynamic>.from(e.value as Map))
-                  .toList();
-
-              items.sort((a, b) {
-                final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
-                final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
-                return at.compareTo(bt);
-              });
-
-              return ListView.builder(
-                padding: const EdgeInsets.all(12),
-                itemCount: items.length,
-                itemBuilder: (context, i) {
-                  final m = items[i];
-                  final text = (m['text'] ?? '').toString();
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(text),
-                      ),
+          child: Container(
+            decoration: bg.isEmpty
+                ? null
+                : BoxDecoration(
+                    image: DecorationImage(
+                      image: NetworkImage(bg),
+                      fit: BoxFit.cover,
+                      opacity: 0.35,
                     ),
-                  );
-                },
-              );
-            },
+                  ),
+            child: StreamBuilder<DatabaseEvent>(
+              stream: messagesRef.onValue,
+              builder: (context, snapshot) {
+                final value = snapshot.data?.snapshot.value;
+                if (value is! Map) {
+                  return const Center(child: Text('Napiš první zprávu.'));
+                }
+
+                final now = DateTime.now().millisecondsSinceEpoch;
+                final items = <Map<String, dynamic>>[];
+                for (final e in value.entries) {
+                  if (e.value is! Map) continue;
+                  final msg = Map<String, dynamic>.from(e.value as Map);
+                  msg['__key'] = e.key.toString();
+                  final expiresAt = (msg['expiresAt'] is int) ? msg['expiresAt'] as int : null;
+                  if (expiresAt != null && expiresAt <= now) continue;
+                  items.add(msg);
+                }
+
+                items.sort((a, b) {
+                  final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                  final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                  return at.compareTo(bt);
+                });
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: items.length,
+                  itemBuilder: (context, i) {
+                    final m = items[i];
+                    final key = (m['__key'] ?? '').toString();
+                    final text = (m['text'] ?? '').toString();
+                    final fromUid = (m['fromUid'] ?? '').toString();
+                    final isMe = fromUid == current.uid;
+
+                    final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
+                    final color = bubbleColor(context, bubbleKey);
+                    final tcolor = bubbleTextColor(context, bubbleKey);
+
+                    final reactions = (m['reactions'] is Map) ? (m['reactions'] as Map) : null;
+                    final reactionChips = <Widget>[];
+                    if (reactions != null) {
+                      for (final re in reactions.entries) {
+                        final emoji = re.key.toString();
+                        final voters = (re.value is Map) ? (re.value as Map) : null;
+                        final count = voters?.length ?? 0;
+                        if (count > 0) {
+                          reactionChips.add(
+                            Container(
+                              margin: const EdgeInsets.only(top: 4, right: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text('$emoji $count', style: TextStyle(fontSize: widget.settings.chatTextSize - 4)),
+                            ),
+                          );
+                        }
+                      }
+                    }
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                        children: [
+                          GestureDetector(
+                            onLongPress: () => _showReactionsMenu(login: login, messageKey: key),
+                            child: Align(
+                              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
+                                ),
+                                child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
+                              ),
+                            ),
+                          ),
+                          if (reactionChips.isNotEmpty)
+                            Wrap(
+                              alignment: WrapAlignment.end,
+                              children: reactionChips,
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ),
         Padding(

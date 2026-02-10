@@ -30,6 +30,7 @@ class _RegisterPageState extends State<RegisterPage> {
           'createdAt': ServerValue.timestamp,
           'avatarUrl': '',
           'verified': false,
+          'isModerator': false,
         });
       }
       if (mounted) {
