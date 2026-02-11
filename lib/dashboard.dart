@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -18,6 +20,7 @@ import 'package:gitmit/rtdb.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 Future<String> _uploadGroupLogo({required String groupId, required Uint8List bytes}) async {
   String normalizeBucket(String b) {
@@ -1509,12 +1512,29 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   void _openChat({required String login, required String avatarUrl}) {
-    setState(() {
-      _index = 1; // Chaty tab
-      _openChatLogin = login;
-      _openChatAvatarUrl = avatarUrl;
-      _openChatToken++;
-    });
+    final key = login.trim().toLowerCase();
+    if (key.isEmpty) return;
+
+    () async {
+      final snap = await rtdb().ref('usernames/$key').get();
+      final v = snap.value;
+      final uid = (v == null) ? '' : v.toString().trim();
+      if (!mounted) return;
+
+      if (uid.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Uživatel @$login nepoužívá GitMit (nelze zjistit UID).')),
+        );
+        return;
+      }
+
+      setState(() {
+        _index = 1; // Chaty tab
+        _openChatLogin = login;
+        _openChatAvatarUrl = avatarUrl;
+        _openChatToken++;
+      });
+    }();
   }
 
   @override
@@ -2151,6 +2171,38 @@ class _SettingsAccountPageState extends State<_SettingsAccountPage> {
   final _bio = TextEditingController();
   final _debouncer = _Debouncer(const Duration(milliseconds: 500));
 
+  Future<void> _openGitHubLogout() async {
+    final uri = Uri.parse('https://github.com/logout');
+    var ok = false;
+
+    // Primary: Android native fallback (avoids url_launcher channel issues).
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        ok = (await const MethodChannel('gitmit/open_url').invokeMethod<bool>('open', {
+              'url': uri.toString(),
+            })) ??
+            false;
+      } catch (_) {
+        ok = false;
+      }
+    }
+
+    // Secondary: url_launcher (for iOS/macOS/web/etc).
+    if (!ok) {
+      try {
+        ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        ok = false;
+      }
+    }
+
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nepodařilo se otevřít GitHub logout.')),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2239,6 +2291,11 @@ class _SettingsAccountPageState extends State<_SettingsAccountPage> {
           OutlinedButton(
             onPressed: widget.onLogout,
             child: const Text('Odhlásit se'),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: _openGitHubLogout,
+            child: const Text('Odhlásit z GitHubu'),
           ),
           const SizedBox(height: 12),
           OutlinedButton(
@@ -3536,6 +3593,8 @@ class _ChatsTabState extends State<_ChatsTab> {
       setState(() {
         _activeLogin = null;
         _activeAvatarUrl = null;
+        _activeOtherUid = null;
+        _activeOtherUidLoginLower = null;
       });
       return true;
     }
@@ -3576,6 +3635,8 @@ class _ChatsTabState extends State<_ChatsTab> {
       setState(() {
         _activeLogin = null;
         _activeAvatarUrl = null;
+        _activeOtherUid = null;
+        _activeOtherUidLoginLower = null;
         _activeGroupId = null;
         _activeVerifiedUid = null;
         _activeVerifiedGithub = null;
@@ -3589,6 +3650,8 @@ class _ChatsTabState extends State<_ChatsTab> {
       setState(() {
         _activeLogin = widget.initialOpenLogin;
         _activeAvatarUrl = widget.initialOpenAvatarUrl;
+        _activeOtherUid = null;
+        _activeOtherUidLoginLower = null;
       });
       return;
     }
@@ -3597,6 +3660,8 @@ class _ChatsTabState extends State<_ChatsTab> {
       setState(() {
         _activeLogin = widget.initialOpenLogin;
         _activeAvatarUrl = widget.initialOpenAvatarUrl;
+        _activeOtherUid = null;
+        _activeOtherUidLoginLower = null;
       });
     }
   }
