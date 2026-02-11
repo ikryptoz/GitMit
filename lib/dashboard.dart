@@ -5290,44 +5290,54 @@ class _ChatsTabState extends State<_ChatsTab> {
                       await E2ee.publishMyPublicKey(uid: current.uid);
                     } catch (_) {}
 
-                    SecretKey? gk = _groupKeyCache[groupId];
-                    gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+                    // Prefer stronger v2 group encryption (Signal-like sender key) when possible.
+                    Map<String, Object?>? encrypted;
+                    try {
+                      encrypted = await E2ee.encryptForGroupSignalLike(groupId: groupId, myUid: current.uid, plaintext: text);
+                    } catch (_) {
+                      encrypted = null;
+                    }
 
-                    if (gk == null) {
-                      if (!isAdmin) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('E2EE: skupina není připravená (chybí klíč).')),
-                          );
+                    if (encrypted == null) {
+                      // Fallback to legacy v1 group shared key.
+                      SecretKey? gk = _groupKeyCache[groupId];
+                      gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+
+                      if (gk == null) {
+                        if (!isAdmin) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('E2EE: skupina není připravená (chybí klíč).')),
+                            );
+                          }
+                          return;
                         }
-                        return;
+                        try {
+                          await E2ee.ensureGroupKeyDistributed(groupId: groupId, myUid: current.uid);
+                          gk = await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('E2EE: nelze nastavit skupinový klíč: $e')),
+                            );
+                          }
+                          return;
+                        }
                       }
+
+                      if (gk == null) return;
+                      _groupKeyCache[groupId] = gk;
+
                       try {
-                        await E2ee.ensureGroupKeyDistributed(groupId: groupId, myUid: current.uid);
-                        gk = await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+                        encrypted = await E2ee.encryptForGroup(groupKey: gk, plaintext: text);
                       } catch (e) {
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('E2EE: nelze nastavit skupinový klíč: $e')),
+                            SnackBar(content: Text('E2EE: šifrování selhalo: $e')),
                           );
                         }
                         return;
                       }
-                    }
-
-                    if (gk == null) return;
-                    _groupKeyCache[groupId] = gk;
-
-                    Map<String, Object?> encrypted;
-                    try {
-                      encrypted = await E2ee.encryptForGroup(groupKey: gk, plaintext: text);
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('E2EE: šifrování selhalo: $e')),
-                        );
-                      }
-                      return;
                     }
 
                     await msgsRef.push().set({
@@ -5443,7 +5453,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                         gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
                                         if (gk != null) _groupKeyCache[groupId] = gk;
                                         if (gk == null) return;
-                                        final plain = await E2ee.decryptFromGroup(groupKey: gk, message: m);
+                                        final plain = await E2ee.decryptGroupMessage(groupId: groupId, myUid: current.uid, groupKey: gk, message: m);
                                         if (!mounted) return;
                                         setState(() => _decryptedCache[cacheKey] = plain);
                                       } catch (_) {
