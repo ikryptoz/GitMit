@@ -1011,6 +1011,17 @@ class E2ee {
         n: 0,
       );
       await _saveGroupSenderState(groupId: groupId, myUid: myUid, st: st);
+
+      // Important: seed a local receiver state for our own sender key.
+      // Otherwise decrypting our own group messages would require decrypting an
+      // envelope "from me to me" which is fragile with v2 ratchet sessions.
+      await _saveGroupRecvState(
+        groupId: groupId,
+        senderUid: myUid,
+        keyId: st.keyId,
+        st: _GroupRecvState(chainKey: st.chainKey, nr: 0, skipped: const {}),
+      );
+
       await _ensureSenderKeyDistributed(groupId: groupId, myUid: myUid, st: st);
     }
 

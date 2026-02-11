@@ -213,9 +213,8 @@ class _LoginPageState extends State<LoginPage> {
           await rtdb().ref('users/${user.uid}').update({'isModerator': false});
         }
       }
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/dashboard');
-      }
+      // Navigation is handled by AuthGate reacting to authStateChanges.
+      // Avoid pushing a second Dashboard route (can lead to odd initial state).
     } on FirebaseAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {

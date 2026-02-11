@@ -3588,6 +3588,153 @@ class _ChatsTabState extends State<_ChatsTab> {
   int _overviewMode = 0; // 0=priváty, 1=skupiny, 2=složky
   String? _activeFolderId; // when _overviewMode==2
 
+  Future<String?> _myGithubUsername(String myUid) async {
+    final snap = await rtdb().ref('users/$myUid/githubUsername').get();
+    final v = snap.value;
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  Future<String?> _myAvatarUrl(String myUid) async {
+    final snap = await rtdb().ref('users/$myUid/avatarUrl').get();
+    final v = snap.value;
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  DatabaseReference _dmContactRef({required String myUid, required String otherLoginLower}) {
+    return rtdb().ref('dmContacts/$myUid/$otherLoginLower');
+  }
+
+  DatabaseReference _dmRequestRef({required String myUid, required String fromLoginLower}) {
+    return rtdb().ref('dmRequests/$myUid/$fromLoginLower');
+  }
+
+  Future<bool> _isDmAccepted({required String myUid, required String otherLoginLower}) async {
+    final snap = await _dmContactRef(myUid: myUid, otherLoginLower: otherLoginLower).get();
+    if (!snap.exists) return false;
+    final v = snap.value;
+    if (v is bool) return v;
+    return true;
+  }
+
+  Future<void> _sendDmRequest({
+    required String myUid,
+    required String myLogin,
+    required String otherUid,
+    required String otherLogin,
+    String? messageText,
+  }) async {
+    final myLoginLower = myLogin.trim().toLowerCase();
+    final otherLoginLower = otherLogin.trim().toLowerCase();
+    if (myLoginLower.isEmpty || otherLoginLower.isEmpty) return;
+
+    Map<String, Object?>? encrypted;
+    final pt = (messageText ?? '').trim();
+    if (pt.isNotEmpty) {
+      encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: pt);
+    }
+
+    final myAvatar = await _myAvatarUrl(myUid);
+
+    final updates = <String, Object?>{
+      'dmRequests/$otherUid/$myLoginLower': {
+        'fromUid': myUid,
+        'fromLogin': myLogin,
+        if (myAvatar != null) 'fromAvatarUrl': myAvatar,
+        'createdAt': ServerValue.timestamp,
+        if (encrypted != null) ...encrypted,
+      },
+      'savedChats/$myUid/$otherLogin': {
+        'login': otherLogin,
+        if (_activeAvatarUrl != null && _activeAvatarUrl!.isNotEmpty) 'avatarUrl': _activeAvatarUrl,
+        'status': 'pending_out',
+        'lastMessageText': pt.isEmpty ? 'Žádost o chat' : '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+      'savedChats/$otherUid/$myLogin': {
+        'login': myLogin,
+        if (myAvatar != null) 'avatarUrl': myAvatar,
+        'status': 'pending_in',
+        'lastMessageText': pt.isEmpty ? 'Žádost o chat' : '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+    };
+
+    await rtdb().ref().update(updates);
+  }
+
+  Future<void> _acceptDmRequest({
+    required String myUid,
+    required String otherLogin,
+  }) async {
+    final otherLoginLower = otherLogin.trim().toLowerCase();
+    final reqSnap = await _dmRequestRef(myUid: myUid, fromLoginLower: otherLoginLower).get();
+    final rv = reqSnap.value;
+    if (rv is! Map) return;
+    final req = Map<String, dynamic>.from(rv);
+    final fromUid = (req['fromUid'] ?? '').toString();
+    final fromLogin = (req['fromLogin'] ?? otherLogin).toString();
+    final fromAvatarUrl = (req['fromAvatarUrl'] ?? '').toString();
+    if (fromUid.isEmpty) return;
+
+    final myLogin = await _myGithubUsername(myUid);
+    if (myLogin == null || myLogin.trim().isEmpty) {
+      throw Exception('Nelze zjistit tvůj GitHub username.');
+    }
+
+    final myLoginLower = myLogin.trim().toLowerCase();
+
+    // Extract optional encrypted message fields from the request.
+    final enc = <String, Object?>{};
+    for (final k in ['e2eeV', 'alg', 'nonce', 'ciphertext', 'mac', 'dh', 'pn', 'n', 'init', 'spkId']) {
+      if (req[k] != null) enc[k] = req[k];
+    }
+
+    final myAvatar = await _myAvatarUrl(myUid);
+
+    final updates = <String, Object?>{
+      'dmContacts/$myUid/$otherLoginLower': true,
+      'dmContacts/$fromUid/$myLoginLower': true,
+      'savedChats/$myUid/$fromLogin': {
+        'login': fromLogin,
+        if (fromAvatarUrl.isNotEmpty) 'avatarUrl': fromAvatarUrl,
+        'status': 'accepted',
+        'lastMessageText': enc.isEmpty ? '' : '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+      'savedChats/$fromUid/$myLogin': {
+        'login': myLogin,
+        if (myAvatar != null) 'avatarUrl': myAvatar,
+        'status': 'accepted',
+        'lastMessageText': enc.isEmpty ? '' : '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+      'dmRequests/$myUid/$otherLoginLower': null,
+    };
+
+    if (enc.isNotEmpty) {
+      final key = rtdb().ref().push().key;
+      if (key != null && key.isNotEmpty) {
+        final msg = {
+          ...enc,
+          'fromUid': fromUid,
+          'createdAt': ServerValue.timestamp,
+        };
+        updates['messages/$myUid/$fromLogin/$key'] = msg;
+        updates['messages/$fromUid/$myLogin/$key'] = msg;
+      }
+    }
+
+    await rtdb().ref().update(updates);
+  }
+
   bool handleBack() {
     if (_activeLogin != null) {
       setState(() {
@@ -3813,6 +3960,43 @@ class _ChatsTabState extends State<_ChatsTab> {
       // best-effort
     }
 
+    final myLogin = await _myGithubUsername(current.uid);
+    if (myLogin == null || myLogin.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Nelze zjistit tvůj GitHub username.')),
+        );
+      }
+      return;
+    }
+
+    final otherLoginLower = login.trim().toLowerCase();
+    final accepted = await _isDmAccepted(myUid: current.uid, otherLoginLower: otherLoginLower);
+    if (!accepted) {
+      try {
+        await _sendDmRequest(
+          myUid: current.uid,
+          myLogin: myLogin,
+          otherUid: otherUid,
+          otherLogin: login,
+          messageText: text,
+        );
+        _messageController.clear();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Žádost o chat byla odeslána.')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Nelze odeslat žádost: $e')),
+          );
+        }
+      }
+      return;
+    }
+
     Map<String, Object?> encrypted;
     try {
       encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: text);
@@ -3829,21 +4013,41 @@ class _ChatsTabState extends State<_ChatsTab> {
     final expiresAt = (widget.settings.autoDeleteSeconds > 0)
         ? DateTime.now().millisecondsSinceEpoch + (widget.settings.autoDeleteSeconds * 1000)
         : null;
-    await rtdb().ref('messages/${current.uid}/$login').push().set({
+
+    final key = rtdb().ref().push().key;
+    if (key == null || key.isEmpty) return;
+
+    final msg = {
       ...encrypted,
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
       if (expiresAt != null) 'expiresAt': expiresAt,
-    });
+    };
 
-    // Chat se "uloží" až po první zprávě.
-    await rtdb().ref('savedChats/${current.uid}/$login').update({
+    final updates = <String, Object?>{};
+    updates['messages/${current.uid}/$login/$key'] = msg;
+    updates['messages/$otherUid/$myLogin/$key'] = msg;
+
+    // Chat tiles for both sides.
+    updates['savedChats/${current.uid}/$login'] = {
       'login': login,
       if (_activeAvatarUrl != null && _activeAvatarUrl!.isNotEmpty) 'avatarUrl': _activeAvatarUrl,
+      'status': 'accepted',
       'lastMessageText': '🔒',
       'lastMessageAt': ServerValue.timestamp,
       'savedAt': ServerValue.timestamp,
-    });
+    };
+    final myAvatar = await _myAvatarUrl(current.uid);
+    updates['savedChats/$otherUid/$myLogin'] = {
+      'login': myLogin,
+      if (myAvatar != null) 'avatarUrl': myAvatar,
+      'status': 'accepted',
+      'lastMessageText': '🔒',
+      'lastMessageAt': ServerValue.timestamp,
+      'savedAt': ServerValue.timestamp,
+    };
+
+    await rtdb().ref().update(updates);
 
     if (widget.settings.vibrationEnabled) {
       HapticFeedback.lightImpact();
@@ -4030,6 +4234,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                               final root = (vv is Map) ? vv : null;
 
                               final rows = <Map<String, Object?>>[];
+                              final handled = <String>{};
                               if (root != null) {
                                 for (final entry in root.entries) {
                                   final login = entry.key.toString();
@@ -4054,12 +4259,44 @@ class _ChatsTabState extends State<_ChatsTab> {
 
                                   final meta = (metaMap != null && metaMap[login] is Map) ? (metaMap[login] as Map) : null;
                                   final avatarUrl = (meta?['avatarUrl'] ?? '').toString();
+                                  final status = (meta?['status'] ?? 'accepted').toString();
+                                  if (lastText.trim().isEmpty) {
+                                    lastText = (meta?['lastMessageText'] ?? '').toString();
+                                  }
+
+                                  handled.add(lower);
 
                                   rows.add({
                                     'login': login,
                                     'avatarUrl': avatarUrl,
                                     'lastAt': lastAt,
                                     'lastText': lastText,
+                                    'status': status,
+                                  });
+                                }
+                              }
+
+                              // Include pending chats from savedChats even when thread doesn't exist yet.
+                              if (metaMap != null) {
+                                for (final entry in metaMap.entries) {
+                                  final login = entry.key.toString();
+                                  final lower = login.trim().toLowerCase();
+                                  if (handled.contains(lower)) continue;
+                                  final blocked = (blockedMap != null && blockedMap[lower] == true);
+                                  if (blocked) continue;
+                                  if (entry.value is! Map) continue;
+                                  final meta = Map<String, dynamic>.from(entry.value as Map);
+                                  final status = (meta['status'] ?? 'accepted').toString();
+                                  if (!status.startsWith('pending')) continue;
+                                  final avatarUrl = (meta['avatarUrl'] ?? '').toString();
+                                  final lastAt = (meta['lastMessageAt'] is int) ? meta['lastMessageAt'] as int : 0;
+                                  final lastText = (meta['lastMessageText'] ?? '').toString();
+                                  rows.add({
+                                    'login': login,
+                                    'avatarUrl': avatarUrl,
+                                    'lastAt': lastAt,
+                                    'lastText': lastText,
+                                    'status': status,
                                   });
                                 }
                               }
@@ -4416,9 +4653,15 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 final login = (r['login'] ?? '').toString();
                                 final avatarUrl = (r['avatarUrl'] ?? '').toString();
                                 final lastText = (r['lastText'] ?? '').toString();
+                                final status = (r['status'] ?? 'accepted').toString();
                                 return ListTile(
                                   leading: _ChatLoginAvatar(login: login, avatarUrl: avatarUrl, radius: 20),
-                                  title: Text('@$login'),
+                                  title: Row(
+                                    children: [
+                                      Expanded(child: Text('@$login')),
+                                      if (status.startsWith('pending')) const Icon(Icons.lock_outline, size: 16),
+                                    ],
+                                  ),
                                   subtitle: lastText.isNotEmpty
                                       ? Text(lastText, maxLines: 1, overflow: TextOverflow.ellipsis)
                                       : null,
@@ -5476,7 +5719,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   child: Column(
                                     crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                     children: [
-                                      if (!isMe && fromGh.isNotEmpty)
+                                      if (fromGh.isNotEmpty)
                                         Text('@$fromGh', style: const TextStyle(fontSize: 12, color: Colors.white70)),
                                       GestureDetector(
                                         onLongPress: isAdmin ? () => showAdminMenu(key) : null,
@@ -5535,6 +5778,8 @@ class _ChatsTabState extends State<_ChatsTab> {
     final messagesRef = rtdb().ref('messages/${current.uid}/$login');
     final loginLower = login.trim().toLowerCase();
     final blockedRef = rtdb().ref('blocked/${current.uid}/$loginLower');
+    final dmContactRef = _dmContactRef(myUid: current.uid, otherLoginLower: loginLower);
+    final dmReqRef = _dmRequestRef(myUid: current.uid, fromLoginLower: loginLower);
 
     final bg = widget.settings.wallpaperUrl.trim();
     return StreamBuilder<DatabaseEvent>(
@@ -5545,8 +5790,43 @@ class _ChatsTabState extends State<_ChatsTab> {
         final myGithub = (um?['githubUsername'] ?? '').toString();
         final myGithubLower = myGithub.toLowerCase();
 
-        return Column(
-          children: [
+        return StreamBuilder<DatabaseEvent>(
+          stream: dmContactRef.onValue,
+          builder: (context, cSnap) {
+            final accepted = cSnap.data?.snapshot.exists == true && (cSnap.data?.snapshot.value != false);
+
+            return StreamBuilder<DatabaseEvent>(
+              stream: dmReqRef.onValue,
+              builder: (context, rSnap) {
+                final hasIncomingReq = rSnap.data?.snapshot.exists == true;
+
+                Future<void> acceptReq() async {
+                  try {
+                    await _acceptDmRequest(myUid: current.uid, otherLogin: login);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Žádost přijata.')));
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nelze přijmout: $e')));
+                  }
+                }
+
+                Future<void> rejectReq() async {
+                  await dmReqRef.remove();
+                  await rtdb().ref('savedChats/${current.uid}/$login').remove();
+                  if (!mounted) return;
+                  setState(() {
+                    _activeLogin = null;
+                    _activeAvatarUrl = null;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Žádost odmítnuta.')));
+                }
+
+                final lockedIncoming = hasIncomingReq && !accepted;
+                final lockedOutgoing = !accepted && !hasIncomingReq;
+
+                return Column(
+                  children: [
             ListTile(
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back),
@@ -5561,10 +5841,32 @@ class _ChatsTabState extends State<_ChatsTab> {
               onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
             ),
             const Divider(height: 1),
+            if (lockedIncoming)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                color: Theme.of(context).colorScheme.surface,
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('Žádost o chat. Přijmout?')),
+                    TextButton(onPressed: acceptReq, child: const Text('Přijmout')),
+                    TextButton(onPressed: rejectReq, child: const Text('Odmítnout')),
+                  ],
+                ),
+              ),
+            if (lockedOutgoing)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                color: Theme.of(context).colorScheme.surface,
+                child: const Text('Chat čeká na potvrzení. První zpráva odešle žádost.'),
+              ),
             StreamBuilder<DatabaseEvent>(
               stream: blockedRef.onValue,
               builder: (context, bSnap) {
                 final blocked = bSnap.data?.snapshot.value == true;
+
+                final canSend = accepted && !lockedIncoming;
 
                 return Expanded(
                   child: Column(
@@ -5747,14 +6049,14 @@ class _ChatsTabState extends State<_ChatsTab> {
                               child: TextField(
                                 controller: _messageController,
                                 decoration: const InputDecoration(labelText: 'Zpráva'),
-                                enabled: !blocked,
-                                onSubmitted: blocked ? null : (_) => _send(),
+                                enabled: !blocked && canSend,
+                                onSubmitted: (!blocked && canSend) ? (_) => _send() : null,
                               ),
                             ),
                             const SizedBox(width: 8),
                             IconButton(
                               icon: const Icon(Icons.send),
-                              onPressed: blocked ? null : _send,
+                              onPressed: (!blocked && canSend) ? _send : null,
                             ),
                           ],
                         ),
@@ -5764,7 +6066,11 @@ class _ChatsTabState extends State<_ChatsTab> {
                 );
               },
             ),
-          ],
+                  ],
+                );
+              },
+            );
+          },
         );
       },
     );
