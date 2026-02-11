@@ -4194,6 +4194,11 @@ class _ChatsTabState extends State<_ChatsTab> {
 
     await rtdb().ref().update(updates);
 
+    // Show our own message immediately (avoid "🔒 …" placeholder).
+    if (mounted) {
+      setState(() => _decryptedCache[key] = text);
+    }
+
     if (widget.settings.vibrationEnabled) {
       HapticFeedback.lightImpact();
     }
