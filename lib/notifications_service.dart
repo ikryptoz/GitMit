@@ -6,11 +6,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:gitmit/rtdb.dart';
 
 class AppNotifications {
   static final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
+
+  static const _storage = FlutterSecureStorage();
+  static const _fcmLastTokenPrefix = 'fcm_last_token_v1_';
 
   static StreamSubscription<DatabaseEvent>? _settingsSub;
   static bool _notificationsEnabled = true;
@@ -27,6 +31,38 @@ class AppNotifications {
   static String _tokenKey(String token) {
     // RTDB key-safe encoding.
     return base64Url.encode(utf8.encode(token));
+  }
+
+  static Future<String?> _readLastToken(String uid) async {
+    try {
+      return _storage.read(key: '$_fcmLastTokenPrefix$uid');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _writeLastToken(String uid, String token) async {
+    try {
+      await _storage.write(key: '$_fcmLastTokenPrefix$uid', value: token);
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  static Future<void> _storeTokenForUser(String uid, String token) async {
+    final prev = await _readLastToken(uid);
+    if (prev != null && prev.isNotEmpty && prev != token) {
+      final prevKey = _tokenKey(prev);
+      await rtdb().ref('fcmTokens/$uid/$prevKey').remove();
+    }
+
+    final key = _tokenKey(token);
+    await rtdb().ref('fcmTokens/$uid/$key').set({
+      'token': token,
+      'platform': Platform.operatingSystem,
+      'updatedAt': ServerValue.timestamp,
+    });
+    await _writeLastToken(uid, token);
   }
 
   static Future<void> initialize() async {
@@ -96,22 +132,12 @@ class AppNotifications {
     try {
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null && token.isNotEmpty) {
-        final key = _tokenKey(token);
-        await rtdb().ref('fcmTokens/${user.uid}/$key').set({
-          'token': token,
-          'platform': Platform.operatingSystem,
-          'updatedAt': ServerValue.timestamp,
-        });
+        await _storeTokenForUser(user.uid, token);
       }
 
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
         if (newToken.isEmpty) return;
-        final key = _tokenKey(newToken);
-        await rtdb().ref('fcmTokens/${user.uid}/$key').set({
-          'token': newToken,
-          'platform': Platform.operatingSystem,
-          'updatedAt': ServerValue.timestamp,
-        });
+        await _storeTokenForUser(user.uid, newToken);
       });
     } catch (_) {
       // Ignore token errors; app should still work.

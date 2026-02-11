@@ -10,7 +10,7 @@ import 'package:gitmit/rtdb.dart';
 import 'package:gitmit/github_api.dart';
 import 'package:gitmit/e2ee.dart';
 import 'package:gitmit/plaintext_cache.dart';
-import 'package:http/http.dart' as http;
+import 'package:gitmit/data_usage.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -137,6 +137,7 @@ class _AuthGateState extends State<AuthGate> {
       // Scope all local E2EE state to the active Firebase UID.
       // This prevents cross-account key/session mixups when switching accounts.
       E2ee.setActiveUser(u?.uid);
+      DataUsageTracker.setActiveUser(u?.uid);
       () async {
         try {
           await PlaintextCache.setActiveUser(u?.uid);
@@ -300,12 +301,13 @@ class _LoginPageState extends State<LoginPage> {
 
       if ((githubUsername == null || githubUsername.isEmpty) && accessToken != null && accessToken.isNotEmpty) {
         final uri = Uri.https('api.github.com', '/user');
-        final res = await http.get(
+        final res = await DataUsageTracker.trackedGet(
           uri,
           headers: {
             'Accept': 'application/vnd.github+json',
             'Authorization': 'token $accessToken',
           },
+          category: 'api',
         );
         if (res.statusCode == 200) {
           final data = Map<String, dynamic>.from(jsonDecode(res.body));
@@ -317,7 +319,11 @@ class _LoginPageState extends State<LoginPage> {
       // Fetch avatar if still missing (PAT fallback; might be rate-limited).
       if ((avatarUrl == null || avatarUrl.isEmpty) && githubUsername != null && githubUsername.isNotEmpty) {
         final uri = Uri.https('api.github.com', '/users/$githubUsername');
-        final res = await http.get(uri, headers: githubApiHeaders());
+        final res = await DataUsageTracker.trackedGet(
+          uri,
+          headers: githubApiHeaders(),
+          category: 'api',
+        );
         if (res.statusCode == 200) {
           final data = Map<String, dynamic>.from(jsonDecode(res.body));
           avatarUrl = data['avatar_url']?.toString();

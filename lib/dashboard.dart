@@ -18,10 +18,11 @@ import 'package:gitmit/github_api.dart';
 import 'package:gitmit/join_group_via_link_qr_page.dart';
 import 'package:gitmit/plaintext_cache.dart';
 import 'package:gitmit/rtdb.dart';
-import 'package:http/http.dart' as http;
+import 'package:gitmit/data_usage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:path_provider/path_provider.dart';
 
 Future<String> _uploadGroupLogo({required String groupId, required Uint8List bytes}) async {
   String normalizeBucket(String b) {
@@ -53,6 +54,7 @@ Future<String> _uploadGroupLogo({required String groupId, required Uint8List byt
 
       final ref = storage.ref().child('groupLogos').child('$groupId.jpg');
       await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+      await DataUsageTracker.recordUpload(bytes.length, category: 'media');
 
       for (var attempt = 0; attempt < 5; attempt++) {
         try {
@@ -1493,6 +1495,8 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _presenceInitialized = false;
   bool _presenceEnabled = true;
   String _presenceStatus = 'online';
+  String? _presenceSessionId;
+  static const Duration _presenceSessionTtl = Duration(days: 3);
   late final _AppLifecycleObserver _lifecycleObserver;
 
   final GlobalKey<_ChatsTabState> _chatsKey = GlobalKey<_ChatsTabState>();
@@ -1657,6 +1661,12 @@ class _DashboardPageState extends State<DashboardPage> {
     // Reset E2EE scope immediately so any late async tasks won't read/write
     // keys/sessions under the wrong user after logout.
     E2ee.setActiveUser(null);
+    DataUsageTracker.setActiveUser(null);
+    final current = FirebaseAuth.instance.currentUser;
+    if (current != null) {
+      final sessionRef = _presenceSessionRef(current.uid);
+      sessionRef?.remove();
+    }
     () async {
       try {
         await PlaintextCache.setActiveUser(null);
@@ -1717,12 +1727,57 @@ class _DashboardPageState extends State<DashboardPage> {
     if (current == null) return;
     if (!_presenceEnabled) return;
     final presenceRef = rtdb().ref('presence/${current.uid}');
+    _ensurePresenceSessionId();
+    final sessionRef = _presenceSessionRef(current.uid);
 
     if (state == AppLifecycleState.resumed) {
       final online = _presenceStatus != 'hidden';
       presenceRef.update({'enabled': true, 'status': _presenceStatus, 'online': online, 'lastChangedAt': ServerValue.timestamp});
+      sessionRef?.update({'online': online, 'status': _presenceStatus, 'lastSeenAt': ServerValue.timestamp});
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) {
       presenceRef.update({'enabled': true, 'status': _presenceStatus, 'online': false, 'lastChangedAt': ServerValue.timestamp});
+      sessionRef?.update({'online': false, 'status': _presenceStatus, 'lastSeenAt': ServerValue.timestamp});
+    }
+  }
+
+  String _ensurePresenceSessionId() {
+    if (_presenceSessionId != null && _presenceSessionId!.isNotEmpty) return _presenceSessionId!;
+    final id = rtdb().ref().push().key ?? DateTime.now().microsecondsSinceEpoch.toString();
+    _presenceSessionId = id;
+    return id;
+  }
+
+  DatabaseReference? _presenceSessionRef(String uid) {
+    if (_presenceSessionId == null || _presenceSessionId!.isEmpty) return null;
+    return rtdb().ref('presenceSessions/$uid/${_presenceSessionId!}');
+  }
+
+  Future<void> _cleanupStalePresenceSessions(String uid) async {
+    final snap = await rtdb().ref('presenceSessions/$uid').get();
+    final v = snap.value;
+    final m = (v is Map) ? Map<String, dynamic>.from(v) : null;
+    if (m == null || m.isEmpty) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final cutoff = now - _presenceSessionTtl.inMilliseconds;
+    final updates = <String, Object?>{};
+
+    for (final entry in m.entries) {
+      final key = entry.key.toString();
+      final val = entry.value;
+      if (val is! Map) {
+        updates['presenceSessions/$uid/$key'] = null;
+        continue;
+      }
+      final mm = Map<String, dynamic>.from(val);
+      final lastSeen = (mm['lastSeenAt'] is int) ? mm['lastSeenAt'] as int : int.tryParse((mm['lastSeenAt'] ?? '').toString()) ?? 0;
+      if (lastSeen > 0 && lastSeen < cutoff) {
+        updates['presenceSessions/$uid/$key'] = null;
+      }
+    }
+
+    if (updates.isNotEmpty) {
+      await rtdb().ref().update(updates);
     }
   }
 
@@ -1751,9 +1806,31 @@ class _DashboardPageState extends State<DashboardPage> {
           'online': false,
           'lastChangedAt': ServerValue.timestamp,
         });
+        final sessionRef = _presenceSessionRef(current.uid);
+        sessionRef?.remove();
       } else {
         _initPresence();
+        _updatePresenceNow(current.uid);
       }
+    });
+  }
+
+  void _updatePresenceNow(String uid) {
+    if (!_presenceEnabled) return;
+    final presenceRef = rtdb().ref('presence/$uid');
+    _ensurePresenceSessionId();
+    final sessionRef = _presenceSessionRef(uid);
+    final online = _presenceStatus != 'hidden';
+    presenceRef.update({
+      'enabled': true,
+      'status': _presenceStatus,
+      'online': online,
+      'lastChangedAt': ServerValue.timestamp,
+    });
+    sessionRef?.update({
+      'online': online,
+      'status': _presenceStatus,
+      'lastSeenAt': ServerValue.timestamp,
     });
   }
 
@@ -1766,12 +1843,16 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final connectedRef = rtdb().ref('.info/connected');
     final presenceRef = rtdb().ref('presence/${current.uid}');
+    _ensurePresenceSessionId();
+    final sessionRef = _presenceSessionRef(current.uid);
 
     _connectedSub = connectedRef.onValue.listen((event) async {
       final connected = event.snapshot.value == true;
       if (!connected) return;
 
       final online = _presenceStatus != 'hidden';
+
+      await _cleanupStalePresenceSessions(current.uid);
 
       await presenceRef.onDisconnect().set({
         'enabled': true,
@@ -1785,6 +1866,16 @@ class _DashboardPageState extends State<DashboardPage> {
         'online': online,
         'lastChangedAt': ServerValue.timestamp,
       });
+
+      if (sessionRef != null) {
+        await sessionRef.onDisconnect().remove();
+        await sessionRef.set({
+          'online': online,
+          'status': _presenceStatus,
+          'platform': Platform.operatingSystem,
+          'lastSeenAt': ServerValue.timestamp,
+        });
+      }
     });
   }
 
@@ -1969,6 +2060,14 @@ class UserSettings {
     required this.vibrationEnabled,
     required this.soundsEnabled,
     required this.notificationsEnabled,
+    required this.dataAllowWifi,
+    required this.dataAllowMobile,
+    required this.dataAllowRoaming,
+    required this.dataSaverEnabled,
+    required this.savePrivatePhotos,
+    required this.savePrivateVideos,
+    required this.saveGroupPhotos,
+    required this.saveGroupVideos,
     required this.language,
   });
 
@@ -1986,6 +2085,14 @@ class UserSettings {
   final bool vibrationEnabled;
   final bool soundsEnabled;
   final bool notificationsEnabled;
+  final bool dataAllowWifi;
+  final bool dataAllowMobile;
+  final bool dataAllowRoaming;
+  final bool dataSaverEnabled;
+  final bool savePrivatePhotos;
+  final bool savePrivateVideos;
+  final bool saveGroupPhotos;
+  final bool saveGroupVideos;
   final String language;
 
   static UserSettings fromSnapshot(Object? value) {
@@ -2033,6 +2140,14 @@ class UserSettings {
       vibrationEnabled: readBool('vibrationEnabled', true),
       soundsEnabled: readBool('soundsEnabled', true),
       notificationsEnabled: readBool('notificationsEnabled', true),
+      dataAllowWifi: readBool('dataAllowWifi', true),
+      dataAllowMobile: readBool('dataAllowMobile', true),
+      dataAllowRoaming: readBool('dataAllowRoaming', false),
+      dataSaverEnabled: readBool('dataSaverEnabled', false),
+      savePrivatePhotos: readBool('savePrivatePhotos', false),
+      savePrivateVideos: readBool('savePrivateVideos', false),
+      saveGroupPhotos: readBool('saveGroupPhotos', false),
+      saveGroupVideos: readBool('saveGroupVideos', false),
       language: readString('language', 'cs'),
     );
   }
@@ -2616,32 +2731,30 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                 onChanged: (_) => _debouncer.run(() => _updateSetting(u.uid, {'wallpaperUrl': _wallpaper.text.trim()})),
               ),
               const SizedBox(height: 8),
-              Row(
+              Column(
                 children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: settings.bubbleIncoming,
-                      decoration: const InputDecoration(labelText: 'Příchozí bublina'),
-                      items: const [
-                        DropdownMenuItem(value: 'surface', child: Text('Surface')),
-                        DropdownMenuItem(value: 'surfaceVariant', child: Text('Surface Variant')),
-                        DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
-                      ],
-                      onChanged: (v) => _updateSetting(u.uid, {'bubbleIncoming': v ?? 'surface'}),
-                    ),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: settings.bubbleIncoming,
+                    decoration: const InputDecoration(labelText: 'Příchozí bublina'),
+                    items: const [
+                      DropdownMenuItem(value: 'surface', child: Text('Surface')),
+                      DropdownMenuItem(value: 'surfaceVariant', child: Text('Surface Variant')),
+                      DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
+                    ],
+                    onChanged: (v) => _updateSetting(u.uid, {'bubbleIncoming': v ?? 'surface'}),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: settings.bubbleOutgoing,
-                      decoration: const InputDecoration(labelText: 'Odchozí bublina'),
-                      items: const [
-                        DropdownMenuItem(value: 'secondaryContainer', child: Text('Secondary Container')),
-                        DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
-                        DropdownMenuItem(value: 'surface', child: Text('Surface')),
-                      ],
-                      onChanged: (v) => _updateSetting(u.uid, {'bubbleOutgoing': v ?? 'secondaryContainer'}),
-                    ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: settings.bubbleOutgoing,
+                    decoration: const InputDecoration(labelText: 'Odchozí bublina'),
+                    items: const [
+                      DropdownMenuItem(value: 'secondaryContainer', child: Text('Secondary Container')),
+                      DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
+                      DropdownMenuItem(value: 'surface', child: Text('Surface')),
+                    ],
+                    onChanged: (v) => _updateSetting(u.uid, {'bubbleOutgoing': v ?? 'secondaryContainer'}),
                   ),
                 ],
               ),
@@ -2657,7 +2770,8 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
               SwitchListTile(
                 value: settings.stickersEnabled,
                 onChanged: (v) => _updateSetting(u.uid, {'stickersEnabled': v}),
-                title: const Text('Stickers'),
+                title: const Text('Samolepky'),
+                subtitle: const Text('Obrázkové nálepky / GIF v chatu'),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
@@ -2728,7 +2842,7 @@ class _SettingsPrivacyPage extends StatelessWidget {
                 decoration: const InputDecoration(labelText: 'Status'),
                 items: const [
                   DropdownMenuItem(value: 'online', child: Text('Online')),
-                  DropdownMenuItem(value: 'dnd', child: Text('DND')),
+                  DropdownMenuItem(value: 'dnd', child: Text('Nerušit')),
                   DropdownMenuItem(value: 'hidden', child: Text('Hidden')),
                 ],
                 onChanged: (v) => _update(u.uid, {'presenceStatus': v ?? 'online'}),
@@ -2737,7 +2851,7 @@ class _SettingsPrivacyPage extends StatelessWidget {
               SwitchListTile(
                 value: s.giftsVisible,
                 onChanged: (v) => _update(u.uid, {'giftsVisible': v}),
-                title: const Text('Dárky viditelné'),
+                title: const Text('Achievementy viditelné'),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
@@ -2814,19 +2928,541 @@ class _SettingsNotificationsPage extends StatelessWidget {
   }
 }
 
-class _SettingsDataPage extends StatelessWidget {
+class _SettingsDataPage extends StatefulWidget {
   const _SettingsDataPage();
 
   @override
+  State<_SettingsDataPage> createState() => _SettingsDataPageState();
+}
+
+class _SettingsDataPageState extends State<_SettingsDataPage> {
+  Future<_StorageUsage>? _storageFuture;
+
+  static const _categoryLabels = {
+    'api': 'API',
+    'media': 'Media',
+    'avatars': 'Avatary',
+    'other': 'Ostatní',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshStorage();
+  }
+
+  void _refreshStorage() {
+    _storageFuture = _loadStorageUsage();
+  }
+
+  Future<void> _updateSetting(String uid, Map<String, Object?> patch) async {
+    await rtdb().ref('settings/$uid').update({
+      ...patch,
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
+  Future<_StorageUsage> _loadStorageUsage() async {
+    final support = await getApplicationSupportDirectory();
+    final docs = await getApplicationDocumentsDirectory();
+    final temp = await getTemporaryDirectory();
+
+    final supportStats = await _dirStats(support);
+    final docsStats = await _dirStats(docs);
+    final cacheSize = await _dirSize(temp);
+
+    final appDataBytes = supportStats.totalBytes + docsStats.totalBytes;
+    final mediaBytes = supportStats.mediaBytes + docsStats.mediaBytes;
+    final otherBytes = (appDataBytes - mediaBytes).clamp(0, appDataBytes);
+
+    return _StorageUsage(
+      appDataBytes: appDataBytes,
+      mediaBytes: mediaBytes,
+      otherBytes: otherBytes,
+      cacheBytes: cacheSize,
+    );
+  }
+
+  static const _mediaExt = [
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.gif',
+    '.heic',
+    '.mp4',
+    '.mov',
+    '.m4v',
+    '.webm',
+  ];
+
+  Future<_DirStats> _dirStats(Directory dir) async {
+    var total = 0;
+    var media = 0;
+    if (!await dir.exists()) return const _DirStats(totalBytes: 0, mediaBytes: 0);
+    try {
+      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+        if (entity is File) {
+          try {
+            final size = await entity.length();
+            total += size;
+            final path = entity.path.toLowerCase();
+            if (_mediaExt.any(path.endsWith)) {
+              media += size;
+            }
+          } catch (_) {
+            // ignore
+          }
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+    return _DirStats(totalBytes: total, mediaBytes: media);
+  }
+
+  Future<int> _dirSize(Directory dir) async {
+    var total = 0;
+    if (!await dir.exists()) return 0;
+    try {
+      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+        if (entity is File) {
+          try {
+            total += await entity.length();
+          } catch (_) {
+            // ignore
+          }
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+    return total;
+  }
+
+  String _formatBytes(int bytes) {
+    const k = 1024;
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var b = bytes.toDouble();
+    var i = 0;
+    while (b >= k && i < units.length - 1) {
+      b /= k;
+      i++;
+    }
+    final value = (i == 0) ? b.toStringAsFixed(0) : b.toStringAsFixed(2);
+    return '$value ${units[i]}';
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Data a paměť')),
-      body: const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('Zatím tu nejsou další volby. (Nechám připravené pro další funkce.)'),
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+    final settingsRef = rtdb().ref('settings/${u.uid}');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: settingsRef.onValue,
+      builder: (context, snap) {
+        final settings = UserSettings.fromSnapshot(snap.data?.snapshot.value);
+
+        return Scaffold(
+          appBar: AppBar(title: const Text('Data a paměť')),
+          body: StreamBuilder<DataUsageSnapshot>(
+            stream: DataUsageTracker.stream,
+            initialData: DataUsageTracker.snapshot,
+            builder: (context, usageSnap) {
+              final usage = usageSnap.data ?? DataUsageTracker.snapshot;
+              final totalRx = usage.totalRx();
+              final totalTx = usage.totalTx();
+              final total = totalRx + totalTx;
+
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  const Text('Internet usage', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  _UsageSummaryCard(
+                    title: 'Celkem',
+                    total: _formatBytes(total),
+                    rx: _formatBytes(totalRx),
+                    tx: _formatBytes(totalTx),
+                  ),
+                  const SizedBox(height: 12),
+                  _NetworkUsageCard(
+                    title: 'Mobilní data',
+                    netKey: 'mobile',
+                    usage: usage,
+                    formatBytes: _formatBytes,
+                  ),
+                  _NetworkUsageCard(
+                    title: 'Wi‑Fi',
+                    netKey: 'wifi',
+                    usage: usage,
+                    formatBytes: _formatBytes,
+                  ),
+                  _NetworkUsageCard(
+                    title: 'Roaming',
+                    netKey: 'roaming',
+                    usage: usage,
+                    formatBytes: _formatBytes,
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () => DataUsageTracker.reset(),
+                    child: const Text('Reset usage'),
+                  ),
+                  const SizedBox(height: 24),
+
+                  const Text('Stahování médií', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    value: settings.dataAllowMobile,
+                    onChanged: (v) => _updateSetting(u.uid, {'dataAllowMobile': v}),
+                    title: const Text('Mobilní data'),
+                    subtitle: const Text('Stahovat media přes mobilní internet'),
+                  ),
+                  SwitchListTile(
+                    value: settings.dataAllowWifi,
+                    onChanged: (v) => _updateSetting(u.uid, {'dataAllowWifi': v}),
+                    title: const Text('Wi‑Fi'),
+                    subtitle: const Text('Stahovat media přes Wi‑Fi'),
+                  ),
+                  SwitchListTile(
+                    value: settings.dataAllowRoaming,
+                    onChanged: (v) => _updateSetting(u.uid, {'dataAllowRoaming': v}),
+                    title: const Text('Roaming'),
+                    subtitle: const Text('Stahovat media v roamingu'),
+                  ),
+                  SwitchListTile(
+                    value: settings.dataSaverEnabled,
+                    onChanged: (v) => _updateSetting(u.uid, {'dataSaverEnabled': v}),
+                    title: const Text('Ekonomie dat'),
+                    subtitle: const Text('Omezuje stahování médií na mobilních datech'),
+                  ),
+                  const SizedBox(height: 24),
+
+                  const Text('Ukládání do galerie', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    value: settings.savePrivatePhotos,
+                    onChanged: (v) => _updateSetting(u.uid, {'savePrivatePhotos': v}),
+                    title: const Text('Privátní chaty – fotky'),
+                  ),
+                  SwitchListTile(
+                    value: settings.savePrivateVideos,
+                    onChanged: (v) => _updateSetting(u.uid, {'savePrivateVideos': v}),
+                    title: const Text('Privátní chaty – videa'),
+                  ),
+                  SwitchListTile(
+                    value: settings.saveGroupPhotos,
+                    onChanged: (v) => _updateSetting(u.uid, {'saveGroupPhotos': v}),
+                    title: const Text('Skupiny – fotky'),
+                  ),
+                  SwitchListTile(
+                    value: settings.saveGroupVideos,
+                    onChanged: (v) => _updateSetting(u.uid, {'saveGroupVideos': v}),
+                    title: const Text('Skupiny – videa'),
+                  ),
+                  const SizedBox(height: 24),
+
+                  const Text('Usage paměti', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  FutureBuilder<_StorageUsage>(
+                    future: _storageFuture,
+                    builder: (context, storageSnap) {
+                      final s = storageSnap.data;
+                      final appData = s?.appDataBytes ?? 0;
+                      final media = s?.mediaBytes ?? 0;
+                      final other = s?.otherBytes ?? 0;
+                      final cache = s?.cacheBytes ?? 0;
+                      final totalStorage = appData + cache;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _UsageSummaryCard(
+                            title: 'Celkem',
+                            total: _formatBytes(totalStorage),
+                            rx: _formatBytes(appData),
+                            tx: _formatBytes(cache),
+                            rxLabel: 'App data',
+                            txLabel: 'Cache',
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: UsagePie(
+                                  size: 120,
+                                  data: {
+                                    'Fotky/video/GIF': media,
+                                    'Ostatní data': other,
+                                    'Cache': cache,
+                                  },
+                                  colors: [
+                                    Theme.of(context).colorScheme.primary,
+                                    Theme.of(context).colorScheme.secondary,
+                                    Theme.of(context).colorScheme.tertiary,
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Fotky/video/GIF: ${_formatBytes(media)}'),
+                                    Text('Ostatní data: ${_formatBytes(other)}'),
+                                    Text('Cache: ${_formatBytes(cache)}'),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              OutlinedButton(
+                                onPressed: () => setState(_refreshStorage),
+                                child: const Text('Přepočítat'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _UsageSummaryCard extends StatelessWidget {
+  const _UsageSummaryCard({
+    required this.title,
+    required this.total,
+    required this.rx,
+    required this.tx,
+    this.rxLabel = 'Přijato',
+    this.txLabel = 'Odesláno',
+  });
+
+  final String title;
+  final String total;
+  final String rx;
+  final String tx;
+  final String rxLabel;
+  final String txLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('Celkem: $total'),
+            Text('$rxLabel: $rx'),
+            Text('$txLabel: $tx'),
+          ],
+        ),
       ),
     );
   }
+}
+
+class _NetworkUsageCard extends StatelessWidget {
+  const _NetworkUsageCard({
+    required this.title,
+    required this.netKey,
+    required this.usage,
+    required this.formatBytes,
+  });
+
+  final String title;
+  final String netKey;
+  final DataUsageSnapshot usage;
+  final String Function(int bytes) formatBytes;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalRx = usage.networkRx(netKey);
+    final totalTx = usage.networkTx(netKey);
+    final total = totalRx + totalTx;
+    final categories = DataUsageTracker.categories;
+    final totals = usage.categoryTotalsForNetwork(netKey, categories);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('Celkem: ${formatBytes(total)}'),
+            Text('Přijato: ${formatBytes(totalRx)}'),
+            Text('Odesláno: ${formatBytes(totalTx)}'),
+            const SizedBox(height: 8),
+            if (total > 0)
+              Row(
+                children: [
+                  UsagePie(
+                    size: 120,
+                    data: {
+                      for (final c in categories) _SettingsDataPageState._categoryLabels[c] ?? c: totals[c] ?? 0,
+                    },
+                    colors: [
+                      Theme.of(context).colorScheme.primary,
+                      Theme.of(context).colorScheme.secondary,
+                      Theme.of(context).colorScheme.tertiary,
+                      Theme.of(context).colorScheme.error,
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final c in categories)
+                          if ((totals[c] ?? 0) > 0)
+                            Text('${_SettingsDataPageState._categoryLabels[c] ?? c}: ${formatBytes(totals[c] ?? 0)}'),
+                        if (totals.values.every((v) => v == 0))
+                          const Text('Zatím žádná data.'),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            else
+              const Text('Zatím žádná data.'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class UsagePie extends StatelessWidget {
+  const UsagePie({
+    required this.size,
+    required this.data,
+    required this.colors,
+  });
+
+  final double size;
+  final Map<String, int> data;
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _UsagePiePainter(
+          data: data,
+          colors: colors,
+          background: Theme.of(context).colorScheme.surfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _UsagePiePainter extends CustomPainter {
+  _UsagePiePainter({
+    required this.data,
+    required this.colors,
+    required this.background,
+  });
+
+  final Map<String, int> data;
+  final List<Color> colors;
+  final Color background;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = data.values.fold<int>(0, (a, b) => a + b);
+    final rect = Offset.zero & size;
+    final center = rect.center;
+    final radius = size.shortestSide / 2;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = radius * 0.4;
+
+    if (total <= 0) {
+      paint.color = background;
+      canvas.drawCircle(center, radius * 0.6, paint);
+      return;
+    }
+
+    var start = -1.5708;
+    var colorIndex = 0;
+    for (final value in data.values) {
+      if (value <= 0) {
+        colorIndex++;
+        continue;
+      }
+      final sweep = (value / total) * 6.283185307179586;
+      paint.color = colors[colorIndex % colors.length];
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius * 0.6),
+        start,
+        sweep,
+        false,
+        paint,
+      );
+      start += sweep;
+      colorIndex++;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _UsagePiePainter oldDelegate) {
+    return oldDelegate.data != data || oldDelegate.colors != colors || oldDelegate.background != background;
+  }
+}
+
+class _StorageUsage {
+  const _StorageUsage({
+    required this.appDataBytes,
+    required this.mediaBytes,
+    required this.otherBytes,
+    required this.cacheBytes,
+  });
+
+  final int appDataBytes;
+  final int mediaBytes;
+  final int otherBytes;
+  final int cacheBytes;
+}
+
+class _DirStats {
+  const _DirStats({required this.totalBytes, required this.mediaBytes});
+
+  final int totalBytes;
+  final int mediaBytes;
+}
+
+class _GitmitStats {
+  const _GitmitStats({
+    required this.privateChats,
+    required this.groups,
+    required this.messagesSent,
+  });
+
+  final int privateChats;
+  final int groups;
+  final int messagesSent;
 }
 
 class _SettingsDevicesPage extends StatelessWidget {
@@ -2941,50 +3577,78 @@ class _ChatPreview extends StatelessWidget {
     }
   }
 
+  Color? _backgroundColor(BuildContext context, String key) {
+    final k = key.trim();
+    if (k.isEmpty) return null;
+    switch (k) {
+      case 'graphite':
+        return const Color(0xFF1B1F1D);
+      case 'teal':
+        return const Color(0xFF1A2B2C);
+      case 'pine':
+        return const Color(0xFF1C2A24);
+      case 'sand':
+        return const Color(0xFF2B241C);
+      case 'slate':
+        return const Color(0xFF20242C);
+      default:
+        return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bg = settings.wallpaperUrl.trim();
-    final decoration = (bg.isEmpty)
-        ? null
-        : BoxDecoration(
-            image: DecorationImage(
-              image: NetworkImage(bg),
-              fit: BoxFit.cover,
-              opacity: 0.35,
-            ),
-          );
+    final bgColor = _backgroundColor(context, settings.wallpaperUrl);
+    final decoration = BoxDecoration(
+      color: bgColor ?? Theme.of(context).colorScheme.surfaceVariant,
+      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      borderRadius: BorderRadius.circular(14),
+    );
 
     final inColor = _bubbleColor(context, settings.bubbleIncoming, outgoing: false);
     final outColor = _bubbleColor(context, settings.bubbleOutgoing, outgoing: true);
     final inText = _bubbleTextColor(context, settings.bubbleIncoming);
     final outText = _bubbleTextColor(context, settings.bubbleOutgoing);
 
-    Widget bubble({required bool outgoing, required String text}) {
+    Widget bubble({required bool outgoing, required String text, required double maxWidth}) {
       final color = outgoing ? outColor : inColor;
       final tcolor = outgoing ? outText : inText;
       return Align(
         alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(settings.bubbleRadius),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(settings.bubbleRadius),
+            ),
+            child: Text(
+              text,
+              softWrap: true,
+              style: TextStyle(fontSize: settings.chatTextSize, color: tcolor),
+            ),
           ),
-          child: Text(text, style: TextStyle(fontSize: settings.chatTextSize, color: tcolor)),
         ),
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: decoration,
-      child: Column(
-        children: [
-          bubble(outgoing: false, text: 'Ahoj! Tohle je preview.'),
-          bubble(outgoing: true, text: 'Super, vidím změny hned.'),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxBubbleWidth = constraints.maxWidth * 0.78;
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: decoration,
+          child: Column(
+            children: [
+              bubble(outgoing: false, text: 'Ahoj! Tohle je preview.', maxWidth: maxBubbleWidth),
+              bubble(outgoing: true, text: 'Super, vidím změny hned.', maxWidth: maxBubbleWidth),
+              bubble(outgoing: false, text: 'Bubliny jsou teď přehlednější.', maxWidth: maxBubbleWidth),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -3087,6 +3751,8 @@ bool _isModeratorFromUserMap(Map? userMap) {
 Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
   if (username == null || username.isEmpty) return null;
 
+  final allowMedia = await DataUsageTracker.canDownloadMedia();
+
   String? extractFirstSvg(String html) {
     final re = RegExp(r'(<svg[^>]*>[\s\S]*?<\/svg>)', caseSensitive: false);
     final m = re.firstMatch(html);
@@ -3105,9 +3771,10 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
   try {
     // Avatar
     String? avatarUrl;
-    final userRes = await http.get(
+    final userRes = await DataUsageTracker.trackedGet(
       Uri.https('api.github.com', '/users/$username'),
       headers: githubApiHeaders(),
+      category: 'api',
     );
     if (userRes.statusCode == 200) {
       final decoded = jsonDecode(userRes.body);
@@ -3120,29 +3787,33 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
     // Aktivita SVG (contributions calendar)
     // Prefer GitHub official public endpoint to avoid relying on third-party services.
     String? svg;
-    final ghSvgRes = await http.get(
-      Uri.parse('https://github.com/users/$username/contributions'),
-      headers: const {
-        'Accept': 'image/svg+xml,text/html;q=0.9,*/*;q=0.8',
-        'User-Agent': 'gitmit',
-      },
-    );
-    if (ghSvgRes.statusCode == 200) {
-      final body = ghSvgRes.body.trim();
-      if (body.startsWith('<svg')) {
-        svg = sanitizeContributionsSvg(body);
-      } else {
-        final extracted = extractFirstSvg(body);
-        if (extracted != null && extracted.isNotEmpty) {
-          svg = sanitizeContributionsSvg(extracted);
+    if (allowMedia) {
+      final ghSvgRes = await DataUsageTracker.trackedGet(
+        Uri.parse('https://github.com/users/$username/contributions'),
+        headers: const {
+          'Accept': 'image/svg+xml,text/html;q=0.9,*/*;q=0.8',
+          'User-Agent': 'gitmit',
+        },
+        category: 'media',
+      );
+      if (ghSvgRes.statusCode == 200) {
+        final body = ghSvgRes.body.trim();
+        if (body.startsWith('<svg')) {
+          svg = sanitizeContributionsSvg(body);
+        } else {
+          final extracted = extractFirstSvg(body);
+          if (extracted != null && extracted.isNotEmpty) {
+            svg = sanitizeContributionsSvg(extracted);
+          }
         }
       }
     }
 
     // Fallback: legacy third-party API if GitHub endpoint changes or is blocked.
-    if (svg == null || svg.isEmpty) {
-      final svgRes = await http.get(
+    if (allowMedia && (svg == null || svg.isEmpty)) {
+      final svgRes = await DataUsageTracker.trackedGet(
         Uri.parse('https://github-contributions-api.jogruber.de/v4/$username?format=svg'),
+        category: 'media',
       );
       if (svgRes.statusCode == 200 && svgRes.body.trim().startsWith('<svg')) {
         svg = sanitizeContributionsSvg(svgRes.body);
@@ -3150,12 +3821,13 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
     }
 
     // Top repozitáře (podle hvězdiček)
-    final repoRes = await http.get(
+    final repoRes = await DataUsageTracker.trackedGet(
       Uri.https('api.github.com', '/users/$username/repos', {
         'sort': 'stars',
         'per_page': '5',
       }),
       headers: githubApiHeaders(),
+      category: 'api',
     );
 
     List<Map<String, dynamic>> topRepos = [];
@@ -3234,10 +3906,72 @@ class _ProfileTabState extends State<_ProfileTab> {
   Future<Map<String, dynamic>?>? _ghFuture;
   String? _ghUsername;
 
+  Future<_GitmitStats?>? _gitmitStatsFuture;
+  String? _statsUid;
+
   @override
   void dispose() {
     _verifiedReason.dispose();
     super.dispose();
+  }
+
+  List<String> _parseBadges(Object? raw) {
+    if (raw is List) {
+      return raw.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList(growable: false);
+    }
+    if (raw is Map) {
+      return raw.entries
+          .where((e) => e.value == true || e.value == 1)
+          .map((e) => e.key.toString())
+          .where((e) => e.trim().isNotEmpty)
+          .toList(growable: false);
+    }
+    return const [];
+  }
+
+  Future<_GitmitStats?> _loadGitmitStats(String uid) async {
+    try {
+      final savedSnap = await rtdb().ref('savedChats/$uid').get();
+      final savedVal = savedSnap.value;
+      final savedMap = (savedVal is Map) ? Map<String, dynamic>.from(savedVal) : <String, dynamic>{};
+      final privateChats = savedMap.length;
+
+      final groupsSnap = await rtdb().ref('groupMembers').get();
+      final groupsVal = groupsSnap.value;
+      var groups = 0;
+      if (groupsVal is Map) {
+        for (final entry in groupsVal.entries) {
+          final members = entry.value;
+          if (members is Map) {
+            final mm = Map<String, dynamic>.from(members);
+            final v = mm[uid];
+            if (v is Map || v == true) {
+              groups++;
+            }
+          }
+        }
+      }
+
+      final msgsSnap = await rtdb().ref('messages/$uid').get();
+      final msgsVal = msgsSnap.value;
+      var sent = 0;
+      if (msgsVal is Map) {
+        for (final entry in msgsVal.entries) {
+          final thread = entry.value;
+          if (thread is! Map) continue;
+          for (final msgEntry in thread.entries) {
+            final msg = msgEntry.value;
+            if (msg is! Map) continue;
+            final fromUid = (msg['fromUid'] ?? '').toString();
+            if (fromUid == uid) sent++;
+          }
+        }
+      }
+
+      return _GitmitStats(privateChats: privateChats, groups: groups, messagesSent: sent);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -3245,6 +3979,11 @@ class _ProfileTabState extends State<_ProfileTab> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return const Center(child: Text('Nepřihlášen.'));
+    }
+
+    if (_statsUid != user.uid) {
+      _statsUid = user.uid;
+      _gitmitStatsFuture = _loadGitmitStats(user.uid);
     }
 
     final userRef = rtdb().ref('users/${user.uid}');
@@ -3259,6 +3998,8 @@ class _ProfileTabState extends State<_ProfileTab> {
         final githubUsername = map?['githubUsername']?.toString();
         final githubAvatar = map?['avatarUrl']?.toString();
         final verified = map?['verified'] == true;
+        final badgesRaw = map?['badges'];
+        final badges = _parseBadges(badgesRaw);
         final githubAt = (githubUsername != null && githubUsername.isNotEmpty) ? '@$githubUsername' : '@(není nastaveno)';
 
         if (githubUsername != _ghUsername) {
@@ -3438,22 +4179,40 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
 
                   const SizedBox(height: 24),
-                  const Text('Dárky', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                  const Text('Achievementy na GitMitu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  Container(
-                    height: 60,
-                    color: Colors.black12,
-                    alignment: Alignment.center,
-                    child: const Text('Dárky (brzy)'),
-                  ),
+                  if (badges.isEmpty)
+                    const Text('Zatím žádné achievementy.')
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: badges
+                          .map((b) => Chip(
+                                label: Text(b),
+                                avatar: const Icon(Icons.emoji_events_outlined, size: 18),
+                              ))
+                          .toList(growable: false),
+                    ),
                   const SizedBox(height: 24),
                   const Text('Aktivita v GitMitu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  Container(
-                    height: 60,
-                    color: Colors.black12,
-                    alignment: Alignment.center,
-                    child: const Text('Aktivita v GitMitu (brzy)'),
+                  FutureBuilder<_GitmitStats?>(
+                    future: _gitmitStatsFuture,
+                    builder: (context, statsSnap) {
+                      final stats = statsSnap.data;
+                      if (stats == null) {
+                        return const Text('Načítání aktivity...');
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Priváty: ${stats.privateChats}'),
+                          Text('Skupiny: ${stats.groups}'),
+                          Text('Odeslané zprávy celkem: ${stats.messagesSent}'),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 32),
                   Text('UID: ${user.uid}'),
@@ -6743,6 +7502,28 @@ class _ChatsTabState extends State<_ChatsTab> {
     final dmReqRef = _dmRequestRef(myUid: current.uid, fromLoginLower: loginLower);
 
     final bg = widget.settings.wallpaperUrl.trim();
+    Color? bgColor;
+    if (bg.isNotEmpty) {
+      switch (bg) {
+        case 'graphite':
+          bgColor = const Color(0xFF1B1F1D);
+          break;
+        case 'teal':
+          bgColor = const Color(0xFF1A2B2C);
+          break;
+        case 'pine':
+          bgColor = const Color(0xFF1C2A24);
+          break;
+        case 'sand':
+          bgColor = const Color(0xFF2B241C);
+          break;
+        case 'slate':
+          bgColor = const Color(0xFF20242C);
+          break;
+        default:
+          bgColor = null;
+      }
+    }
     return StreamBuilder<DatabaseEvent>(
       stream: currentUserRef.onValue,
       builder: (context, uSnap) {
@@ -6867,15 +7648,9 @@ class _ChatsTabState extends State<_ChatsTab> {
                         ),
                       Expanded(
                         child: Container(
-                          decoration: bg.isEmpty
-                              ? null
-                              : BoxDecoration(
-                                  image: DecorationImage(
-                                    image: NetworkImage(bg),
-                                    fit: BoxFit.cover,
-                                    opacity: 0.35,
-                                  ),
-                                ),
+                          decoration: BoxDecoration(
+                            color: bgColor ?? Theme.of(context).colorScheme.surface,
+                          ),
                           child: StreamBuilder<DatabaseEvent>(
                             stream: messagesRef.onValue,
                             builder: (context, snapshot) {

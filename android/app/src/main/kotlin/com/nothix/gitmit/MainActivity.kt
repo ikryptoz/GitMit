@@ -2,6 +2,8 @@ package com.nothix.gitmit
 
 import android.content.Intent
 import android.net.Uri
+import android.content.Context
+import android.telephony.TelephonyManager
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -9,6 +11,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 	private val channel = "gitmit/open_url"
+	private val networkChannel = "gitmit/network"
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
@@ -31,6 +34,21 @@ class MainActivity : FlutterActivity() {
 					intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 					startActivity(intent)
 					result.success(true)
+				} catch (_: Exception) {
+					result.success(false)
+				}
+			}
+
+		MethodChannel(flutterEngine.dartExecutor.binaryMessenger, networkChannel)
+			.setMethodCallHandler { call, result ->
+				if (call.method != "isRoaming") {
+					result.notImplemented()
+					return@setMethodCallHandler
+				}
+
+				try {
+					val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+					result.success(tm.isNetworkRoaming)
 				} catch (_: Exception) {
 					result.success(false)
 				}

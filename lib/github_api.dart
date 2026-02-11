@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'package:gitmit/data_usage.dart';
 
 /// Optional GitHub Personal Access Token (PAT).
 ///
@@ -45,9 +45,10 @@ Future<List<GithubUser>> searchGithubUsers(String query) async {
     'per_page': '20',
   });
 
-  final res = await http.get(
+  final res = await DataUsageTracker.trackedGet(
     uri,
     headers: githubApiHeaders(),
+    category: 'api',
   );
 
   if (res.statusCode != 200) {
