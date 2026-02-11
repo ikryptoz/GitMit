@@ -2,6 +2,26 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+/// Optional GitHub Personal Access Token (PAT).
+///
+/// Provide it at build/run time via:
+/// `--dart-define=GITHUB_TOKEN=...`
+const String githubToken = String.fromEnvironment('GITHUB_TOKEN');
+
+Map<String, String> githubApiHeaders({String accept = 'application/vnd.github+json'}) {
+  final headers = <String, String>{
+    'Accept': accept,
+    'User-Agent': 'gitmit',
+  };
+
+  final token = githubToken.trim();
+  if (token.isNotEmpty) {
+    // GitHub v3 REST accepts "token <PAT>".
+    headers['Authorization'] = 'token $token';
+  }
+  return headers;
+}
+
 class GithubUser {
   final String login;
   final String avatarUrl;
@@ -27,10 +47,7 @@ Future<List<GithubUser>> searchGithubUsers(String query) async {
 
   final res = await http.get(
     uri,
-    headers: const {
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'gitmit',
-    },
+    headers: githubApiHeaders(),
   );
 
   if (res.statusCode != 200) {

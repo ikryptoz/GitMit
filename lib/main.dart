@@ -7,6 +7,7 @@ import 'package:gitmit/dashboard.dart';
 import 'package:gitmit/notifications_service.dart';
 import 'package:gitmit/deep_links.dart';
 import 'package:gitmit/rtdb.dart';
+import 'package:gitmit/github_api.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
@@ -183,10 +184,7 @@ class _LoginPageState extends State<LoginPage> {
       // Fetch avatar and verification from GitHub API
       if (githubUsername != null && githubUsername.isNotEmpty) {
         final uri = Uri.https('api.github.com', '/users/$githubUsername');
-        final res = await http.get(uri, headers: {
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'gitmit',
-        });
+        final res = await http.get(uri, headers: githubApiHeaders());
         if (res.statusCode == 200) {
           final data = Map<String, dynamic>.from(jsonDecode(res.body));
           avatarUrl = data['avatar_url']?.toString();

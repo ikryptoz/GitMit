@@ -2,6 +2,21 @@
 
 A new Flutter project.
 
+## GitHub API limit (PAT)
+
+GitHub REST API má bez autentizace limit cca 60 requestů/hod.
+S Personal Access Tokenem (PAT) se limit zvedne (typicky na 5 000 requestů/hod).
+
+V aplikaci se token bere z `--dart-define` proměnné `GITHUB_TOKEN` a pokud je nastavená,
+automaticky se přidá do hlavičky `Authorization: token ...`.
+
+Spuštění s tokenem:
+
+- `flutter run --dart-define=GITHUB_TOKEN=YOUR_TOKEN`
+- `flutter test --dart-define=GITHUB_TOKEN=YOUR_TOKEN`
+
+Poznámka: token nikdy nehardcoduj do repozitáře a nesdílej ho veřejně.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

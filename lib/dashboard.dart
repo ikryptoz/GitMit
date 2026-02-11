@@ -2824,10 +2824,7 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
     String? avatarUrl;
     final userRes = await http.get(
       Uri.https('api.github.com', '/users/$username'),
-      headers: const {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'gitmit',
-      },
+      headers: githubApiHeaders(),
     );
     if (userRes.statusCode == 200) {
       final decoded = jsonDecode(userRes.body);
@@ -2875,10 +2872,7 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
         'sort': 'stars',
         'per_page': '5',
       }),
-      headers: const {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'gitmit',
-      },
+      headers: githubApiHeaders(),
     );
 
     List<Map<String, dynamic>> topRepos = [];
@@ -4803,13 +4797,19 @@ class _ChatsTabState extends State<_ChatsTab> {
                                                   ListTile(
                                                     leading: const Icon(Icons.create_new_folder_outlined),
                                                     title: const Text('Vytvořit složku'),
-                                                    onTap: createFolder,
+                                                    onTap: () {
+                                                      _hapticSelect();
+                                                      createFolder();
+                                                    },
                                                   ),
                                                   ListTile(
                                                     leading: const Icon(Icons.inbox_outlined),
                                                     title: const Text('Priváty'),
                                                     subtitle: Text('Chaty: ${countChatsForFolder(null)}'),
-                                                    onTap: () => setState(() => _activeFolderId = '__privates__'),
+                                                    onTap: () {
+                                                      _hapticSelect();
+                                                      setState(() => _activeFolderId = '__privates__');
+                                                    },
                                                   ),
                                                   const Divider(height: 1),
                                                   if (folders.isEmpty)
@@ -4827,9 +4827,15 @@ class _ChatsTabState extends State<_ChatsTab> {
                                                         subtitle: Text('Chaty: ${countChatsForFolder(fid)} • Skupiny: ${countGroupsForFolder(fid)}'),
                                                         trailing: IconButton(
                                                           icon: const Icon(Icons.delete_outline),
-                                                          onPressed: () => deleteFolder(fid, folderName: name),
+                                                          onPressed: () {
+                                                            _hapticMedium();
+                                                            deleteFolder(fid, folderName: name);
+                                                          },
                                                         ),
-                                                        onTap: () => setState(() => _activeFolderId = fid),
+                                                        onTap: () {
+                                                          _hapticSelect();
+                                                          setState(() => _activeFolderId = fid);
+                                                        },
                                                       );
                                                     }),
                                                 ],
