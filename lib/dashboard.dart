@@ -279,6 +279,62 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                       ),
                       const SizedBox(height: 8),
                       if (!hasOtherUid) const Text('Účet není propojený v databázi.'),
+
+                      if (hasOtherUid)
+                        FutureBuilder<String?>(
+                          future: E2ee.fingerprintForUserSigningKey(uid: otherUid, bytes: 8),
+                          builder: (context, peerFpSnap) {
+                            return FutureBuilder<String>(
+                              future: E2ee.fingerprintForMySigningKey(bytes: 8),
+                              builder: (context, myFpSnap) {
+                                final peerFp = peerFpSnap.data;
+                                final myFp = myFpSnap.data;
+                                if ((peerFp == null || peerFp.isEmpty) && (myFp == null || myFp.isEmpty)) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 8, bottom: 8),
+                                  child: Card(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('E2EE Fingerprint (anti-MITM)', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          const SizedBox(height: 8),
+                                          if (peerFp != null && peerFp.isNotEmpty)
+                                            ListTile(
+                                              contentPadding: EdgeInsets.zero,
+                                              title: const Text('Fingerprint protějšku'),
+                                              subtitle: SelectableText(peerFp),
+                                              trailing: IconButton(
+                                                icon: const Icon(Icons.copy),
+                                                onPressed: () => Clipboard.setData(ClipboardData(text: peerFp)),
+                                              ),
+                                            )
+                                          else
+                                            const Text('Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).'),
+                                          if (myFp != null && myFp.isNotEmpty)
+                                            ListTile(
+                                              contentPadding: EdgeInsets.zero,
+                                              title: const Text('Můj fingerprint'),
+                                              subtitle: SelectableText(myFp),
+                                              trailing: IconButton(
+                                                icon: const Icon(Icons.copy),
+                                                onPressed: () => Clipboard.setData(ClipboardData(text: myFp)),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+
                       const Divider(height: 32),
                       const Text('Aktivita na GitHubu',
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
@@ -3585,6 +3641,11 @@ class _ChatsTabState extends State<_ChatsTab> {
   final Set<String> _migrating = {};
   final Map<String, SecretKey> _groupKeyCache = {};
 
+  // DM ephemeral messaging controls.
+  // 0=use settings, 1=never, 2=1m, 3=1h, 4=1d, 5=burn-after-read
+  int _dmTtlMode = 0;
+  final Set<String> _ttlDeleting = {};
+
   int _overviewMode = 0; // 0=priváty, 1=skupiny, 2=složky
   String? _activeFolderId; // when _overviewMode==2
 
@@ -3602,6 +3663,81 @@ class _ChatsTabState extends State<_ChatsTab> {
     if (v == null) return null;
     final s = v.toString().trim();
     return s.isEmpty ? null : s;
+  }
+
+  Future<void> _showPeerFingerprintDialog({
+    required String peerUid,
+    required String peerLogin,
+  }) async {
+    String? peerFp;
+    String myFp = '';
+    bool? changed;
+
+    try {
+      peerFp = await E2ee.fingerprintForUserSigningKey(uid: peerUid, bytes: 8);
+      if (peerFp != null && peerFp.isNotEmpty) {
+        changed = await E2ee.rememberPeerFingerprint(peerUid: peerUid, fingerprint: peerFp);
+      }
+    } catch (_) {}
+
+    try {
+      myFp = await E2ee.fingerprintForMySigningKey(bytes: 8);
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Otisky klíčů (anti‑MITM)'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Porovnejte fingerprint přes jiný kanál (např. osobně / Signal).'),
+            if (changed == true)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Pozor: fingerprint protějšku se změnil od minula. Může jít o reinstalaci, nebo MITM.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            const SizedBox(height: 12),
+            Text('Protějšek (@$peerLogin):', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            if (peerFp != null && peerFp.isNotEmpty)
+              Row(
+                children: [
+                  Expanded(child: SelectableText(peerFp)),
+                  IconButton(
+                    icon: const Icon(Icons.copy),
+                    onPressed: () => Clipboard.setData(ClipboardData(text: peerFp!)),
+                  ),
+                ],
+              )
+            else
+              const Text('Není dostupné (uživatel ještě nezveřejnil klíč).'),
+            const SizedBox(height: 12),
+            const Text('Můj klíč:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(child: SelectableText(myFp.isEmpty ? '—' : myFp)),
+                if (myFp.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.copy),
+                    onPressed: () => Clipboard.setData(ClipboardData(text: myFp)),
+                  ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Zavřít')),
+        ],
+      ),
+    );
   }
 
   DatabaseReference _dmContactRef({required String myUid, required String otherLoginLower}) {
@@ -3651,7 +3787,7 @@ class _ChatsTabState extends State<_ChatsTab> {
         'login': otherLogin,
         if (_activeAvatarUrl != null && _activeAvatarUrl!.isNotEmpty) 'avatarUrl': _activeAvatarUrl,
         'status': 'pending_out',
-        'lastMessageText': pt.isEmpty ? 'Žádost o chat' : '🔒',
+        'lastMessageText': '🔒',
         'lastMessageAt': ServerValue.timestamp,
         'savedAt': ServerValue.timestamp,
       },
@@ -3659,7 +3795,7 @@ class _ChatsTabState extends State<_ChatsTab> {
         'login': myLogin,
         if (myAvatar != null) 'avatarUrl': myAvatar,
         'status': 'pending_in',
-        'lastMessageText': pt.isEmpty ? 'Žádost o chat' : '🔒',
+        'lastMessageText': '🔒',
         'lastMessageAt': ServerValue.timestamp,
         'savedAt': ServerValue.timestamp,
       },
@@ -3704,7 +3840,7 @@ class _ChatsTabState extends State<_ChatsTab> {
         'login': fromLogin,
         if (fromAvatarUrl.isNotEmpty) 'avatarUrl': fromAvatarUrl,
         'status': 'accepted',
-        'lastMessageText': enc.isEmpty ? '' : '🔒',
+        'lastMessageText': '🔒',
         'lastMessageAt': ServerValue.timestamp,
         'savedAt': ServerValue.timestamp,
       },
@@ -3712,7 +3848,7 @@ class _ChatsTabState extends State<_ChatsTab> {
         'login': myLogin,
         if (myAvatar != null) 'avatarUrl': myAvatar,
         'status': 'accepted',
-        'lastMessageText': enc.isEmpty ? '' : '🔒',
+        'lastMessageText': '🔒',
         'lastMessageAt': ServerValue.timestamp,
         'savedAt': ServerValue.timestamp,
       },
@@ -4010,9 +4146,17 @@ class _ChatsTabState extends State<_ChatsTab> {
     }
 
     _messageController.clear();
-    final expiresAt = (widget.settings.autoDeleteSeconds > 0)
-        ? DateTime.now().millisecondsSinceEpoch + (widget.settings.autoDeleteSeconds * 1000)
-        : null;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final burnAfterRead = _dmTtlMode == 5;
+    final ttlSeconds = switch (_dmTtlMode) {
+      0 => widget.settings.autoDeleteSeconds,
+      1 => 0,
+      2 => 60,
+      3 => 60 * 60,
+      4 => 60 * 60 * 24,
+      _ => widget.settings.autoDeleteSeconds,
+    };
+    final expiresAt = (!burnAfterRead && ttlSeconds > 0) ? (nowMs + (ttlSeconds * 1000)) : null;
 
     final key = rtdb().ref().push().key;
     if (key == null || key.isEmpty) return;
@@ -4022,6 +4166,7 @@ class _ChatsTabState extends State<_ChatsTab> {
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
       if (expiresAt != null) 'expiresAt': expiresAt,
+      if (burnAfterRead) 'burnAfterRead': true,
     };
 
     final updates = <String, Object?>{};
@@ -4260,8 +4405,10 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   final meta = (metaMap != null && metaMap[login] is Map) ? (metaMap[login] as Map) : null;
                                   final avatarUrl = (meta?['avatarUrl'] ?? '').toString();
                                   final status = (meta?['status'] ?? 'accepted').toString();
-                                  if (lastText.trim().isEmpty) {
-                                    lastText = (meta?['lastMessageText'] ?? '').toString();
+                                  if (status.startsWith('pending')) {
+                                    lastText = 'Žádost o chat';
+                                  } else if (lastText.trim().isEmpty) {
+                                    lastText = '🔒';
                                   }
 
                                   handled.add(lower);
@@ -4290,7 +4437,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   if (!status.startsWith('pending')) continue;
                                   final avatarUrl = (meta['avatarUrl'] ?? '').toString();
                                   final lastAt = (meta['lastMessageAt'] is int) ? meta['lastMessageAt'] as int : 0;
-                                  final lastText = (meta['lastMessageText'] ?? '').toString();
+                                  const lastText = 'Žádost o chat';
                                   rows.add({
                                     'login': login,
                                     'avatarUrl': avatarUrl,
@@ -5496,6 +5643,18 @@ class _ChatsTabState extends State<_ChatsTab> {
                   final perms = (gm['permissions'] is Map) ? (gm['permissions'] as Map) : null;
                   final canSend = (perms?['sendMessages'] != false) || isAdmin;
 
+                  String ttlLabel(int v) {
+                    return switch (v) {
+                      0 => 'Podle nastavení',
+                      1 => 'Nikdy',
+                      2 => '1 minuta',
+                      3 => '1 hodina',
+                      4 => '1 den',
+                      5 => 'Po přečtení',
+                      _ => 'Podle nastavení',
+                    };
+                  }
+
                   Future<void> deleteMessage(String key) async {
                     await msgsRef.child(key).remove();
                   }
@@ -5528,6 +5687,18 @@ class _ChatsTabState extends State<_ChatsTab> {
                     final text = _messageController.text.trim();
                     if (text.isEmpty || !canSend) return;
                     _messageController.clear();
+
+                    final nowMs = DateTime.now().millisecondsSinceEpoch;
+                    final burnAfterRead = _dmTtlMode == 5;
+                    final ttlSeconds = switch (_dmTtlMode) {
+                      0 => widget.settings.autoDeleteSeconds,
+                      1 => 0,
+                      2 => 60,
+                      3 => 60 * 60,
+                      4 => 60 * 60 * 24,
+                      _ => widget.settings.autoDeleteSeconds,
+                    };
+                    final expiresAt = (!burnAfterRead && ttlSeconds > 0) ? (nowMs + (ttlSeconds * 1000)) : null;
 
                     try {
                       await E2ee.publishMyPublicKey(uid: current.uid);
@@ -5583,12 +5754,21 @@ class _ChatsTabState extends State<_ChatsTab> {
                       }
                     }
 
-                    await msgsRef.push().set({
+                    final newRef = msgsRef.push();
+                    final newKey = newRef.key;
+                    await newRef.set({
                       ...encrypted,
                       'fromUid': current.uid,
                       'fromGithub': myGithub,
                       'createdAt': ServerValue.timestamp,
+                      if (expiresAt != null) 'expiresAt': expiresAt,
+                      if (burnAfterRead) 'burnAfterRead': true,
                     });
+
+                    // Show our own message immediately (avoid "🔒 …" placeholder).
+                    if (newKey != null && newKey.isNotEmpty && mounted) {
+                      setState(() => _decryptedCache['g:$groupId:$newKey'] = text);
+                    }
                     if (widget.settings.vibrationEnabled) {
                       HapticFeedback.lightImpact();
                     }
@@ -5626,11 +5806,30 @@ class _ChatsTabState extends State<_ChatsTab> {
                             if (v is! Map) {
                               return const Center(child: Text('Zatím žádné zprávy.'));
                             }
+                            final now = DateTime.now().millisecondsSinceEpoch;
                             final items = <Map<String, dynamic>>[];
                             for (final e in v.entries) {
                               if (e.value is! Map) continue;
                               final m = Map<String, dynamic>.from(e.value as Map);
                               m['__key'] = e.key.toString();
+                              final expiresAt = (m['expiresAt'] is int) ? m['expiresAt'] as int : null;
+                              if (expiresAt != null && expiresAt <= now) {
+                                final k = (m['__key'] ?? '').toString();
+                                final delKey = 'g:$groupId:$k';
+                                if (k.isNotEmpty && !_ttlDeleting.contains(delKey)) {
+                                  _ttlDeleting.add(delKey);
+                                  () async {
+                                    try {
+                                      await msgsRef.child(k).remove();
+                                    } catch (_) {
+                                      // ignore
+                                    } finally {
+                                      _ttlDeleting.remove(delKey);
+                                    }
+                                  }();
+                                }
+                                continue;
+                              }
                               items.add(m);
                             }
                             items.sort((a, b) {
@@ -5682,6 +5881,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 final fromUid = (m['fromUid'] ?? '').toString();
                                 final fromGh = (m['fromGithub'] ?? '').toString();
                                 final isMe = fromUid == current.uid;
+                                final burnAfterRead = m['burnAfterRead'] == true;
 
                                 final hasCipher = m['ciphertext'] != null && (m['ciphertext']?.toString().isNotEmpty ?? false);
                                 final cacheKey = 'g:$groupId:$key';
@@ -5699,10 +5899,43 @@ class _ChatsTabState extends State<_ChatsTab> {
                                         final plain = await E2ee.decryptGroupMessage(groupId: groupId, myUid: current.uid, groupKey: gk, message: m);
                                         if (!mounted) return;
                                         setState(() => _decryptedCache[cacheKey] = plain);
+
+                                        if (burnAfterRead && !isMe) {
+                                          final delKey = 'g:$groupId:$key';
+                                          if (key.isNotEmpty && !_ttlDeleting.contains(delKey)) {
+                                            _ttlDeleting.add(delKey);
+                                            () async {
+                                              try {
+                                                await msgsRef.child(key).remove();
+                                              } catch (_) {
+                                                // ignore
+                                              } finally {
+                                                _ttlDeleting.remove(delKey);
+                                              }
+                                            }();
+                                          }
+                                        }
                                       } catch (_) {
                                         // keep placeholder
                                       } finally {
                                         _decrypting.remove(cacheKey);
+                                      }
+                                    }();
+                                  }
+                                }
+
+                                if (burnAfterRead && !isMe && text.isNotEmpty && !hasCipher) {
+                                  // Old plaintext message: treat first render as "read".
+                                  final delKey = 'g:$groupId:$key';
+                                  if (key.isNotEmpty && !_ttlDeleting.contains(delKey)) {
+                                    _ttlDeleting.add(delKey);
+                                    () async {
+                                      try {
+                                        await msgsRef.child(key).remove();
+                                      } catch (_) {
+                                        // ignore
+                                      } finally {
+                                        _ttlDeleting.remove(delKey);
                                       }
                                     }();
                                   }
@@ -5757,6 +5990,20 @@ class _ChatsTabState extends State<_ChatsTab> {
                               ),
                             ),
                             const SizedBox(width: 8),
+                            PopupMenuButton<int>(
+                              tooltip: 'Ničení zpráv',
+                              initialValue: _dmTtlMode,
+                              onSelected: (v) => setState(() => _dmTtlMode = v),
+                              itemBuilder: (context) => [
+                                PopupMenuItem(value: 0, child: Text('Ničení: ${ttlLabel(0)}')),
+                                PopupMenuItem(value: 1, child: Text('Ničení: ${ttlLabel(1)}')),
+                                PopupMenuItem(value: 2, child: Text('Ničení: ${ttlLabel(2)}')),
+                                PopupMenuItem(value: 3, child: Text('Ničení: ${ttlLabel(3)}')),
+                                PopupMenuItem(value: 4, child: Text('Ničení: ${ttlLabel(4)}')),
+                                PopupMenuItem(value: 5, child: Text('Ničení: ${ttlLabel(5)}')),
+                              ],
+                              icon: const Icon(Icons.timer_outlined),
+                            ),
                             IconButton(
                               icon: const Icon(Icons.send),
                               onPressed: canSend ? send : null,
@@ -5825,6 +6072,18 @@ class _ChatsTabState extends State<_ChatsTab> {
                 final lockedIncoming = hasIncomingReq && !accepted;
                 final lockedOutgoing = !accepted && !hasIncomingReq;
 
+                String ttlLabel(int v) {
+                  return switch (v) {
+                    0 => 'Podle nastavení',
+                    1 => 'Nikdy',
+                    2 => '1 minuta',
+                    3 => '1 hodina',
+                    4 => '1 den',
+                    5 => 'Po přečtení',
+                    _ => 'Podle nastavení',
+                  };
+                }
+
                 return Column(
                   children: [
             ListTile(
@@ -5833,10 +6092,24 @@ class _ChatsTabState extends State<_ChatsTab> {
                 onPressed: () => setState(() => _activeLogin = null),
               ),
               title: Text('@$login'),
-              trailing: _ChatLoginAvatar(
-                login: login,
-                avatarUrl: _activeAvatarUrl ?? '',
-                radius: 18,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Fingerprint klíčů',
+                    icon: const Icon(Icons.fingerprint),
+                    onPressed: () async {
+                      final peerUid = await _ensureActiveOtherUid();
+                      if (peerUid == null || peerUid.isEmpty) return;
+                      await _showPeerFingerprintDialog(peerUid: peerUid, peerLogin: login);
+                    },
+                  ),
+                  _ChatLoginAvatar(
+                    login: login,
+                    avatarUrl: _activeAvatarUrl ?? '',
+                    radius: 18,
+                  ),
+                ],
               ),
               onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
             ),
@@ -5904,7 +6177,32 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 final msg = Map<String, dynamic>.from(e.value as Map);
                                 msg['__key'] = e.key.toString();
                                 final expiresAt = (msg['expiresAt'] is int) ? msg['expiresAt'] as int : null;
-                                if (expiresAt != null && expiresAt <= now) continue;
+                                if (expiresAt != null && expiresAt <= now) {
+                                  final k = (msg['__key'] ?? '').toString();
+                                  if (k.isNotEmpty && !_ttlDeleting.contains(k)) {
+                                    _ttlDeleting.add(k);
+                                    () async {
+                                      try {
+                                        final peerUid = await _ensureActiveOtherUid();
+                                        final myLogin = myGithub.trim();
+                                        final updates = <String, Object?>{
+                                          'messages/${current.uid}/$login/$k': null,
+                                        };
+                                        if (peerUid != null && peerUid.isNotEmpty && myLogin.isNotEmpty) {
+                                          updates['messages/$peerUid/$myLogin/$k'] = null;
+                                        }
+                                        await rtdb().ref().update(updates);
+                                      } catch (_) {
+                                        try {
+                                          await messagesRef.child(k).remove();
+                                        } catch (_) {}
+                                      } finally {
+                                        _ttlDeleting.remove(k);
+                                      }
+                                    }();
+                                  }
+                                  continue;
+                                }
                                 items.add(msg);
                               }
 
@@ -5955,6 +6253,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   final plaintext = (m['text'] ?? '').toString();
                                   final fromUid = (m['fromUid'] ?? '').toString();
                                   final isMe = fromUid == current.uid;
+                                  final burnAfterRead = m['burnAfterRead'] == true;
 
                                   final hasCipher = m['ciphertext'] != null && (m['ciphertext']?.toString().isNotEmpty ?? false);
                                   String text = plaintext;
@@ -5969,6 +6268,31 @@ class _ChatsTabState extends State<_ChatsTab> {
                                           final plain = await E2ee.decryptFromUser(otherUid: otherUid, message: m);
                                           if (!mounted) return;
                                           setState(() => _decryptedCache[key] = plain);
+
+                                          if (burnAfterRead && !isMe) {
+                                            if (key.isNotEmpty && !_ttlDeleting.contains(key)) {
+                                              _ttlDeleting.add(key);
+                                              () async {
+                                                try {
+                                                  final peerUid = await _ensureActiveOtherUid();
+                                                  final myLogin = myGithub.trim();
+                                                  final updates = <String, Object?>{
+                                                    'messages/${current.uid}/$login/$key': null,
+                                                  };
+                                                  if (peerUid != null && peerUid.isNotEmpty && myLogin.isNotEmpty) {
+                                                    updates['messages/$peerUid/$myLogin/$key'] = null;
+                                                  }
+                                                  await rtdb().ref().update(updates);
+                                                } catch (_) {
+                                                  try {
+                                                    await messagesRef.child(key).remove();
+                                                  } catch (_) {}
+                                                } finally {
+                                                  _ttlDeleting.remove(key);
+                                                }
+                                              }();
+                                            }
+                                          }
                                         } catch (_) {
                                           // keep placeholder
                                         } finally {
@@ -6054,6 +6378,20 @@ class _ChatsTabState extends State<_ChatsTab> {
                               ),
                             ),
                             const SizedBox(width: 8),
+                            PopupMenuButton<int>(
+                              tooltip: 'Ničení zpráv',
+                              initialValue: _dmTtlMode,
+                              onSelected: (v) => setState(() => _dmTtlMode = v),
+                              itemBuilder: (context) => [
+                                PopupMenuItem(value: 0, child: Text('Ničení: ${ttlLabel(0)}')),
+                                PopupMenuItem(value: 1, child: Text('Ničení: ${ttlLabel(1)}')),
+                                PopupMenuItem(value: 2, child: Text('Ničení: ${ttlLabel(2)}')),
+                                PopupMenuItem(value: 3, child: Text('Ničení: ${ttlLabel(3)}')),
+                                PopupMenuItem(value: 4, child: Text('Ničení: ${ttlLabel(4)}')),
+                                PopupMenuItem(value: 5, child: Text('Ničení: ${ttlLabel(5)}')),
+                              ],
+                              icon: const Icon(Icons.timer_outlined),
+                            ),
                             IconButton(
                               icon: const Icon(Icons.send),
                               onPressed: (!blocked && canSend) ? _send : null,

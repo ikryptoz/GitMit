@@ -50,6 +50,7 @@ class E2ee {
   static final _aead = Chacha20.poly1305Aead();
   static final _ed25519 = Ed25519();
   static final _hmacSha256 = Hmac.sha256();
+  static final _sha256 = Sha256();
 
   static final Random _rng = Random.secure();
   static List<int> _randomBytes(int length) => List<int>.generate(length, (_) => _rng.nextInt(256), growable: false);
@@ -75,6 +76,49 @@ class E2ee {
 
   static String _b64(List<int> bytes) => base64UrlEncode(bytes);
   static List<int> _unb64(String s) => base64Url.decode(s);
+
+  static String _formatFingerprint(List<int> bytes) {
+    return bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+        .join(':');
+  }
+
+  static Future<String> fingerprintForPublicKey({
+    required SimplePublicKey publicKey,
+    int bytes = 8,
+  }) async {
+    final h = await _sha256.hash(publicKey.bytes);
+    final take = bytes.clamp(4, h.bytes.length);
+    return _formatFingerprint(h.bytes.sublist(0, take));
+  }
+
+  static Future<String> fingerprintForMySigningKey({int bytes = 8}) async {
+    final kp = await getOrCreateSigningKeyPair();
+    return fingerprintForPublicKey(publicKey: kp.publicKey, bytes: bytes);
+  }
+
+  static Future<String?> fingerprintForUserSigningKey({required String uid, int bytes = 8}) async {
+    final bundle = await fetchUserBundle(uid);
+    final pk = bundle.identityEd25519;
+    if (pk == null) return null;
+    return fingerprintForPublicKey(publicKey: pk, bytes: bytes);
+  }
+
+  static Future<bool?> rememberPeerFingerprint({
+    required String peerUid,
+    required String fingerprint,
+  }) async {
+    // Returns: true if changed, false if same/first-time, null if storage unavailable.
+    try {
+      final k = 'e2ee_peer_fp_v2_$peerUid';
+      final prev = await _storage.read(key: k);
+      final changed = prev != null && prev.isNotEmpty && prev != fingerprint;
+      await _storage.write(key: k, value: fingerprint);
+      return changed;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static Future<List<int>> _hmac(List<int> key, List<int> data) async {
     final mac = await _hmacSha256.calculateMac(data, secretKey: SecretKey(key));
