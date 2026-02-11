@@ -262,20 +262,47 @@ class _LoginPageState extends State<LoginPage> {
   // ...existing code...
 
   Future<void> _loginWithGitHub() async {
-    setState(() {
-      _loading = true;
-      _errorMessage = null;
-    });
+    if (_loading) return;
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _errorMessage = null;
+      });
+    }
     try {
       final provider = GithubAuthProvider()..addScope('read:user');
       final credential = await FirebaseAuth.instance.signInWithProvider(provider);
 
       final user = credential.user;
-      final githubUsername = credential.additionalUserInfo?.username;
+      String? githubUsername = credential.additionalUserInfo?.username;
       String? avatarUrl;
 
-      // Fetch avatar and verification from GitHub API
-      if (githubUsername != null && githubUsername.isNotEmpty) {
+      // Some platforms/providers occasionally return null additionalUserInfo.username.
+      // In that case, resolve it using the GitHub OAuth access token.
+      String? accessToken;
+      final authCred = credential.credential;
+      if (authCred is OAuthCredential) {
+        accessToken = authCred.accessToken;
+      }
+
+      if ((githubUsername == null || githubUsername.isEmpty) && accessToken != null && accessToken.isNotEmpty) {
+        final uri = Uri.https('api.github.com', '/user');
+        final res = await http.get(
+          uri,
+          headers: {
+            'Accept': 'application/vnd.github+json',
+            'Authorization': 'token $accessToken',
+          },
+        );
+        if (res.statusCode == 200) {
+          final data = Map<String, dynamic>.from(jsonDecode(res.body));
+          githubUsername = data['login']?.toString();
+          avatarUrl = data['avatar_url']?.toString();
+        }
+      }
+
+      // Fetch avatar if still missing (PAT fallback; might be rate-limited).
+      if ((avatarUrl == null || avatarUrl.isEmpty) && githubUsername != null && githubUsername.isNotEmpty) {
         final uri = Uri.https('api.github.com', '/users/$githubUsername');
         final res = await http.get(uri, headers: githubApiHeaders());
         if (res.statusCode == 200) {
@@ -305,15 +332,21 @@ class _LoginPageState extends State<LoginPage> {
         if (!modSnap.exists) {
           await rtdb().ref('users/${user.uid}').update({'isModerator': false});
         }
+      } else {
+        // Avoid leaving the app in a "half-logged-in" state where AuthGate waits forever.
+        await FirebaseAuth.instance.signOut();
+        if (mounted) {
+          setState(() => _errorMessage = 'Nepodařilo se zjistit GitHub username. Zkus to prosím znovu.');
+        }
       }
       // Navigation is handled by AuthGate reacting to authStateChanges.
       // Avoid pushing a second Dashboard route (can lead to odd initial state).
     } on FirebaseAuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      if (mounted) setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = e.toString());
+      if (mounted) setState(() => _errorMessage = e.toString());
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 

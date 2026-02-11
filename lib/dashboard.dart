@@ -75,6 +75,82 @@ Future<String> _uploadGroupLogo({required String groupId, required Uint8List byt
   throw Exception('Logo upload failed: ${lastError ?? 'unknown error'}');
 }
 
+Future<String?> _myGithubUsernameFromRtdb(String myUid) async {
+  final snap = await rtdb().ref('users/$myUid/githubUsername').get();
+  final v = snap.value;
+  if (v == null) return null;
+  final s = v.toString().trim();
+  return s.isEmpty ? null : s;
+}
+
+Future<String?> _myAvatarUrlFromRtdb(String myUid) async {
+  final snap = await rtdb().ref('users/$myUid/avatarUrl').get();
+  final v = snap.value;
+  if (v == null) return null;
+  final s = v.toString().trim();
+  return s.isEmpty ? null : s;
+}
+
+Future<String?> _lookupUidForLoginLower(String loginLower) async {
+  final snap = await rtdb().ref('usernames/$loginLower').get();
+  final v = snap.value;
+  if (v == null) return null;
+  final s = v.toString().trim();
+  return s.isEmpty ? null : s;
+}
+
+Future<void> _sendDmRequestCore({
+  required String myUid,
+  required String myLogin,
+  required String otherUid,
+  required String otherLogin,
+  String? myAvatarUrl,
+  String? otherAvatarUrl,
+  String? messageText,
+}) async {
+  final myLoginLower = myLogin.trim().toLowerCase();
+  final otherLoginLower = otherLogin.trim().toLowerCase();
+  if (myLoginLower.isEmpty || otherLoginLower.isEmpty) return;
+
+  Map<String, Object?>? encrypted;
+  final pt = (messageText ?? '').trim();
+  if (pt.isNotEmpty) {
+    try {
+      encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: pt);
+    } catch (_) {
+      encrypted = null;
+    }
+  }
+
+  final updates = <String, Object?>{
+    'dmRequests/$otherUid/$myLoginLower': {
+      'fromUid': myUid,
+      'fromLogin': myLogin,
+      if (myAvatarUrl != null && myAvatarUrl.trim().isNotEmpty) 'fromAvatarUrl': myAvatarUrl.trim(),
+      'createdAt': ServerValue.timestamp,
+      if (encrypted != null) ...encrypted,
+    },
+    'savedChats/$myUid/$otherLogin': {
+      'login': otherLogin,
+      if (otherAvatarUrl != null && otherAvatarUrl.trim().isNotEmpty) 'avatarUrl': otherAvatarUrl.trim(),
+      'status': 'pending_out',
+      'lastMessageText': '🔒',
+      'lastMessageAt': ServerValue.timestamp,
+      'savedAt': ServerValue.timestamp,
+    },
+    'savedChats/$otherUid/$myLogin': {
+      'login': myLogin,
+      if (myAvatarUrl != null && myAvatarUrl.trim().isNotEmpty) 'avatarUrl': myAvatarUrl.trim(),
+      'status': 'pending_in',
+      'lastMessageText': '🔒',
+      'lastMessageAt': ServerValue.timestamp,
+      'savedAt': ServerValue.timestamp,
+    },
+  };
+
+  await rtdb().ref().update(updates);
+}
+
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
@@ -3373,8 +3449,184 @@ class _ContactsTabState extends State<_ContactsTab> {
   }
 
   Future<void> _addToChats(GithubUser user) async {
-    // Neukládej chat jen klikem z kontaktů – uloží se až při první zprávě.
-    widget.onStartChat(login: user.login, avatarUrl: user.avatarUrl);
+    await _onContactTap(login: user.login, avatarUrl: user.avatarUrl);
+  }
+
+  Future<void> _onContactTap({required String login, required String avatarUrl}) async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+
+    final otherLogin = login.trim();
+    final otherLower = otherLogin.toLowerCase();
+    if (otherLower.isEmpty) return;
+
+    final otherUid = await _lookupUidForLoginLower(otherLower);
+    if (otherUid == null || otherUid.isEmpty) {
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 18,
+                        backgroundImage: avatarUrl.trim().isNotEmpty ? NetworkImage(avatarUrl.trim()) : null,
+                        child: avatarUrl.trim().isEmpty ? const Icon(Icons.person) : null,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text('@$otherLogin', style: const TextStyle(fontWeight: FontWeight.w700))),
+                      IconButton(
+                        tooltip: 'Profil',
+                        icon: const Icon(Icons.open_in_new),
+                        onPressed: () async {
+                          Navigator.of(context).pop();
+                          await Navigator.of(this.context).push(
+                            MaterialPageRoute(builder: (_) => _UserProfilePage(login: otherLogin, avatarUrl: avatarUrl)),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Tenhle uživatel zatím nemá účet v GitMitu (není v databázi), takže nejde poslat DM invajt.',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('OK'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+      return;
+    }
+
+    final acceptedSnap = await rtdb().ref('dmContacts/${current.uid}/$otherLower').get();
+    final accepted = acceptedSnap.exists && acceptedSnap.value != false;
+    if (accepted) {
+      widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
+      return;
+    }
+
+    if (!mounted) return;
+    final msgCtrl = TextEditingController();
+    bool sending = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> sendInvite() async {
+              if (sending) return;
+              setSheetState(() => sending = true);
+              try {
+                final myLogin = await _myGithubUsernameFromRtdb(current.uid);
+                if (myLogin == null || myLogin.trim().isEmpty) {
+                  throw Exception('Nepodařilo se zjistit tvůj GitHub username.');
+                }
+                final myAvatar = await _myAvatarUrlFromRtdb(current.uid);
+                await _sendDmRequestCore(
+                  myUid: current.uid,
+                  myLogin: myLogin,
+                  myAvatarUrl: myAvatar,
+                  otherUid: otherUid,
+                  otherLogin: otherLogin,
+                  otherAvatarUrl: avatarUrl,
+                  messageText: msgCtrl.text,
+                );
+                if (context.mounted) Navigator.of(context).pop();
+                widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
+              } catch (e) {
+                if (this.context.mounted) {
+                  ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                }
+              } finally {
+                if (context.mounted) setSheetState(() => sending = false);
+              }
+            }
+
+            final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundImage: avatarUrl.trim().isNotEmpty ? NetworkImage(avatarUrl.trim()) : null,
+                          child: avatarUrl.trim().isEmpty ? const Icon(Icons.person) : null,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text('@$otherLogin', style: const TextStyle(fontWeight: FontWeight.w700))),
+                        IconButton(
+                          tooltip: 'Profil + fingerprint',
+                          icon: const Icon(Icons.fingerprint),
+                          onPressed: () async {
+                            Navigator.of(context).pop();
+                            await Navigator.of(this.context).push(
+                              MaterialPageRoute(builder: (_) => _UserProfilePage(login: otherLogin, avatarUrl: avatarUrl)),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Pošli invajt. Můžeš přidat jednu zprávu – odešle se šifrovaně a chat se odemkne až po přijetí.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: msgCtrl,
+                      minLines: 1,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'Zpráva (volitelné)',
+                        hintText: 'Napiš jednu zprávu…',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: sending ? null : sendInvite,
+                            child: Text(sending ? 'Odesílám…' : 'Poslat invajt'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    msgCtrl.dispose();
   }
 
   Future<void> _refreshLocalRecommendations() async {
@@ -3522,7 +3774,7 @@ class _ContactsTabState extends State<_ContactsTab> {
                               if (widget.vibrationEnabled) {
                                 HapticFeedback.selectionClick();
                               }
-                              widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl);
+                              _onContactTap(login: u.login, avatarUrl: u.avatarUrl);
                             },
                           ),
                         ),
@@ -3544,7 +3796,7 @@ class _ContactsTabState extends State<_ContactsTab> {
                               if (widget.vibrationEnabled) {
                                 HapticFeedback.selectionClick();
                               }
-                              widget.onStartChat(login: u.login, avatarUrl: u.avatarUrl);
+                              _onContactTap(login: u.login, avatarUrl: u.avatarUrl);
                             },
                           ),
                         ),
@@ -3763,44 +4015,42 @@ class _ChatsTabState extends State<_ChatsTab> {
     required String otherLogin,
     String? messageText,
   }) async {
-    final myLoginLower = myLogin.trim().toLowerCase();
-    final otherLoginLower = otherLogin.trim().toLowerCase();
-    if (myLoginLower.isEmpty || otherLoginLower.isEmpty) return;
-
-    Map<String, Object?>? encrypted;
-    final pt = (messageText ?? '').trim();
-    if (pt.isNotEmpty) {
-      encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: pt);
-    }
-
     final myAvatar = await _myAvatarUrl(myUid);
+    await _sendDmRequestCore(
+      myUid: myUid,
+      myLogin: myLogin,
+      myAvatarUrl: myAvatar,
+      otherUid: otherUid,
+      otherLogin: otherLogin,
+      otherAvatarUrl: _activeAvatarUrl,
+      messageText: messageText,
+    );
+  }
 
+  Future<void> _rejectDmRequest({
+    required String myUid,
+    required String otherLogin,
+  }) async {
+    final otherLower = otherLogin.trim().toLowerCase();
+    if (otherLower.isEmpty) return;
+    final reqSnap = await _dmRequestRef(myUid: myUid, fromLoginLower: otherLower).get();
+    final rv = reqSnap.value;
+    if (rv is! Map) {
+      await _dmRequestRef(myUid: myUid, fromLoginLower: otherLower).remove();
+      return;
+    }
+    final req = Map<String, dynamic>.from(rv);
+    final fromUid = (req['fromUid'] ?? '').toString();
+    final fromLogin = (req['fromLogin'] ?? otherLogin).toString();
+
+    final myLogin = await _myGithubUsername(myUid);
     final updates = <String, Object?>{
-      'dmRequests/$otherUid/$myLoginLower': {
-        'fromUid': myUid,
-        'fromLogin': myLogin,
-        if (myAvatar != null) 'fromAvatarUrl': myAvatar,
-        'createdAt': ServerValue.timestamp,
-        if (encrypted != null) ...encrypted,
-      },
-      'savedChats/$myUid/$otherLogin': {
-        'login': otherLogin,
-        if (_activeAvatarUrl != null && _activeAvatarUrl!.isNotEmpty) 'avatarUrl': _activeAvatarUrl,
-        'status': 'pending_out',
-        'lastMessageText': '🔒',
-        'lastMessageAt': ServerValue.timestamp,
-        'savedAt': ServerValue.timestamp,
-      },
-      'savedChats/$otherUid/$myLogin': {
-        'login': myLogin,
-        if (myAvatar != null) 'avatarUrl': myAvatar,
-        'status': 'pending_in',
-        'lastMessageText': '🔒',
-        'lastMessageAt': ServerValue.timestamp,
-        'savedAt': ServerValue.timestamp,
-      },
+      'dmRequests/$myUid/$otherLower': null,
+      'savedChats/$myUid/$fromLogin': null,
     };
-
+    if (fromUid.isNotEmpty && myLogin != null && myLogin.trim().isNotEmpty) {
+      updates['savedChats/$fromUid/$myLogin'] = null;
+    }
     await rtdb().ref().update(updates);
   }
 
@@ -4718,6 +4968,97 @@ class _ChatsTabState extends State<_ChatsTab> {
                                           ),
                                         );
                                       },
+                                    );
+                                  }),
+                                  const Divider(height: 1),
+                                ],
+                              );
+                            },
+                          ),
+
+                          // DM žádosti (priváty) – notifikace nahoře v přehledu Chaty
+                          StreamBuilder<DatabaseEvent>(
+                            stream: rtdb().ref('dmRequests/${current.uid}').onValue,
+                            builder: (context, reqSnap) {
+                              final v = reqSnap.data?.snapshot.value;
+                              final m = (v is Map) ? v : null;
+
+                              final items = <Map<String, dynamic>>[];
+                              if (m != null) {
+                                for (final e in m.entries) {
+                                  if (e.value is! Map) continue;
+                                  final mm = Map<String, dynamic>.from(e.value as Map);
+                                  mm['__key'] = e.key.toString();
+                                  items.add(mm);
+                                }
+                                items.sort((a, b) {
+                                  final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                                  final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                                  return bt.compareTo(at);
+                                });
+                              }
+
+                              if (items.isEmpty) return const SizedBox.shrink();
+
+                              Future<void> accept(Map<String, dynamic> req) async {
+                                final fromLogin = (req['fromLogin'] ?? '').toString();
+                                if (fromLogin.trim().isEmpty) return;
+                                try {
+                                  await _acceptDmRequest(myUid: current.uid, otherLogin: fromLogin);
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                                  }
+                                }
+                              }
+
+                              Future<void> reject(Map<String, dynamic> req) async {
+                                final fromLogin = (req['fromLogin'] ?? '').toString();
+                                if (fromLogin.trim().isEmpty) return;
+                                try {
+                                  await _rejectDmRequest(myUid: current.uid, otherLogin: fromLogin);
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                                  }
+                                }
+                              }
+
+                              return Column(
+                                children: [
+                                  ListTile(
+                                    leading: const Icon(Icons.mail_lock_outlined),
+                                    title: const Text('Žádosti o chat'),
+                                    subtitle: Text('Čeká: ${items.length}'),
+                                  ),
+                                  ...items.map((req) {
+                                    final fromLogin = (req['fromLogin'] ?? '').toString();
+                                    final fromUid = (req['fromUid'] ?? '').toString();
+                                    final fromAvatar = (req['fromAvatarUrl'] ?? '').toString();
+                                    final hasEncryptedText = (req['ciphertext'] ?? '').toString().isNotEmpty;
+                                    return ListTile(
+                                      leading: fromUid.isNotEmpty
+                                          ? _AvatarWithPresenceDot(uid: fromUid, avatarUrl: fromAvatar, radius: 18)
+                                          : CircleAvatar(
+                                              radius: 18,
+                                              backgroundImage: fromAvatar.isNotEmpty ? NetworkImage(fromAvatar) : null,
+                                              child: fromAvatar.isEmpty ? const Icon(Icons.person, size: 18) : null,
+                                            ),
+                                      title: Text('@$fromLogin'),
+                                      subtitle: hasEncryptedText ? const Text('Zpráva: 🔒 (šifrovaně)') : const Text('Invajt do privátu'),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.close),
+                                            onPressed: () => reject(req),
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.check),
+                                            onPressed: () => accept(req),
+                                          ),
+                                        ],
+                                      ),
                                     );
                                   }),
                                   const Divider(height: 1),
