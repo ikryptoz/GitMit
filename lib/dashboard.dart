@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -9,6 +10,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
+import 'package:gitmit/e2ee.dart';
 import 'package:gitmit/group_invites.dart';
 import 'package:gitmit/github_api.dart';
 import 'package:gitmit/join_group_via_link_qr_page.dart';
@@ -3513,11 +3515,18 @@ class _ChatsTab extends StatefulWidget {
 class _ChatsTabState extends State<_ChatsTab> {
   String? _activeLogin;
   String? _activeAvatarUrl;
+  String? _activeOtherUid;
+  String? _activeOtherUidLoginLower;
   String? _activeGroupId;
   String? _activeVerifiedUid;
   String? _activeVerifiedGithub;
   bool _moderatorAnonymous = true;
   final _messageController = TextEditingController();
+
+  final Map<String, String> _decryptedCache = {};
+  final Set<String> _decrypting = {};
+  final Set<String> _migrating = {};
+  final Map<String, SecretKey> _groupKeyCache = {};
 
   int _overviewMode = 0; // 0=priváty, 1=skupiny, 2=složky
   String? _activeFolderId; // when _overviewMode==2
@@ -3610,6 +3619,30 @@ class _ChatsTabState extends State<_ChatsTab> {
     }
   }
 
+  Future<String?> _lookupUidForLoginLower(String loginLower) async {
+    final snap = await rtdb().ref('usernames/$loginLower').get();
+    final v = snap.value;
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  Future<String?> _ensureActiveOtherUid() async {
+    final login = _activeLogin;
+    if (login == null || login.trim().isEmpty) return null;
+    final loginLower = login.trim().toLowerCase();
+    if (_activeOtherUid != null && _activeOtherUidLoginLower == loginLower) {
+      return _activeOtherUid;
+    }
+    final uid = await _lookupUidForLoginLower(loginLower);
+    if (!mounted) return uid;
+    setState(() {
+      _activeOtherUid = uid;
+      _activeOtherUidLoginLower = loginLower;
+    });
+    return uid;
+  }
+
   Future<void> _moveChatToFolder({required String myUid, required String login}) async {
     final foldersSnap = await rtdb().ref('folders/$myUid').get();
     final fv = foldersSnap.value;
@@ -3699,12 +3732,40 @@ class _ChatsTabState extends State<_ChatsTab> {
     final text = _messageController.text.trim();
     if (current == null || login == null || text.isEmpty) return;
 
+    final otherUid = await _ensureActiveOtherUid();
+    if (otherUid == null || otherUid.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('E2EE: nelze zjistit UID uživatele.')),
+        );
+      }
+      return;
+    }
+
+    try {
+      await E2ee.publishMyPublicKey(uid: current.uid);
+    } catch (_) {
+      // best-effort
+    }
+
+    Map<String, Object?> encrypted;
+    try {
+      encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: text);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('E2EE: šifrování selhalo: $e')),
+        );
+      }
+      return;
+    }
+
     _messageController.clear();
     final expiresAt = (widget.settings.autoDeleteSeconds > 0)
         ? DateTime.now().millisecondsSinceEpoch + (widget.settings.autoDeleteSeconds * 1000)
         : null;
     await rtdb().ref('messages/${current.uid}/$login').push().set({
-      'text': text,
+      ...encrypted,
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
       if (expiresAt != null) 'expiresAt': expiresAt,
@@ -3714,7 +3775,7 @@ class _ChatsTabState extends State<_ChatsTab> {
     await rtdb().ref('savedChats/${current.uid}/$login').update({
       'login': login,
       if (_activeAvatarUrl != null && _activeAvatarUrl!.isNotEmpty) 'avatarUrl': _activeAvatarUrl,
-      'lastMessageText': text,
+      'lastMessageText': '🔒',
       'lastMessageAt': ServerValue.timestamp,
       'savedAt': ServerValue.timestamp,
     });
@@ -5159,8 +5220,53 @@ class _ChatsTabState extends State<_ChatsTab> {
                     final text = _messageController.text.trim();
                     if (text.isEmpty || !canSend) return;
                     _messageController.clear();
+
+                    try {
+                      await E2ee.publishMyPublicKey(uid: current.uid);
+                    } catch (_) {}
+
+                    SecretKey? gk = _groupKeyCache[groupId];
+                    gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+
+                    if (gk == null) {
+                      if (!isAdmin) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('E2EE: skupina není připravená (chybí klíč).')),
+                          );
+                        }
+                        return;
+                      }
+                      try {
+                        await E2ee.ensureGroupKeyDistributed(groupId: groupId, myUid: current.uid);
+                        gk = await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('E2EE: nelze nastavit skupinový klíč: $e')),
+                          );
+                        }
+                        return;
+                      }
+                    }
+
+                    if (gk == null) return;
+                    _groupKeyCache[groupId] = gk;
+
+                    Map<String, Object?> encrypted;
+                    try {
+                      encrypted = await E2ee.encryptForGroup(groupKey: gk, plaintext: text);
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('E2EE: šifrování selhalo: $e')),
+                        );
+                      }
+                      return;
+                    }
+
                     await msgsRef.push().set({
-                      'text': text,
+                      ...encrypted,
                       'fromUid': current.uid,
                       'fromGithub': myGithub,
                       'createdAt': ServerValue.timestamp,
@@ -5215,16 +5321,74 @@ class _ChatsTabState extends State<_ChatsTab> {
                               return at.compareTo(bt);
                             });
 
+                            // Best-effort migration: encrypt old plaintext group messages.
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              for (final msg in items.take(30)) {
+                                final k = (msg['__key'] ?? '').toString();
+                                if (k.isEmpty) continue;
+                                if (_migrating.contains('g:$groupId:$k')) continue;
+                                final pt = (msg['text'] ?? '').toString();
+                                final hasC = msg['ciphertext'] != null && (msg['ciphertext']?.toString().isNotEmpty ?? false);
+                                if (pt.isEmpty || hasC) continue;
+
+                                _migrating.add('g:$groupId:$k');
+                                () async {
+                                  try {
+                                    SecretKey? gk = _groupKeyCache[groupId];
+                                    gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+                                    if (gk == null) return;
+                                    _groupKeyCache[groupId] = gk;
+                                    final enc = await E2ee.encryptForGroup(groupKey: gk, plaintext: pt);
+                                    await msgsRef.child(k).update({
+                                      ...enc,
+                                      'text': null,
+                                    });
+                                    if (!mounted) return;
+                                    setState(() => _decryptedCache['g:$groupId:$k'] = pt);
+                                  } catch (_) {
+                                    // ignore
+                                  } finally {
+                                    _migrating.remove('g:$groupId:$k');
+                                  }
+                                }();
+                              }
+                            });
+
                             return ListView.builder(
                               padding: const EdgeInsets.all(12),
                               itemCount: items.length,
                               itemBuilder: (context, i) {
                                 final m = items[i];
                                 final key = (m['__key'] ?? '').toString();
-                                final text = (m['text'] ?? '').toString();
+                                final plaintext = (m['text'] ?? '').toString();
                                 final fromUid = (m['fromUid'] ?? '').toString();
                                 final fromGh = (m['fromGithub'] ?? '').toString();
                                 final isMe = fromUid == current.uid;
+
+                                final hasCipher = m['ciphertext'] != null && (m['ciphertext']?.toString().isNotEmpty ?? false);
+                                final cacheKey = 'g:$groupId:$key';
+                                String text = plaintext;
+                                if (text.isEmpty && hasCipher) {
+                                  text = _decryptedCache[cacheKey] ?? '🔒 …';
+                                  if (_decryptedCache[cacheKey] == null && !_decrypting.contains(cacheKey)) {
+                                    _decrypting.add(cacheKey);
+                                    () async {
+                                      try {
+                                        SecretKey? gk = _groupKeyCache[groupId];
+                                        gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+                                        if (gk != null) _groupKeyCache[groupId] = gk;
+                                        if (gk == null) return;
+                                        final plain = await E2ee.decryptFromGroup(groupKey: gk, message: m);
+                                        if (!mounted) return;
+                                        setState(() => _decryptedCache[cacheKey] = plain);
+                                      } catch (_) {
+                                        // keep placeholder
+                                      } finally {
+                                        _decrypting.remove(cacheKey);
+                                      }
+                                    }();
+                                  }
+                                }
 
                                 final mentioned = myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
 
@@ -5373,15 +5537,69 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 return at.compareTo(bt);
                               });
 
+                              // Best-effort migration: encrypt old plaintext messages.
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                for (final msg in items.take(30)) {
+                                  final k = (msg['__key'] ?? '').toString();
+                                  if (k.isEmpty) continue;
+                                  if (_migrating.contains(k)) continue;
+                                  final pt = (msg['text'] ?? '').toString();
+                                  final hasC = msg['ciphertext'] != null && (msg['ciphertext']?.toString().isNotEmpty ?? false);
+                                  final fu = (msg['fromUid'] ?? '').toString();
+                                  if (pt.isEmpty || hasC || fu.isEmpty) continue;
+
+                                  _migrating.add(k);
+                                  () async {
+                                    try {
+                                      final otherUid = (fu == current.uid) ? (await _ensureActiveOtherUid()) : fu;
+                                      if (otherUid == null || otherUid.isEmpty) return;
+                                      final enc = await E2ee.encryptForUser(otherUid: otherUid, plaintext: pt);
+                                      await messagesRef.child(k).update({
+                                        ...enc,
+                                        'text': null,
+                                      });
+                                      if (!mounted) return;
+                                      setState(() => _decryptedCache[k] = pt);
+                                    } catch (_) {
+                                      // ignore
+                                    } finally {
+                                      _migrating.remove(k);
+                                    }
+                                  }();
+                                }
+                              });
+
                               return ListView.builder(
                                 padding: const EdgeInsets.all(12),
                                 itemCount: items.length,
                                 itemBuilder: (context, i) {
                                   final m = items[i];
                                   final key = (m['__key'] ?? '').toString();
-                                  final text = (m['text'] ?? '').toString();
+                                  final plaintext = (m['text'] ?? '').toString();
                                   final fromUid = (m['fromUid'] ?? '').toString();
                                   final isMe = fromUid == current.uid;
+
+                                  final hasCipher = m['ciphertext'] != null && (m['ciphertext']?.toString().isNotEmpty ?? false);
+                                  String text = plaintext;
+                                  if (text.isEmpty && hasCipher) {
+                                    text = _decryptedCache[key] ?? '🔒 …';
+                                    if (_decryptedCache[key] == null && !_decrypting.contains(key)) {
+                                      _decrypting.add(key);
+                                      () async {
+                                        try {
+                                          final otherUid = isMe ? (await _ensureActiveOtherUid()) : fromUid;
+                                          if (otherUid == null || otherUid.isEmpty) return;
+                                          final plain = await E2ee.decryptFromUser(otherUid: otherUid, message: m);
+                                          if (!mounted) return;
+                                          setState(() => _decryptedCache[key] = plain);
+                                        } catch (_) {
+                                          // keep placeholder
+                                        } finally {
+                                          _decrypting.remove(key);
+                                        }
+                                      }();
+                                    }
+                                  }
 
                                   final mentioned = myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
 
