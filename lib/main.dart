@@ -151,7 +151,100 @@ class _AuthGateState extends State<AuthGate> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    return _user == null ? const LoginPage() : const DashboardPage();
+    final user = _user;
+    if (user == null) return const LoginPage();
+
+    final userRef = rtdb().ref('users/${user.uid}');
+    return StreamBuilder<DatabaseEvent>(
+      stream: userRef.onValue,
+      builder: (context, snap) {
+        final v = snap.data?.snapshot.value;
+        final m = (v is Map) ? v : null;
+        final githubUsername = (m?['githubUsername'] ?? '').toString().trim();
+        final provider = (m?['provider'] ?? '').toString().trim();
+
+        // If this is a GitHub user, wait until RTDB profile + username mapping exist.
+        if (provider == 'github') {
+          if (githubUsername.isEmpty) {
+            return _AccountSetupScreen(
+              title: 'Dokončuji registraci…',
+              message: 'Načítám profil a připravuji účet.',
+            );
+          }
+          final lower = githubUsername.toLowerCase();
+          final mapRef = rtdb().ref('usernames/$lower');
+          return StreamBuilder<DatabaseEvent>(
+            stream: mapRef.onValue,
+            builder: (context, mapSnap) {
+              final mapped = mapSnap.data?.snapshot.value?.toString();
+
+              if (mapped == null || mapped.isEmpty) {
+                // Best-effort: fill mapping once it's known.
+                mapRef.set(user.uid);
+                return _AccountSetupScreen(
+                  title: 'Dokončuji registraci…',
+                  message: 'Nastavuji mapování @${githubUsername.toLowerCase()} → UID.',
+                );
+              }
+
+              if (mapped != user.uid) {
+                return _AccountSetupScreen(
+                  title: 'Chyba registrace',
+                  message: 'Username @$githubUsername už je spárovaný s jiným účtem. Odhlas se a zkus to znovu.',
+                  showSignOut: true,
+                );
+              }
+
+              return const DashboardPage();
+            },
+          );
+        }
+
+        // Non-GitHub users: proceed as before.
+        return const DashboardPage();
+      },
+    );
+  }
+}
+
+class _AccountSetupScreen extends StatelessWidget {
+  const _AccountSetupScreen({
+    required this.title,
+    required this.message,
+    this.showSignOut = false,
+  });
+
+  final String title;
+  final String message;
+  final bool showSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(title, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Text(message, style: const TextStyle(color: Colors.white70), textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              if (!showSignOut) const CircularProgressIndicator(),
+              if (showSignOut) ...[
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: () => FirebaseAuth.instance.signOut(),
+                  child: const Text('Odhlásit'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
