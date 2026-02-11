@@ -81,6 +81,10 @@ class E2ee {
     await _storage.write(key: _scopedKey(baseKey), value: value);
   }
 
+  static Future<void> _deleteKey(String baseKey) async {
+    await _storage.delete(key: _scopedKey(baseKey));
+  }
+
   static final _x25519 = X25519();
   static final _aead = Chacha20.poly1305Aead();
   static final _ed25519 = Ed25519();
@@ -134,6 +138,19 @@ class E2ee {
       if (n != null) return n;
     }
     return fallback;
+  }
+
+  static bool _fieldBool(Map<String, dynamic> m, List<String> keys) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v == null) continue;
+      if (v is bool) return v;
+      if (v is int) return v != 0;
+      final s = v.toString().trim().toLowerCase();
+      if (s == 'true' || s == '1' || s == 'yes' || s == 'y') return true;
+      if (s == 'false' || s == '0' || s == 'no' || s == 'n') return false;
+    }
+    return false;
   }
 
   static void _mergeNested(Map<String, dynamic> into, Object? maybeMap) {
@@ -548,6 +565,10 @@ class E2ee {
 
   static String _sessionKey(String otherUid) => '$_kDrPrefix$otherUid';
 
+  static Future<void> _deleteSession(String otherUid) async {
+    await _deleteKey(_sessionKey(otherUid));
+  }
+
   static Future<_DrState?> _loadSession(String otherUid) async {
     try {
       final s = await _readKey(_sessionKey(otherUid));
@@ -680,8 +701,20 @@ class E2ee {
   }) async {
     final m = _flattenCipherEnvelope(message);
     final v = _fieldInt(m, ['e2eeV', 'v'], v1);
-    if (v >= v2 || (m['alg'] ?? '').toString().contains('dr-v2')) {
-      return _decryptFromUserV2(otherUid: otherUid, message: m);
+    if (v >= v2 || (m['alg'] ?? '').toString().toLowerCase().contains('dr-v2')) {
+      try {
+        return _decryptFromUserV2(otherUid: otherUid, message: m);
+      } catch (_) {
+        final hasSpkId = (m['spkId'] ?? '').toString().trim().isNotEmpty;
+        final isInit = _fieldBool(m, ['init']) || hasSpkId;
+        if (!isInit) rethrow;
+        try {
+          await _deleteSession(otherUid);
+        } catch (_) {
+          // ignore
+        }
+        return _decryptFromUserV2(otherUid: otherUid, message: m);
+      }
     }
 
     // Backwards-compat aliases (older clients / migrations).
@@ -718,7 +751,7 @@ class E2ee {
     final dhB64 = _fieldStr(m, ['dh']);
     final n = _fieldInt(m, ['n'], 0);
     final pn = _fieldInt(m, ['pn'], 0);
-    final isInit = m['init'] == true;
+    final isInit = _fieldBool(m, ['init']) || (m['spkId'] ?? '').toString().trim().isNotEmpty;
     final spkId = (m['spkId'] is int) ? m['spkId'] as int : int.tryParse((m['spkId'] ?? '').toString());
 
     if (nonceB64.isEmpty || ciphertextB64.isEmpty || macB64.isEmpty || dhB64.isEmpty) {

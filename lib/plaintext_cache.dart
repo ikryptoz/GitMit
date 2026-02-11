@@ -4,6 +4,24 @@ import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 class PlaintextCache {
+  ///
+  /// ===============================
+  ///  DOKUMENTACE: Šifrování v GitMit
+  /// ===============================
+  ///
+  /// - Všechny privátní zprávy (DM i skupiny) jsou šifrované end-to-end (E2EE) pomocí X25519/Ed25519 a ChaCha20-Poly1305.
+  /// - Každý uživatel má unikátní klíčovou identitu (X25519/Ed25519), která je vázaná na jeho Firebase UID.
+  /// - Při navázání komunikace se vymění veřejné klíče a vygeneruje se session (double ratchet, Signal-like).
+  /// - Každá zpráva má unikátní šifrovací klíč (forward secrecy, perfect forward secrecy).
+  /// - Skupiny používají buď sdílený group key (v1), nebo Signal Sender Keys (v2, pokud všichni podporují).
+  /// - Klíče a sessiony jsou uloženy v zabezpečeném úložišti na zařízení (flutter_secure_storage).
+  /// - Fingerprint klíče je hash veřejného podpisového klíče (Ed25519), zobrazovaný v UI pro ověření identity.
+  /// - Pokud se fingerprinty shodují, je to podezřelé (viz varování v UI).
+  /// - Vyhledávání v chatu funguje pouze nad dešifrovaným obsahem (plaintext cache), nikdy nad ciphertextem.
+  /// - PlaintextCache ukládá dešifrované zprávy pouze lokálně, nikdy se neodesílají na server.
+  ///
+  /// Pro detailní popis protokolu viz README nebo kontaktuj vývojáře.
+  ///
   static bool _initialized = false;
   static String? _activeUid;
   static Box<String>? _box;

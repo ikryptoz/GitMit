@@ -365,51 +365,60 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 32),
-              Center(
-                child: Text(
-                  'Sign in to GitMit',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 28,
-                    letterSpacing: 1.2,
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.data != null) {
+          return const AuthGate();
+        }
+
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 32),
+                  Center(
+                    child: Text(
+                      'Sign in to GitMit',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 28,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 40),
-              OutlinedButton(
-                onPressed: _loading ? null : _loginWithGitHub,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white38),
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                  const SizedBox(height: 40),
+                  OutlinedButton(
+                    onPressed: _loading ? null : _loginWithGitHub,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(8)),
+                      ),
+                    ),
+                    child: const Text(
+                      'Sign in with GitHub',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
-                ),
-                child: const Text(
-                  'Sign in with GitHub',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent)),
+                  ],
+                ],
               ),
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 16),
-                Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent)),
-              ],
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

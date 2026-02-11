@@ -410,6 +410,14 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                                 onPressed: () => Clipboard.setData(ClipboardData(text: myFp)),
                                               ),
                                             ),
+                                          if (peerFp != null && peerFp.isNotEmpty && myFp != null && myFp.isNotEmpty && peerFp == myFp)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 4),
+                                              child: Text(
+                                                'Pozor: fingerprinty jsou shodné. To je neobvyklé (může jít o sdílené zařízení nebo záměnu účtů).',
+                                                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     ),
@@ -2256,6 +2264,12 @@ class _SettingsHome extends StatelessWidget {
               onTap: () => _open(context, const _SettingsNotificationsPage()),
             ),
             _SettingsSectionTile(
+              icon: Icons.security_outlined,
+              title: 'Šifrování a E2EE',
+              subtitle: 'Jak fungují klíče, fingerprinty a vyhledávání',
+              onTap: () => _open(context, const _SettingsEncryptionPage()),
+            ),
+            _SettingsSectionTile(
               icon: Icons.storage_outlined,
               title: 'Data a paměť',
               subtitle: 'Zatím základní',
@@ -2303,6 +2317,65 @@ class _SettingsSectionTile extends StatelessWidget {
         subtitle: Text(subtitle),
         trailing: const Icon(Icons.chevron_right),
         onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _SettingsEncryptionPage extends StatelessWidget {
+  const _SettingsEncryptionPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Šifrování a E2EE')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: const [
+          Card(
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Jak funguje šifrování', style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  Text('GitMit používá end-to-end šifrování (E2EE). Obsah zpráv se šifruje na tvém zařízení a na server se ukládá pouze ciphertext.'),
+                  SizedBox(height: 8),
+                  Text('Pro privátní chaty se používá X25519/Ed25519 a ChaCha20-Poly1305. Pro skupiny je k dispozici sdílený group key (v1) nebo Sender Keys (v2), pokud všichni podporují.'),
+                ],
+              ),
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Fingerprinty a ověření', style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  Text('Fingerprint je otisk veřejného podpisového klíče (Ed25519). Ověř si ho s protějškem přes jiný kanál (osobně, Signal).'),
+                  SizedBox(height: 8),
+                  Text('Pokud se fingerprint protějšku změní, může to znamenat reinstall nebo riziko MITM.'),
+                ],
+              ),
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Vyhledávání', style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  Text('Vyhledávání funguje pouze nad lokálně dešifrovaným obsahem. Plaintext se neodesílá na server, ukládá se jen na zařízení.'),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -4216,6 +4289,14 @@ class _ChatsTabState extends State<_ChatsTab> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   'Pozor: fingerprint protějšku se změnil od minula. Může jít o reinstalaci, nebo MITM.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            if (peerFp != null && peerFp.isNotEmpty && myFp.isNotEmpty && peerFp == myFp)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Pozor: fingerprinty jsou shodné. To je neobvyklé (může jít o sdílené zařízení nebo záměnu účtů).',
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
