@@ -16,6 +16,7 @@ import 'package:gitmit/e2ee.dart';
 import 'package:gitmit/group_invites.dart';
 import 'package:gitmit/github_api.dart';
 import 'package:gitmit/join_group_via_link_qr_page.dart';
+import 'package:gitmit/plaintext_cache.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -111,6 +112,14 @@ Future<void> _sendDmRequestCore({
   final myLoginLower = myLogin.trim().toLowerCase();
   final otherLoginLower = otherLogin.trim().toLowerCase();
   if (myLoginLower.isEmpty || otherLoginLower.isEmpty) return;
+
+  // Publish my public bundle before sending an invite, so the other side can
+  // immediately fetch my keys/fingerprint and establish encrypted comms.
+  try {
+    await E2ee.publishMyPublicKey(uid: myUid);
+  } catch (_) {
+    // best-effort
+  }
 
   Map<String, Object?>? encrypted;
   final pt = (messageText ?? '').trim();
@@ -1637,6 +1646,16 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _logout() async {
+    // Reset E2EE scope immediately so any late async tasks won't read/write
+    // keys/sessions under the wrong user after logout.
+    E2ee.setActiveUser(null);
+    () async {
+      try {
+        await PlaintextCache.setActiveUser(null);
+      } catch (_) {
+        // ignore
+      }
+    }();
     await FirebaseAuth.instance.signOut();
     if (mounted) {
       Navigator.of(context).pushReplacementNamed('/login');
@@ -3388,10 +3407,12 @@ class _ContactsTab extends StatefulWidget {
 
 class _ContactsTabState extends State<_ContactsTab> {
   final _controller = TextEditingController();
-  Timer? _debounce;
   bool _loading = false;
   String? _error;
   List<GithubUser> _results = const [];
+
+  String _lastSearchedQuery = '';
+  final Map<String, ({int tsMs, List<GithubUser> results})> _searchCache = {};
 
   bool _recoLoading = false;
   String? _recoError;
@@ -3406,46 +3427,84 @@ class _ContactsTabState extends State<_ContactsTab> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
   void _onChanged(String value) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () async {
-      final query = value.trim();
-      if (query.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _results = const [];
-          _error = null;
-          _loading = false;
-        });
-        await _refreshLocalRecommendations();
-        return;
-      }
-
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-
-      try {
-        final users = await searchGithubUsers(query);
-        if (!mounted) return;
-        setState(() {
-          _results = users;
-          _loading = false;
-        });
-      } catch (e) {
-        if (!mounted) return;
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
+    if (!mounted) return;
+    final q = value.trim();
+    setState(() {
+      _error = null;
+      _loading = false;
+      if (q.isEmpty) {
+        _results = const [];
+        _lastSearchedQuery = '';
       }
     });
+    if (q.isEmpty) {
+      _refreshLocalRecommendations();
+    }
+  }
+
+  Future<void> _performSearch(String rawQuery) async {
+    final cleaned = rawQuery.trim();
+    final q = cleaned.replaceFirst(RegExp(r'^@+'), '');
+    if (q.isEmpty) return;
+    if (q.length < 2) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Zadej aspoň 2 znaky (šetří to GitHub API).';
+        _results = const [];
+        _loading = false;
+        _lastSearchedQuery = q;
+      });
+      return;
+    }
+
+    if (_loading) return;
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+      _lastSearchedQuery = q;
+    });
+
+    // Cache to avoid repeated GitHub API calls while user toggles UI.
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final cacheKey = q.toLowerCase();
+    final cached = _searchCache[cacheKey];
+    if (cached != null && (now - cached.tsMs) < 120000) {
+      if (!mounted) return;
+      setState(() {
+        _results = cached.results;
+        _loading = false;
+      });
+      return;
+    }
+
+    try {
+      final users = await searchGithubUsers(q);
+      if (!mounted) return;
+      _searchCache[cacheKey] = (tsMs: now, results: users);
+      // keep cache from growing forever
+      if (_searchCache.length > 30) {
+        final keys = _searchCache.keys.toList(growable: false);
+        for (var i = 0; i < 10 && i < keys.length; i++) {
+          _searchCache.remove(keys[i]);
+        }
+      }
+      setState(() {
+        _results = users;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _addToChats(GithubUser user) async {
@@ -3536,6 +3595,7 @@ class _ContactsTabState extends State<_ContactsTab> {
           builder: (context, setSheetState) {
             Future<void> sendInvite() async {
               if (sending) return;
+              var didPop = false;
               setSheetState(() => sending = true);
               try {
                 final myLogin = await _myGithubUsernameFromRtdb(current.uid);
@@ -3552,14 +3612,22 @@ class _ContactsTabState extends State<_ContactsTab> {
                   otherAvatarUrl: avatarUrl,
                   messageText: msgCtrl.text,
                 );
-                if (context.mounted) Navigator.of(context).pop();
-                widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
+                if (!mounted) return;
+                if (context.mounted) {
+                  didPop = true;
+                  Navigator.of(context).pop();
+                }
+                // Switch tabs only after the sheet is fully closed.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
+                });
               } catch (e) {
-                if (this.context.mounted) {
-                  ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
                 }
               } finally {
-                if (context.mounted) setSheetState(() => sending = false);
+                if (!didPop && context.mounted) setSheetState(() => sending = false);
               }
             }
 
@@ -3734,6 +3802,15 @@ class _ContactsTabState extends State<_ContactsTab> {
   @override
   Widget build(BuildContext context) {
     final query = _controller.text.trim();
+
+    final qLower = query.trim().replaceFirst(RegExp(r'^@+'), '').toLowerCase();
+    final localMatches = <_RecommendedUser>[];
+    if (qLower.isNotEmpty) {
+      localMatches.addAll(_friends.where((u) => u.login.toLowerCase().contains(qLower)));
+      localMatches.addAll(_recommended.where((u) => u.login.toLowerCase().contains(qLower)));
+      localMatches.sort((a, b) => a.login.toLowerCase().compareTo(b.login.toLowerCase()));
+    }
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -3741,10 +3818,26 @@ class _ContactsTabState extends State<_ContactsTab> {
           TextField(
             controller: _controller,
             onChanged: _onChanged,
+            onSubmitted: (v) => _performSearch(v),
             decoration: const InputDecoration(
               labelText: 'Hledat na GitHubu',
               prefixText: '@',
+              helperText: 'Stiskni Enter pro hledání (šetří to GitHub API).',
             ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _loading
+                      ? null
+                      : () => _performSearch(_controller.text),
+                  icon: const Icon(Icons.search),
+                  label: Text(_loading ? 'Hledám…' : 'Hledat'),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           if (_loading) const LinearProgressIndicator(),
@@ -3805,24 +3898,51 @@ class _ContactsTabState extends State<_ContactsTab> {
                         const SizedBox.shrink(),
                     ],
                   )
-                : ListView.separated(
-                    itemCount: _results.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final u = _results[i];
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
-                        ),
-                        title: Text('@${u.login}'),
-                        onTap: () {
-                          if (widget.vibrationEnabled) {
-                            HapticFeedback.selectionClick();
-                          }
-                          _addToChats(u);
-                        },
-                      );
-                    },
+                : ListView(
+                    children: [
+                      if (localMatches.isNotEmpty) ...[
+                        const Text('Lokálně', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 8),
+                        ...localMatches.take(25).map(
+                              (u) => _recommendedTile(
+                                u,
+                                onTap: () {
+                                  if (widget.vibrationEnabled) {
+                                    HapticFeedback.selectionClick();
+                                  }
+                                  _onContactTap(login: u.login, avatarUrl: u.avatarUrl);
+                                },
+                              ),
+                            ),
+                        const Divider(height: 24),
+                      ],
+                      const Text('GitHub', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      if (_lastSearchedQuery.toLowerCase() != qLower || _results.isEmpty)
+                        const Text('Stiskni Enter nebo tlačítko "Hledat" pro dotaz na GitHub.'),
+                      if (_lastSearchedQuery.toLowerCase() == qLower && _results.isNotEmpty) ...[
+                        ..._results.map((u) {
+                          return Column(
+                            children: [
+                              ListTile(
+                                leading: CircleAvatar(
+                                  backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
+                                  child: u.avatarUrl.isEmpty ? const Icon(Icons.person) : null,
+                                ),
+                                title: Text('@${u.login}'),
+                                onTap: () {
+                                  if (widget.vibrationEnabled) {
+                                    HapticFeedback.selectionClick();
+                                  }
+                                  _addToChats(u);
+                                },
+                              ),
+                              const Divider(height: 1),
+                            ],
+                          );
+                        }),
+                      ],
+                    ],
                   ),
           ),
         ],
@@ -3892,6 +4012,150 @@ class _ChatsTabState extends State<_ChatsTab> {
   final Set<String> _decrypting = {};
   final Set<String> _migrating = {};
   final Map<String, SecretKey> _groupKeyCache = {};
+
+  Future<void> _warmupDmDecryptAll({
+    required List<Map<String, dynamic>> items,
+    required String loginLower,
+    required String myUid,
+  }) async {
+    if (!mounted) return;
+    if (((_activeLogin ?? '').trim().toLowerCase()) != loginLower) return;
+
+    // Decrypt a small batch per frame to reduce jank.
+    const batchSize = 4;
+    final peerUid = await _ensureActiveOtherUid();
+
+    var processed = 0;
+    var hasMore = false;
+
+    for (final m in items) {
+      if (!mounted) return;
+      if (((_activeLogin ?? '').trim().toLowerCase()) != loginLower) return;
+
+      final key = (m['__key'] ?? '').toString();
+      if (key.isEmpty) continue;
+
+      final plaintext = (m['text'] ?? '').toString();
+      final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
+      if (!hasCipher || plaintext.isNotEmpty) continue;
+
+      final persisted = PlaintextCache.tryGetDm(otherLoginLower: loginLower, messageKey: key);
+      if (persisted != null && persisted.isNotEmpty) {
+        _decryptedCache[key] ??= persisted;
+        continue;
+      }
+      if (_decryptedCache.containsKey(key) || _decrypting.contains(key)) continue;
+
+      if (processed >= batchSize) {
+        hasMore = true;
+        continue;
+      }
+
+      processed++;
+      _decrypting.add(key);
+      try {
+        final fromUid = (m['fromUid'] ?? '').toString();
+        final otherUid = (fromUid == myUid)
+            ? (peerUid ?? '')
+            : (fromUid.isNotEmpty ? fromUid : (peerUid ?? ''));
+        if (otherUid.isEmpty) {
+          hasMore = true;
+          continue;
+        }
+
+        final plain = await E2ee.decryptFromUser(otherUid: otherUid, message: m);
+        if (!mounted) return;
+        if (((_activeLogin ?? '').trim().toLowerCase()) != loginLower) return;
+
+        setState(() => _decryptedCache[key] = plain);
+        PlaintextCache.putDm(otherLoginLower: loginLower, messageKey: key, plaintext: plain);
+      } catch (_) {
+        // ignore
+      } finally {
+        _decrypting.remove(key);
+      }
+
+      // Yield to UI.
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+
+    if (!mounted) return;
+    if (((_activeLogin ?? '').trim().toLowerCase()) != loginLower) return;
+
+    if (hasMore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _warmupDmDecryptAll(items: items, loginLower: loginLower, myUid: myUid);
+      });
+    }
+  }
+
+  Future<void> _warmupGroupDecryptAll({
+    required List<Map<String, dynamic>> items,
+    required String groupId,
+    required String myUid,
+  }) async {
+    if (!mounted) return;
+    if (_activeGroupId != groupId) return;
+
+    const batchSize = 3;
+    var processed = 0;
+    var hasMore = false;
+
+    for (final m in items) {
+      if (!mounted) return;
+      if (_activeGroupId != groupId) return;
+
+      final key = (m['__key'] ?? '').toString();
+      if (key.isEmpty) continue;
+
+      final plaintext = (m['text'] ?? '').toString();
+      final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
+      if (!hasCipher || plaintext.isNotEmpty) continue;
+
+      final persisted = PlaintextCache.tryGetGroup(groupId: groupId, messageKey: key);
+      final memKey = 'g:$groupId:$key';
+      if (persisted != null && persisted.isNotEmpty) {
+        _decryptedCache[memKey] ??= persisted;
+        continue;
+      }
+      if (_decryptedCache.containsKey(memKey) || _decrypting.contains(memKey)) continue;
+
+      if (processed >= batchSize) {
+        hasMore = true;
+        continue;
+      }
+
+      processed++;
+      _decrypting.add(memKey);
+      try {
+        SecretKey? gk = _groupKeyCache[groupId];
+        gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: myUid);
+        if (gk != null) _groupKeyCache[groupId] = gk;
+
+        final plain = await E2ee.decryptGroupMessage(groupId: groupId, myUid: myUid, groupKey: gk, message: m);
+        if (!mounted) return;
+        if (_activeGroupId != groupId) return;
+
+        setState(() => _decryptedCache[memKey] = plain);
+        PlaintextCache.putGroup(groupId: groupId, messageKey: key, plaintext: plain);
+      } catch (_) {
+        // ignore
+      } finally {
+        _decrypting.remove(memKey);
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+
+    if (!mounted) return;
+    if (_activeGroupId != groupId) return;
+
+    if (hasMore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _warmupGroupDecryptAll(items: items, groupId: groupId, myUid: myUid);
+      });
+    }
+  }
 
   // DM ephemeral messaging controls.
   // 0=use settings, 1=never, 2=1m, 3=1h, 4=1d, 5=burn-after-read
@@ -4072,6 +4336,12 @@ class _ChatsTabState extends State<_ChatsTab> {
     if (myLogin == null || myLogin.trim().isEmpty) {
       throw Exception('Nelze zjistit tvůj GitHub username.');
     }
+
+    // Ensure my E2EE bundle is published as soon as we accept a private chat.
+    // This makes fingerprints/keys available to the other side immediately.
+    try {
+      await E2ee.publishMyPublicKey(uid: myUid);
+    } catch (_) {}
 
     final myLoginLower = myLogin.trim().toLowerCase();
 
@@ -4447,6 +4717,7 @@ class _ChatsTabState extends State<_ChatsTab> {
     // Show our own message immediately (avoid "🔒 …" placeholder).
     if (mounted) {
       setState(() => _decryptedCache[key] = text);
+      PlaintextCache.putDm(otherLoginLower: otherLoginLower, messageKey: key, plaintext: text);
     }
 
     if (widget.settings.vibrationEnabled) {
@@ -4689,10 +4960,12 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   if (entry.value is! Map) continue;
                                   final meta = Map<String, dynamic>.from(entry.value as Map);
                                   final status = (meta['status'] ?? 'accepted').toString();
-                                  if (!status.startsWith('pending')) continue;
+                                  if (!(status.startsWith('pending') || status == 'accepted')) continue;
                                   final avatarUrl = (meta['avatarUrl'] ?? '').toString();
-                                  final lastAt = (meta['lastMessageAt'] is int) ? meta['lastMessageAt'] as int : 0;
-                                  const lastText = 'Žádost o chat';
+                                  final lastAt = (meta['lastMessageAt'] is int)
+                                      ? meta['lastMessageAt'] as int
+                                      : ((meta['savedAt'] is int) ? meta['savedAt'] as int : 0);
+                                  final lastText = status.startsWith('pending') ? 'Žádost o chat' : '🔒';
                                   rows.add({
                                     'login': login,
                                     'avatarUrl': avatarUrl,
@@ -5035,7 +5308,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                     final fromLogin = (req['fromLogin'] ?? '').toString();
                                     final fromUid = (req['fromUid'] ?? '').toString();
                                     final fromAvatar = (req['fromAvatarUrl'] ?? '').toString();
-                                    final hasEncryptedText = (req['ciphertext'] ?? '').toString().isNotEmpty;
+                                    final hasEncryptedText = ((req['ciphertext'] ?? req['ct'] ?? req['cipher'])?.toString().isNotEmpty ?? false);
                                     return ListTile(
                                       leading: fromUid.isNotEmpty
                                           ? _AvatarWithPresenceDot(uid: fromUid, avatarUrl: fromAvatar, radius: 18)
@@ -6114,6 +6387,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                     // Show our own message immediately (avoid "🔒 …" placeholder).
                     if (newKey != null && newKey.isNotEmpty && mounted) {
                       setState(() => _decryptedCache['g:$groupId:$newKey'] = text);
+                      PlaintextCache.putGroup(groupId: groupId, messageKey: newKey, plaintext: text);
                     }
                     if (widget.settings.vibrationEnabled) {
                       HapticFeedback.lightImpact();
@@ -6191,7 +6465,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 if (k.isEmpty) continue;
                                 if (_migrating.contains('g:$groupId:$k')) continue;
                                 final pt = (msg['text'] ?? '').toString();
-                                final hasC = msg['ciphertext'] != null && (msg['ciphertext']?.toString().isNotEmpty ?? false);
+                                final hasC = ((msg['ciphertext'] ?? msg['ct'] ?? msg['cipher'])?.toString().isNotEmpty ?? false);
                                 if (pt.isEmpty || hasC) continue;
 
                                 _migrating.add('g:$groupId:$k');
@@ -6208,6 +6482,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                     });
                                     if (!mounted) return;
                                     setState(() => _decryptedCache['g:$groupId:$k'] = pt);
+                                    PlaintextCache.putGroup(groupId: groupId, messageKey: k, plaintext: pt);
                                   } catch (_) {
                                     // ignore
                                   } finally {
@@ -6215,6 +6490,11 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   }
                                 }();
                               }
+                            });
+
+                            // Background warm-up: decrypt & persist ciphertext messages.
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              _warmupGroupDecryptAll(items: items, groupId: groupId, myUid: current.uid);
                             });
 
                             return ListView.builder(
@@ -6229,22 +6509,29 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 final isMe = fromUid == current.uid;
                                 final burnAfterRead = m['burnAfterRead'] == true;
 
-                                final hasCipher = m['ciphertext'] != null && (m['ciphertext']?.toString().isNotEmpty ?? false);
+                                final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
                                 final cacheKey = 'g:$groupId:$key';
                                 String text = plaintext;
                                 if (text.isEmpty && hasCipher) {
-                                  text = _decryptedCache[cacheKey] ?? '🔒 …';
-                                  if (_decryptedCache[cacheKey] == null && !_decrypting.contains(cacheKey)) {
+                                  final persisted = PlaintextCache.tryGetGroup(groupId: groupId, messageKey: key);
+                                  if (persisted != null && persisted.isNotEmpty) {
+                                    text = persisted;
+                                    _decryptedCache[cacheKey] ??= persisted;
+                                  } else {
+                                    text = _decryptedCache[cacheKey] ?? '🔒 …';
+                                  }
+
+                                  if (persisted == null && _decryptedCache[cacheKey] == null && !_decrypting.contains(cacheKey)) {
                                     _decrypting.add(cacheKey);
                                     () async {
                                       try {
                                         SecretKey? gk = _groupKeyCache[groupId];
                                         gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
                                         if (gk != null) _groupKeyCache[groupId] = gk;
-                                        if (gk == null) return;
                                         final plain = await E2ee.decryptGroupMessage(groupId: groupId, myUid: current.uid, groupKey: gk, message: m);
                                         if (!mounted) return;
                                         setState(() => _decryptedCache[cacheKey] = plain);
+                                        PlaintextCache.putGroup(groupId: groupId, messageKey: key, plaintext: plain);
 
                                         if (burnAfterRead && !isMe) {
                                           final delKey = 'g:$groupId:$key';
@@ -6565,7 +6852,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   if (k.isEmpty) continue;
                                   if (_migrating.contains(k)) continue;
                                   final pt = (msg['text'] ?? '').toString();
-                                  final hasC = msg['ciphertext'] != null && (msg['ciphertext']?.toString().isNotEmpty ?? false);
+                                  final hasC = ((msg['ciphertext'] ?? msg['ct'] ?? msg['cipher'])?.toString().isNotEmpty ?? false);
                                   final fu = (msg['fromUid'] ?? '').toString();
                                   if (pt.isEmpty || hasC || fu.isEmpty) continue;
 
@@ -6581,6 +6868,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                                       });
                                       if (!mounted) return;
                                       setState(() => _decryptedCache[k] = pt);
+                                      PlaintextCache.putDm(otherLoginLower: loginLower, messageKey: k, plaintext: pt);
                                     } catch (_) {
                                       // ignore
                                     } finally {
@@ -6588,6 +6876,11 @@ class _ChatsTabState extends State<_ChatsTab> {
                                     }
                                   }();
                                 }
+                              });
+
+                              // Background warm-up: decrypt & persist ciphertext messages.
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _warmupDmDecryptAll(items: items, loginLower: loginLower, myUid: current.uid);
                               });
 
                               return ListView.builder(
@@ -6601,19 +6894,28 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   final isMe = fromUid == current.uid;
                                   final burnAfterRead = m['burnAfterRead'] == true;
 
-                                  final hasCipher = m['ciphertext'] != null && (m['ciphertext']?.toString().isNotEmpty ?? false);
+                                  final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
                                   String text = plaintext;
                                   if (text.isEmpty && hasCipher) {
-                                    text = _decryptedCache[key] ?? '🔒 …';
-                                    if (_decryptedCache[key] == null && !_decrypting.contains(key)) {
+                                    final persisted = PlaintextCache.tryGetDm(otherLoginLower: loginLower, messageKey: key);
+                                    if (persisted != null && persisted.isNotEmpty) {
+                                      text = persisted;
+                                      _decryptedCache[key] ??= persisted;
+                                    } else {
+                                      text = _decryptedCache[key] ?? '🔒 …';
+                                    }
+
+                                    if (persisted == null && _decryptedCache[key] == null && !_decrypting.contains(key)) {
                                       _decrypting.add(key);
                                       () async {
                                         try {
-                                          final otherUid = isMe ? (await _ensureActiveOtherUid()) : fromUid;
-                                          if (otherUid == null || otherUid.isEmpty) return;
+                                          final peerUid = await _ensureActiveOtherUid();
+                                          final otherUid = isMe ? (peerUid ?? '') : (fromUid.isNotEmpty ? fromUid : (peerUid ?? ''));
+                                          if (otherUid.isEmpty) return;
                                           final plain = await E2ee.decryptFromUser(otherUid: otherUid, message: m);
                                           if (!mounted) return;
                                           setState(() => _decryptedCache[key] = plain);
+                                          PlaintextCache.putDm(otherLoginLower: loginLower, messageKey: key, plaintext: plain);
 
                                           if (burnAfterRead && !isMe) {
                                             if (key.isNotEmpty && !_ttlDeleting.contains(key)) {

@@ -46,6 +46,41 @@ class E2ee {
 
   static const _storage = FlutterSecureStorage();
 
+  // Active Firebase UID used to namespace local E2EE state.
+  // This prevents leaking keys/sessions across accounts on the same device.
+  static String? _activeUid;
+
+  static void setActiveUser(String? uid) {
+    final u = (uid ?? '').trim();
+    _activeUid = u.isEmpty ? null : u;
+  }
+
+  static String _scopedKey(String baseKey) {
+    final scope = (_activeUid == null || _activeUid!.isEmpty) ? 'no_uid' : _activeUid!;
+    return '$baseKey::$scope';
+  }
+
+  static Future<String?> _readKey(String baseKey) async {
+    final scoped = _scopedKey(baseKey);
+    final v = await _storage.read(key: scoped);
+    if (v != null) return v;
+
+    // Legacy fallback (pre-scoping). If activeUid is set, migrate forward.
+    final legacy = await _storage.read(key: baseKey);
+    if (legacy != null && legacy.isNotEmpty && _activeUid != null && _activeUid!.isNotEmpty) {
+      try {
+        await _storage.write(key: scoped, value: legacy);
+      } catch (_) {
+        // ignore
+      }
+    }
+    return legacy;
+  }
+
+  static Future<void> _writeKey(String baseKey, String value) async {
+    await _storage.write(key: _scopedKey(baseKey), value: value);
+  }
+
   static final _x25519 = X25519();
   static final _aead = Chacha20.poly1305Aead();
   static final _ed25519 = Ed25519();
@@ -76,6 +111,50 @@ class E2ee {
 
   static String _b64(List<int> bytes) => base64UrlEncode(bytes);
   static List<int> _unb64(String s) => base64Url.decode(s);
+
+  static String _fieldStr(Map<String, dynamic> m, List<String> keys) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v == null) continue;
+      if (v is Map || v is List) continue;
+      final s = v.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return '';
+  }
+
+  static int _fieldInt(Map<String, dynamic> m, List<String> keys, int fallback) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v == null) continue;
+      if (v is Map || v is List) continue;
+      if (v is int) return v;
+      final s = v.toString().trim();
+      final n = int.tryParse(s);
+      if (n != null) return n;
+    }
+    return fallback;
+  }
+
+  static void _mergeNested(Map<String, dynamic> into, Object? maybeMap) {
+    if (maybeMap is! Map) return;
+    for (final e in maybeMap.entries) {
+      final k = e.key.toString();
+      if (!into.containsKey(k) || into[k] == null || (into[k] is String && (into[k] as String).trim().isEmpty)) {
+        into[k] = e.value;
+      }
+    }
+  }
+
+  // Some older message schemas store the cipher fields inside a nested object
+  // (e.g. {ciphertext: {iv, ct, tag}}). Flatten these so decrypt can read them.
+  static Map<String, dynamic> _flattenCipherEnvelope(Map<String, dynamic> message) {
+    final out = Map<String, dynamic>.from(message);
+    for (final containerKey in const ['ciphertext', 'cipher', 'enc', 'box', 'payload', 'data']) {
+      _mergeNested(out, message[containerKey]);
+    }
+    return out;
+  }
 
   static String _formatFingerprint(List<int> bytes) {
     return bytes
@@ -111,9 +190,9 @@ class E2ee {
     // Returns: true if changed, false if same/first-time, null if storage unavailable.
     try {
       final k = 'e2ee_peer_fp_v2_$peerUid';
-      final prev = await _storage.read(key: k);
+      final prev = await _readKey(k);
       final changed = prev != null && prev.isNotEmpty && prev != fingerprint;
-      await _storage.write(key: k, value: fingerprint);
+      await _writeKey(k, fingerprint);
       return changed;
     } catch (_) {
       return null;
@@ -180,8 +259,8 @@ class E2ee {
 
   static Future<SimpleKeyPairData> getOrCreateIdentityKeyPair() async {
     try {
-      final priv = await _storage.read(key: _kPrivKey);
-      final pub = await _storage.read(key: _kPubKey);
+      final priv = await _readKey(_kPrivKey);
+      final pub = await _readKey(_kPubKey);
       if (priv != null && priv.isNotEmpty && pub != null && pub.isNotEmpty) {
         final privBytes = _unb64(priv);
         final pubBytes = _unb64(pub);
@@ -196,8 +275,8 @@ class E2ee {
       final privBytes = await kp.extractPrivateKeyBytes();
       final pubKey = await kp.extractPublicKey();
 
-      await _storage.write(key: _kPrivKey, value: _b64(privBytes));
-      await _storage.write(key: _kPubKey, value: _b64(pubKey.bytes));
+      await _writeKey(_kPrivKey, _b64(privBytes));
+      await _writeKey(_kPubKey, _b64(pubKey.bytes));
 
       return SimpleKeyPairData(
         privBytes,
@@ -212,8 +291,8 @@ class E2ee {
 
   static Future<SimpleKeyPairData> getOrCreateSigningKeyPair() async {
     try {
-      final priv = await _storage.read(key: _kEdPrivKey);
-      final pub = await _storage.read(key: _kEdPubKey);
+      final priv = await _readKey(_kEdPrivKey);
+      final pub = await _readKey(_kEdPubKey);
       if (priv != null && priv.isNotEmpty && pub != null && pub.isNotEmpty) {
         return SimpleKeyPairData(
           _unb64(priv),
@@ -226,8 +305,8 @@ class E2ee {
       final privBytes = await kp.extractPrivateKeyBytes();
       final pubKey = await kp.extractPublicKey();
 
-      await _storage.write(key: _kEdPrivKey, value: _b64(privBytes));
-      await _storage.write(key: _kEdPubKey, value: _b64(pubKey.bytes));
+      await _writeKey(_kEdPrivKey, _b64(privBytes));
+      await _writeKey(_kEdPubKey, _b64(pubKey.bytes));
 
       return SimpleKeyPairData(
         privBytes,
@@ -241,10 +320,10 @@ class E2ee {
 
   static Future<({int spkId, SimpleKeyPairData spk, List<int> signature})> getOrCreateSignedPrekey() async {
     try {
-      final priv = await _storage.read(key: _kSpkPrivKey);
-      final pub = await _storage.read(key: _kSpkPubKey);
-      final idStr = await _storage.read(key: _kSpkIdKey);
-      final sigStr = await _storage.read(key: _kSpkSigKey);
+      final priv = await _readKey(_kSpkPrivKey);
+      final pub = await _readKey(_kSpkPubKey);
+      final idStr = await _readKey(_kSpkIdKey);
+      final sigStr = await _readKey(_kSpkSigKey);
 
       if (priv != null && priv.isNotEmpty && pub != null && pub.isNotEmpty && idStr != null && idStr.isNotEmpty && sigStr != null && sigStr.isNotEmpty) {
         final spkId = int.tryParse(idStr) ?? 0;
@@ -277,10 +356,10 @@ class E2ee {
       ]);
       final sig = await _ed25519.sign(msg, keyPair: signKp);
 
-      await _storage.write(key: _kSpkPrivKey, value: _b64(spkPriv));
-      await _storage.write(key: _kSpkPubKey, value: _b64(spkPubKey.bytes));
-      await _storage.write(key: _kSpkIdKey, value: spkId.toString());
-      await _storage.write(key: _kSpkSigKey, value: _b64(sig.bytes));
+      await _writeKey(_kSpkPrivKey, _b64(spkPriv));
+      await _writeKey(_kSpkPubKey, _b64(spkPubKey.bytes));
+      await _writeKey(_kSpkIdKey, spkId.toString());
+      await _writeKey(_kSpkSigKey, _b64(sig.bytes));
 
       return (
         spkId: spkId,
@@ -471,7 +550,7 @@ class E2ee {
 
   static Future<_DrState?> _loadSession(String otherUid) async {
     try {
-      final s = await _storage.read(key: _sessionKey(otherUid));
+      final s = await _readKey(_sessionKey(otherUid));
       if (s == null || s.isEmpty) return null;
       final m = jsonDecode(s);
       if (m is! Map) return null;
@@ -482,7 +561,7 @@ class E2ee {
   }
 
   static Future<void> _saveSession(String otherUid, _DrState state) async {
-    await _storage.write(key: _sessionKey(otherUid), value: jsonEncode(state.toJson()));
+    await _writeKey(_sessionKey(otherUid), jsonEncode(state.toJson()));
   }
 
   static Future<List<int>> _dh({required SimpleKeyPairData my, required SimplePublicKey their}) async {
@@ -599,14 +678,16 @@ class E2ee {
     required String otherUid,
     required Map<String, dynamic> message,
   }) async {
-    final v = (message['e2eeV'] is int) ? message['e2eeV'] as int : int.tryParse((message['e2eeV'] ?? '').toString()) ?? v1;
-    if (v >= v2 || (message['alg'] ?? '').toString().contains('dr-v2')) {
-      return _decryptFromUserV2(otherUid: otherUid, message: message);
+    final m = _flattenCipherEnvelope(message);
+    final v = _fieldInt(m, ['e2eeV', 'v'], v1);
+    if (v >= v2 || (m['alg'] ?? '').toString().contains('dr-v2')) {
+      return _decryptFromUserV2(otherUid: otherUid, message: m);
     }
 
-    final nonce = (message['nonce'] ?? '').toString();
-    final ciphertext = (message['ciphertext'] ?? '').toString();
-    final mac = (message['mac'] ?? '').toString();
+    // Backwards-compat aliases (older clients / migrations).
+    final nonce = _fieldStr(m, ['nonce', 'iv']);
+    final ciphertext = _fieldStr(m, ['ciphertext', 'ct', 'cipher']);
+    final mac = _fieldStr(m, ['mac', 'tag']);
     if (nonce.isEmpty || ciphertext.isEmpty || mac.isEmpty) {
       throw E2eeException('E2EE: missing fields');
     }
@@ -630,14 +711,15 @@ class E2ee {
     required String otherUid,
     required Map<String, dynamic> message,
   }) async {
-    final nonceB64 = (message['nonce'] ?? '').toString();
-    final ciphertextB64 = (message['ciphertext'] ?? '').toString();
-    final macB64 = (message['mac'] ?? '').toString();
-    final dhB64 = (message['dh'] ?? '').toString();
-    final n = (message['n'] is int) ? message['n'] as int : int.tryParse((message['n'] ?? '').toString()) ?? 0;
-    final pn = (message['pn'] is int) ? message['pn'] as int : int.tryParse((message['pn'] ?? '').toString()) ?? 0;
-    final isInit = message['init'] == true;
-    final spkId = (message['spkId'] is int) ? message['spkId'] as int : int.tryParse((message['spkId'] ?? '').toString());
+    final m = _flattenCipherEnvelope(message);
+    final nonceB64 = _fieldStr(m, ['nonce', 'iv']);
+    final ciphertextB64 = _fieldStr(m, ['ciphertext', 'ct', 'cipher']);
+    final macB64 = _fieldStr(m, ['mac', 'tag']);
+    final dhB64 = _fieldStr(m, ['dh']);
+    final n = _fieldInt(m, ['n'], 0);
+    final pn = _fieldInt(m, ['pn'], 0);
+    final isInit = m['init'] == true;
+    final spkId = (m['spkId'] is int) ? m['spkId'] as int : int.tryParse((m['spkId'] ?? '').toString());
 
     if (nonceB64.isEmpty || ciphertextB64.isEmpty || macB64.isEmpty || dhB64.isEmpty) {
       throw E2eeException('E2EE: missing fields');
@@ -821,7 +903,7 @@ class E2ee {
 
   static Future<SecretKey?> getLocalGroupKey(String groupId) async {
     try {
-      final s = await _storage.read(key: '$_kGroupPrefix$groupId');
+      final s = await _readKey('$_kGroupPrefix$groupId');
       if (s == null || s.isEmpty) return null;
       return SecretKey(_unb64(s));
     } catch (e) {
@@ -831,7 +913,7 @@ class E2ee {
 
   static Future<void> _saveLocalGroupKey(String groupId, SecretKey key) async {
     final bytes = await key.extractBytes();
-    await _storage.write(key: '$_kGroupPrefix$groupId', value: _b64(bytes));
+    await _writeKey('$_kGroupPrefix$groupId', _b64(bytes));
   }
 
   static Future<SecretKey?> fetchGroupKey({
@@ -932,9 +1014,10 @@ class E2ee {
     required SecretKey groupKey,
     required Map<String, dynamic> message,
   }) async {
-    final nonce = (message['nonce'] ?? '').toString();
-    final ciphertext = (message['ciphertext'] ?? '').toString();
-    final mac = (message['mac'] ?? '').toString();
+    final m = _flattenCipherEnvelope(message);
+    final nonce = _fieldStr(m, ['nonce', 'iv']);
+    final ciphertext = _fieldStr(m, ['ciphertext', 'ct', 'cipher']);
+    final mac = _fieldStr(m, ['mac', 'tag']);
     if (nonce.isEmpty || ciphertext.isEmpty || mac.isEmpty) {
       throw E2eeException('E2EE: missing fields');
     }
@@ -961,7 +1044,7 @@ class E2ee {
 
   static Future<_GroupSenderState?> _loadGroupSenderState({required String groupId, required String myUid}) async {
     try {
-      final s = await _storage.read(key: _gSendKey(groupId, myUid));
+      final s = await _readKey(_gSendKey(groupId, myUid));
       if (s == null || s.isEmpty) return null;
       final m = jsonDecode(s);
       if (m is! Map) return null;
@@ -972,12 +1055,12 @@ class E2ee {
   }
 
   static Future<void> _saveGroupSenderState({required String groupId, required String myUid, required _GroupSenderState st}) async {
-    await _storage.write(key: _gSendKey(groupId, myUid), value: jsonEncode(st.toJson()));
+    await _writeKey(_gSendKey(groupId, myUid), jsonEncode(st.toJson()));
   }
 
   static Future<_GroupRecvState?> _loadGroupRecvState({required String groupId, required String senderUid, required String keyId}) async {
     try {
-      final s = await _storage.read(key: _gRecvKey(groupId, senderUid, keyId));
+      final s = await _readKey(_gRecvKey(groupId, senderUid, keyId));
       if (s == null || s.isEmpty) return null;
       final m = jsonDecode(s);
       if (m is! Map) return null;
@@ -988,7 +1071,7 @@ class E2ee {
   }
 
   static Future<void> _saveGroupRecvState({required String groupId, required String senderUid, required String keyId, required _GroupRecvState st}) async {
-    await _storage.write(key: _gRecvKey(groupId, senderUid, keyId), value: jsonEncode(st.toJson()));
+    await _writeKey(_gRecvKey(groupId, senderUid, keyId), jsonEncode(st.toJson()));
   }
 
   static Future<bool> _groupSupportsV2(String groupId) async {
@@ -1103,15 +1186,19 @@ class E2ee {
   static Future<String> decryptGroupMessage({
     required String groupId,
     required String myUid,
-    required SecretKey groupKey,
+    required SecretKey? groupKey,
     required Map<String, dynamic> message,
   }) async {
-    final v = (message['e2eeV'] is int) ? message['e2eeV'] as int : int.tryParse((message['e2eeV'] ?? '').toString()) ?? v1;
-    final alg = (message['alg'] ?? '').toString();
+    final m = _flattenCipherEnvelope(message);
+    final v = _fieldInt(m, ['e2eeV', 'v'], v1);
+    final alg = (m['alg'] ?? '').toString();
     if (v >= v2 && alg == 'group-sender-v2') {
-      return _decryptFromGroupV2(groupId: groupId, myUid: myUid, message: message);
+      return _decryptFromGroupV2(groupId: groupId, myUid: myUid, message: m);
     }
-    return decryptFromGroup(groupKey: groupKey, message: message);
+    if (groupKey == null) {
+      throw E2eeException('E2EE: missing group key');
+    }
+    return decryptFromGroup(groupKey: groupKey, message: m);
   }
 
   static Future<String> _decryptFromGroupV2({
@@ -1119,12 +1206,13 @@ class E2ee {
     required String myUid,
     required Map<String, dynamic> message,
   }) async {
-    final nonceB64 = (message['nonce'] ?? '').toString();
-    final ciphertextB64 = (message['ciphertext'] ?? '').toString();
-    final macB64 = (message['mac'] ?? '').toString();
-    final keyId = (message['keyId'] ?? '').toString();
-    final n = (message['n'] is int) ? message['n'] as int : int.tryParse((message['n'] ?? '').toString()) ?? 0;
-    final senderUid = (message['fromUid'] ?? '').toString();
+    final m = _flattenCipherEnvelope(message);
+    final nonceB64 = _fieldStr(m, ['nonce', 'iv']);
+    final ciphertextB64 = _fieldStr(m, ['ciphertext', 'ct', 'cipher']);
+    final macB64 = _fieldStr(m, ['mac', 'tag']);
+    final keyId = (m['keyId'] ?? '').toString();
+    final n = (m['n'] is int) ? m['n'] as int : int.tryParse((m['n'] ?? '').toString()) ?? 0;
+    final senderUid = (m['fromUid'] ?? '').toString();
     if (nonceB64.isEmpty || ciphertextB64.isEmpty || macB64.isEmpty || keyId.isEmpty || senderUid.isEmpty) {
       throw E2eeException('E2EE: missing fields');
     }

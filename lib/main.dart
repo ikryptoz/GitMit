@@ -8,12 +8,15 @@ import 'package:gitmit/notifications_service.dart';
 import 'package:gitmit/deep_links.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:gitmit/github_api.dart';
+import 'package:gitmit/e2ee.dart';
+import 'package:gitmit/plaintext_cache.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await PlaintextCache.init();
   await Firebase.initializeApp();
   await AppNotifications.initialize();
   await DeepLinks.initialize();
@@ -131,6 +134,16 @@ class _AuthGateState extends State<AuthGate> {
     _sub = FirebaseAuth.instance.authStateChanges().listen((u) {
       _user = u;
       _ready = true;
+      // Scope all local E2EE state to the active Firebase UID.
+      // This prevents cross-account key/session mixups when switching accounts.
+      E2ee.setActiveUser(u?.uid);
+      () async {
+        try {
+          await PlaintextCache.setActiveUser(u?.uid);
+        } catch (_) {
+          // ignore
+        }
+      }();
       AppNotifications.setUser(u);
       DeepLinks.onAuthChanged(u);
       if (mounted) setState(() {});
