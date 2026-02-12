@@ -201,6 +201,55 @@ List<int> _randomBytes(int length) =>
 String _b64(List<int> bytes) => base64UrlEncode(bytes);
 List<int> _unb64(String s) => base64Url.decode(s);
 
+String? _localDeviceIdCache;
+
+Future<String> _getOrCreateLocalDeviceId() async {
+  if (_localDeviceIdCache != null && _localDeviceIdCache!.isNotEmpty) {
+    return _localDeviceIdCache!;
+  }
+
+  if (kIsWeb) {
+    _localDeviceIdCache = 'web-default';
+    return _localDeviceIdCache!;
+  }
+
+  final dir = await getApplicationSupportDirectory();
+  final file = File('${dir.path}/.gitmit_device_id');
+  if (await file.exists()) {
+    final saved = (await file.readAsString()).trim();
+    if (saved.isNotEmpty) {
+      _localDeviceIdCache = saved;
+      return saved;
+    }
+  }
+
+  final randomBytes = _randomBytes(12);
+  final id = randomBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  await file.writeAsString(id, flush: true);
+  _localDeviceIdCache = id;
+  return id;
+}
+
+String _devicePlatformLabel() {
+  if (kIsWeb) return 'web';
+  if (Platform.isAndroid) return 'android';
+  if (Platform.isIOS) return 'ios';
+  if (Platform.isMacOS) return 'macos';
+  if (Platform.isWindows) return 'windows';
+  if (Platform.isLinux) return 'linux';
+  return Platform.operatingSystem;
+}
+
+String _deviceNameLabel() {
+  if (kIsWeb) return 'Web zařízení';
+  if (Platform.isAndroid) return 'Android zařízení';
+  if (Platform.isIOS) return 'iPhone / iPad';
+  if (Platform.isMacOS) return 'Mac';
+  if (Platform.isWindows) return 'Windows';
+  if (Platform.isLinux) return 'Linux';
+  return 'Zařízení';
+}
+
 class _GitmitSyntaxHighlighter extends SyntaxHighlighter {
   _GitmitSyntaxHighlighter(this._baseStyle);
 
@@ -793,15 +842,13 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                         ),
 
                       const Divider(height: 32),
-                      Text(
-                        AppLanguage.tr(context, 'Aktivita na GitHubu', 'GitHub activity'),
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      _ProfileSectionCard(
+                        title: AppLanguage.tr(context, 'Aktivita na GitHubu', 'GitHub activity'),
+                        icon: Icons.grid_on_outlined,
+                        child: (activitySvg != null && activitySvg.trim().isNotEmpty)
+                            ? _SvgWidget(svg: activitySvg)
+                            : const Text('Načítání aktivity...'),
                       ),
-                      const SizedBox(height: 8),
-                      if (activitySvg != null)
-                        SizedBox(height: 120, child: _SvgWidget(svg: activitySvg))
-                      else
-                        const Text('Načítání aktivity...'),
                       const SizedBox(height: 24),
                       Text(
                         AppLanguage.tr(context, 'Top repozitáře', 'Top repositories'),
@@ -1929,6 +1976,9 @@ class _DashboardPageState extends State<DashboardPage> {
   String _presenceStatus = 'online';
   bool _onlinePresenceNotifySent = false;
   String? _presenceSessionId;
+  String? _currentDeviceId;
+  int _currentDeviceLoginAt = 0;
+  StreamSubscription<DatabaseEvent>? _deviceSessionSub;
   static const Duration _presenceSessionTtl = Duration(days: 3);
   late final _AppLifecycleObserver _lifecycleObserver;
 
@@ -2108,6 +2158,9 @@ class _DashboardPageState extends State<DashboardPage> {
     if (current != null) {
       final sessionRef = _presenceSessionRef(current.uid);
       sessionRef?.remove();
+      if (_currentDeviceId != null && _currentDeviceId!.isNotEmpty) {
+        await rtdb().ref('deviceSessions/${current.uid}/${_currentDeviceId!}').remove();
+      }
     }
     () async {
       try {
@@ -2276,6 +2329,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _lifecycleObserver = _AppLifecycleObserver(onChanged: _onLifecycle);
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
     _listenPresenceSettings();
+    unawaited(_initDeviceSession());
   }
 
   @override
@@ -2283,12 +2337,74 @@ class _DashboardPageState extends State<DashboardPage> {
     WidgetsBinding.instance.removeObserver(_lifecycleObserver);
     _connectedSub?.cancel();
     _presenceEnabledSub?.cancel();
+    _deviceSessionSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _initDeviceSession() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final deviceId = await _getOrCreateLocalDeviceId();
+    if (!mounted) return;
+
+    _currentDeviceId = deviceId;
+    _currentDeviceLoginAt = DateTime.now().millisecondsSinceEpoch;
+
+    final online = _presenceEnabled ? (_presenceStatus != 'hidden') : false;
+    final ref = rtdb().ref('deviceSessions/${current.uid}/$deviceId');
+    await ref.update({
+      'deviceId': deviceId,
+      'platform': _devicePlatformLabel(),
+      'deviceName': _deviceNameLabel(),
+      'online': online,
+      'status': _presenceStatus,
+      'loginAt': _currentDeviceLoginAt,
+      'lastSeenAt': ServerValue.timestamp,
+      'updatedAt': ServerValue.timestamp,
+    });
+
+    try {
+      await ref.onDisconnect().update({
+        'online': false,
+        'lastSeenAt': ServerValue.timestamp,
+        'updatedAt': ServerValue.timestamp,
+      });
+    } catch (_) {}
+
+    _deviceSessionSub?.cancel();
+    _deviceSessionSub = ref.onValue.listen((event) async {
+      final v = event.snapshot.value;
+      if (v is! Map) return;
+      final m = Map<String, dynamic>.from(v);
+      final forceLogoutAt = (m['forceLogoutAt'] is int)
+          ? m['forceLogoutAt'] as int
+          : int.tryParse((m['forceLogoutAt'] ?? '').toString()) ?? 0;
+
+      if (forceLogoutAt <= 0) return;
+      if (forceLogoutAt <= _currentDeviceLoginAt) return;
+
+      await _logout();
+    });
+  }
+
+  Future<void> _updateDeviceSessionOnline(bool online) async {
+    final current = FirebaseAuth.instance.currentUser;
+    final deviceId = _currentDeviceId;
+    if (current == null || deviceId == null || deviceId.isEmpty) return;
+
+    await rtdb().ref('deviceSessions/${current.uid}/$deviceId').update({
+      'online': online,
+      'status': _presenceStatus,
+      'lastSeenAt': ServerValue.timestamp,
+      'updatedAt': ServerValue.timestamp,
+    });
   }
 
   void _onLifecycle(AppLifecycleState state) {
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) return;
+    final shouldBeOnline = state == AppLifecycleState.resumed && _presenceEnabled && _presenceStatus != 'hidden';
+    unawaited(_updateDeviceSessionOnline(shouldBeOnline));
     if (!_presenceEnabled) return;
     final presenceRef = rtdb().ref('presence/${current.uid}');
     _ensurePresenceSessionId();
@@ -2386,6 +2502,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _ensurePresenceSessionId();
     final sessionRef = _presenceSessionRef(uid);
     final online = _presenceStatus != 'hidden';
+    unawaited(_updateDeviceSessionOnline(online));
     presenceRef.update({
       'enabled': true,
       'status': _presenceStatus,
@@ -2454,6 +2571,7 @@ class _DashboardPageState extends State<DashboardPage> {
       }
 
       final online = _presenceStatus != 'hidden';
+      unawaited(_updateDeviceSessionOnline(online));
 
       await _cleanupStalePresenceSessions(current.uid);
 
@@ -4957,28 +5075,215 @@ class _GitmitStats {
   final int messagesSent;
 }
 
-class _SettingsDevicesPage extends StatelessWidget {
+class _SettingsDevicesPage extends StatefulWidget {
   const _SettingsDevicesPage({required this.onLogout});
   final VoidCallback onLogout;
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Zařízení')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+  State<_SettingsDevicesPage> createState() => _SettingsDevicesPageState();
+}
+
+class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
+  late final Future<String> _localDeviceIdFuture;
+  final Set<String> _revoking = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _localDeviceIdFuture = _getOrCreateLocalDeviceId();
+  }
+
+  String _lastSeenLabel(int ms) {
+    if (ms <= 0) return 'neznámé';
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final d = now - ms;
+    if (d < 60 * 1000) return 'právě teď';
+    if (d < 60 * 60 * 1000) return 'před ${d ~/ (60 * 1000)} min';
+    if (d < 24 * 60 * 60 * 1000) return 'před ${d ~/ (60 * 60 * 1000)} h';
+    return 'před ${d ~/ (24 * 60 * 60 * 1000)} d';
+  }
+
+  Future<void> _revokeDevice({required String uid, required String deviceId}) async {
+    if (_revoking.contains(deviceId)) return;
+    setState(() => _revoking.add(deviceId));
+    try {
+      await rtdb().ref('deviceSessions/$uid/$deviceId').update({
+        'forceLogoutAt': ServerValue.timestamp,
+        'updatedAt': ServerValue.timestamp,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Zařízení bylo odhlášeno.')),
+      );
+    } finally {
+      if (mounted) setState(() => _revoking.remove(deviceId));
+    }
+  }
+
+  Widget _deviceCard({
+    required String deviceId,
+    required Map<String, dynamic> data,
+    required bool isCurrent,
+    required String uid,
+  }) {
+    final platform = (data['platform'] ?? '').toString().trim();
+    final deviceName = (data['deviceName'] ?? '').toString().trim();
+    final online = data['online'] == true;
+    final lastSeen = (data['lastSeenAt'] is int)
+        ? data['lastSeenAt'] as int
+        : int.tryParse((data['lastSeenAt'] ?? '').toString()) ?? 0;
+
+    final title = deviceName.isNotEmpty ? deviceName : (platform.isNotEmpty ? platform : 'Zařízení');
+    final subtitle = 'Platforma: ${platform.isEmpty ? '-': platform} • ${online ? 'online' : 'offline'} • ${_lastSeenLabel(lastSeen)}';
+    final shortId = deviceId.length > 10 ? deviceId.substring(0, 10) : deviceId;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Aktivní sezení zatím není implementované.'),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: onLogout,
-              child: const Text('Odhlásit se'),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+                if (isCurrent)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                    ),
+                    child: const Text('Toto zařízení', style: TextStyle(fontSize: 12)),
+                  ),
+              ],
             ),
+            const SizedBox(height: 6),
+            Text(subtitle),
+            const SizedBox(height: 4),
+            Text('ID: $shortId', style: const TextStyle(fontSize: 12, color: Colors.white70)),
+            if (!isCurrent) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _revoking.contains(deviceId)
+                    ? null
+                    : () => _revokeDevice(uid: uid, deviceId: deviceId),
+                icon: _revoking.contains(deviceId)
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.logout),
+                label: const Text('Odhlásit toto zařízení'),
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) {
+      return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+    }
+
+    final sessionsRef = rtdb().ref('deviceSessions/${current.uid}');
+
+    return FutureBuilder<String>(
+      future: _localDeviceIdFuture,
+      builder: (context, idSnap) {
+        if (!idSnap.hasData) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Zařízení')),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final localDeviceId = idSnap.data!;
+
+        return Scaffold(
+          appBar: AppBar(title: const Text('Zařízení')),
+          body: StreamBuilder<DatabaseEvent>(
+            stream: sessionsRef.onValue,
+            builder: (context, snap) {
+              final v = snap.data?.snapshot.value;
+              final m = (v is Map) ? Map<dynamic, dynamic>.from(v) : <dynamic, dynamic>{};
+
+              final entries = m.entries
+                  .where((e) => e.value is Map)
+                  .map((e) {
+                    final data = Map<String, dynamic>.from(e.value as Map);
+                    return (
+                      id: e.key.toString(),
+                      data: data,
+                      lastSeen: (data['lastSeenAt'] is int)
+                          ? data['lastSeenAt'] as int
+                          : int.tryParse((data['lastSeenAt'] ?? '').toString()) ?? 0,
+                    );
+                  })
+                  .toList(growable: false);
+
+              entries.sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+
+              final currentEntry = entries.where((e) => e.id == localDeviceId).toList(growable: false);
+              final otherEntries = entries.where((e) => e.id != localDeviceId).toList(growable: false);
+
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  const Text('Toto zařízení', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  if (currentEntry.isNotEmpty)
+                    _deviceCard(
+                      deviceId: currentEntry.first.id,
+                      data: currentEntry.first.data,
+                      isCurrent: true,
+                      uid: current.uid,
+                    )
+                  else
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text('Aktuální zařízení zatím není synchronizované.'),
+                      ),
+                    ),
+
+                  const SizedBox(height: 16),
+                  const Text('Ostatní zařízení', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  if (otherEntries.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text('Žádná další zařízení.'),
+                      ),
+                    )
+                  else
+                    ...otherEntries.map(
+                      (e) => _deviceCard(
+                        deviceId: e.id,
+                        data: e.data,
+                        isCurrent: false,
+                        uid: current.uid,
+                      ),
+                    ),
+
+                  const SizedBox(height: 16),
+                  OutlinedButton(
+                    onPressed: widget.onLogout,
+                    child: const Text('Odhlásit se na tomto zařízení'),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
@@ -5388,27 +5693,13 @@ class _SvgWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: cs.surface,
-          border: Border.all(color: cs.outlineVariant),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: SvgPicture.string(
-              svg,
-              height: 120,
-              fit: BoxFit.none,
-              alignment: Alignment.centerLeft,
-            ),
-          ),
-        ),
+    return SizedBox(
+      width: double.infinity,
+      height: 140,
+      child: SvgPicture.string(
+        svg,
+        fit: BoxFit.contain,
+        alignment: Alignment.centerLeft,
       ),
     );
   }
@@ -5652,11 +5943,13 @@ class _ProfileTabState extends State<_ProfileTab> {
                     ),
                   const SizedBox(height: 8),
                   const Divider(height: 32),
-                  const Text('Aktivita na GitHubu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  if (activitySvg != null && activitySvg.trim().isNotEmpty) _SvgWidget(svg: activitySvg),
-                  if (snap.connectionState == ConnectionState.done && (activitySvg == null || activitySvg.trim().isEmpty))
-                    const Text('Aktivitu se nepodařilo načíst.', style: TextStyle(color: Colors.white60)),
+                  _ProfileSectionCard(
+                    title: 'Aktivita na GitHubu',
+                    icon: Icons.grid_on_outlined,
+                    child: (activitySvg != null && activitySvg.trim().isNotEmpty)
+                        ? _SvgWidget(svg: activitySvg)
+                        : const Text('Aktivitu se nepodařilo načíst.', style: TextStyle(color: Colors.white60)),
+                  ),
                   const SizedBox(height: 24),
                   const Text('Top repozitáře', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -6350,6 +6643,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   String? _groupTypingGroupId;
   late final AnimationController _typingAnim;
   bool _prewarmDecryptStarted = false;
+  final Set<String> _inlineKeyRequestSent = <String>{};
+  bool _sendingInlineKeyRequest = false;
+  final Map<String, bool> _peerHasPublishedKey = <String, bool>{};
+  final Set<String> _peerKeyProbeInFlight = <String>{};
 
   Future<File> _attachmentFile(String cacheKey, String ext) async {
     final dir = await getApplicationDocumentsDirectory();
@@ -7426,6 +7723,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     if (login == null || login.trim().isEmpty) return null;
     final loginLower = login.trim().toLowerCase();
     if (_activeOtherUid != null && _activeOtherUidLoginLower == loginLower) {
+      unawaited(_probePeerPublishedKey(loginLower: loginLower, peerUid: _activeOtherUid!));
       return _activeOtherUid;
     }
     final uid = await _lookupUidForLoginLower(loginLower);
@@ -7434,7 +7732,32 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
       _activeOtherUid = uid;
       _activeOtherUidLoginLower = loginLower;
     });
+    if (uid != null && uid.isNotEmpty) {
+      unawaited(_probePeerPublishedKey(loginLower: loginLower, peerUid: uid));
+    }
     return uid;
+  }
+
+  Future<void> _probePeerPublishedKey({
+    required String loginLower,
+    required String peerUid,
+  }) async {
+    if (loginLower.isEmpty || peerUid.isEmpty) return;
+    if (_peerKeyProbeInFlight.contains(loginLower)) return;
+    _peerKeyProbeInFlight.add(loginLower);
+    try {
+      final fp = await E2ee.fingerprintForUserSigningKey(uid: peerUid, bytes: 8);
+      final hasKey = (fp ?? '').trim().isNotEmpty;
+      if (!mounted) return;
+      if (_peerHasPublishedKey[loginLower] == hasKey) return;
+      setState(() {
+        _peerHasPublishedKey[loginLower] = hasKey;
+      });
+    } catch (_) {
+      // Keep previous cached value if probe fails.
+    } finally {
+      _peerKeyProbeInFlight.remove(loginLower);
+    }
   }
 
   void _setReplyTarget({required String key, required String from, required String preview}) {
@@ -10330,6 +10653,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         return StreamBuilder<DatabaseEvent>(
           stream: dmContactRef.onValue,
           builder: (context, cSnap) {
+                final cVal = cSnap.data?.snapshot.value;
+                final dmAccepted = (cVal is bool) ? cVal : (cVal != null);
 
                 String ttlLabel(int v) {
                   return switch (v) {
@@ -10919,6 +11244,62 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   tooltip: 'Zrušit odpověď',
                                 ),
                               ],
+                            ),
+                          ),
+                        ),
+                      if (!blocked &&
+                          _activeOtherUid != null &&
+                          _activeOtherUid!.isNotEmpty &&
+                          _peerHasPublishedKey[loginLower] == false &&
+                          !_inlineKeyRequestSent.contains(loginLower))
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: FilledButton.tonalIcon(
+                            onPressed: (_sendingInlineKeyRequest || myGithub.trim().isEmpty)
+                                ? null
+                                : () async {
+                                    setState(() => _sendingInlineKeyRequest = true);
+                                    try {
+                                      await _sendDmRequest(
+                                        myUid: current.uid,
+                                        myLogin: myGithub.trim(),
+                                        otherUid: _activeOtherUid!,
+                                        otherLogin: login,
+                                        messageText: '🔐 Prosím povol sdílení E2EE klíče, ať se naváže šifrovaná komunikace.',
+                                      );
+                                      if (!mounted) return;
+                                      setState(() {
+                                        _inlineKeyRequestSent.add(loginLower);
+                                      });
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            dmAccepted
+                                                ? 'Žádost o sdílení klíče odeslána.'
+                                                : 'Invajt + žádost o sdílení klíče odeslána.',
+                                          ),
+                                        ),
+                                      );
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Chyba: $e')),
+                                      );
+                                    } finally {
+                                      if (mounted) setState(() => _sendingInlineKeyRequest = false);
+                                    }
+                                  },
+                            icon: _sendingInlineKeyRequest
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.key_outlined),
+                            label: Text(
+                              dmAccepted
+                                  ? 'Poprosit sdílet klíč'
+                                  : 'Poslat invajt + požádat o klíč',
                             ),
                           ),
                         ),
