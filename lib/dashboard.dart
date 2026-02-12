@@ -2761,6 +2761,105 @@ class UserSettings {
   }
 }
 
+Color _resolveBubbleColor(BuildContext context, String key) {
+  const custom = <String, Color>{
+    'custom_01': Color(0xFFEF5350),
+    'custom_02': Color(0xFFEC407A),
+    'custom_03': Color(0xFFAB47BC),
+    'custom_04': Color(0xFF7E57C2),
+    'custom_05': Color(0xFF5C6BC0),
+    'custom_06': Color(0xFF42A5F5),
+    'custom_07': Color(0xFF26C6DA),
+    'custom_08': Color(0xFF26A69A),
+    'custom_09': Color(0xFF66BB6A),
+    'custom_10': Color(0xFF9CCC65),
+    'custom_11': Color(0xFFD4E157),
+    'custom_12': Color(0xFFFFCA28),
+    'custom_13': Color(0xFFFFA726),
+    'custom_14': Color(0xFF8D6E63),
+    'custom_15': Color(0xFF90A4AE),
+  };
+  if (custom.containsKey(key)) return custom[key]!;
+
+  final cs = Theme.of(context).colorScheme;
+  switch (key) {
+    case 'primary':
+      return cs.primary;
+    case 'secondary':
+      return cs.secondary;
+    case 'tertiary':
+      return cs.tertiary;
+    case 'error':
+      return cs.error;
+    case 'surfaceVariant':
+      return cs.surfaceVariant;
+    case 'primaryContainer':
+      return cs.primaryContainer;
+    case 'secondaryContainer':
+      return cs.secondaryContainer;
+    case 'tertiaryContainer':
+      return cs.tertiaryContainer;
+    case 'inverseSurface':
+      return cs.inverseSurface;
+    case 'surfaceTint':
+      return cs.surfaceTint;
+    case 'surface':
+    default:
+      return cs.surface;
+  }
+}
+
+Color _resolveBubbleTextColor(BuildContext context, String key) {
+  const custom = <String, Color>{
+    'custom_01': Color(0xFFEF5350),
+    'custom_02': Color(0xFFEC407A),
+    'custom_03': Color(0xFFAB47BC),
+    'custom_04': Color(0xFF7E57C2),
+    'custom_05': Color(0xFF5C6BC0),
+    'custom_06': Color(0xFF42A5F5),
+    'custom_07': Color(0xFF26C6DA),
+    'custom_08': Color(0xFF26A69A),
+    'custom_09': Color(0xFF66BB6A),
+    'custom_10': Color(0xFF9CCC65),
+    'custom_11': Color(0xFFD4E157),
+    'custom_12': Color(0xFFFFCA28),
+    'custom_13': Color(0xFFFFA726),
+    'custom_14': Color(0xFF8D6E63),
+    'custom_15': Color(0xFF90A4AE),
+  };
+  if (custom.containsKey(key)) {
+    final c = custom[key]!;
+    return c.computeLuminance() > 0.56 ? Colors.black : Colors.white;
+  }
+
+  final cs = Theme.of(context).colorScheme;
+  switch (key) {
+    case 'primary':
+      return cs.onPrimary;
+    case 'secondary':
+      return cs.onSecondary;
+    case 'tertiary':
+      return cs.onTertiary;
+    case 'error':
+      return cs.onError;
+    case 'surfaceVariant':
+      return cs.onSurfaceVariant;
+    case 'primaryContainer':
+      return cs.onPrimaryContainer;
+    case 'secondaryContainer':
+      return cs.onSecondaryContainer;
+    case 'tertiaryContainer':
+      return cs.onTertiaryContainer;
+    case 'inverseSurface':
+      return cs.onInverseSurface;
+    case 'surfaceTint':
+      return cs.onSurface;
+    case 'surface':
+    default:
+      return cs.onSurface;
+  }
+}
+
 class _AppLifecycleObserver extends WidgetsBindingObserver {
   _AppLifecycleObserver({required this.onChanged});
 
@@ -3984,6 +4083,24 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
     (key: 'slate', label: 'Slate', color: Color(0xFF20242C)),
   ];
 
+  static const _bubblePalette = <({String key, Color color})>[
+    (key: 'custom_01', color: Color(0xFFEF5350)),
+    (key: 'custom_02', color: Color(0xFFEC407A)),
+    (key: 'custom_03', color: Color(0xFFAB47BC)),
+    (key: 'custom_04', color: Color(0xFF7E57C2)),
+    (key: 'custom_05', color: Color(0xFF5C6BC0)),
+    (key: 'custom_06', color: Color(0xFF42A5F5)),
+    (key: 'custom_07', color: Color(0xFF26C6DA)),
+    (key: 'custom_08', color: Color(0xFF26A69A)),
+    (key: 'custom_09', color: Color(0xFF66BB6A)),
+    (key: 'custom_10', color: Color(0xFF9CCC65)),
+    (key: 'custom_11', color: Color(0xFFD4E157)),
+    (key: 'custom_12', color: Color(0xFFFFCA28)),
+    (key: 'custom_13', color: Color(0xFFFFA726)),
+    (key: 'custom_14', color: Color(0xFF8D6E63)),
+    (key: 'custom_15', color: Color(0xFF90A4AE)),
+  ];
+
   @override
   void dispose() {
     super.dispose();
@@ -4081,32 +4198,54 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                   );
                 }).toList(growable: false),
               ),
-              Column(
-                children: [
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    value: settings.bubbleIncoming,
-                    decoration: InputDecoration(labelText: t(context, 'Příchozí bublina', 'Incoming bubble')),
-                    items: const [
-                      DropdownMenuItem(value: 'surface', child: Text('Surface')),
-                      DropdownMenuItem(value: 'surfaceVariant', child: Text('Surface Variant')),
-                      DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
-                    ],
-                    onChanged: (v) => _updateSetting(u.uid, {'bubbleIncoming': v ?? 'surface'}),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    value: settings.bubbleOutgoing,
-                    decoration: InputDecoration(labelText: t(context, 'Odchozí bublina', 'Outgoing bubble')),
-                    items: const [
-                      DropdownMenuItem(value: 'secondaryContainer', child: Text('Secondary Container')),
-                      DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
-                      DropdownMenuItem(value: 'surface', child: Text('Surface')),
-                    ],
-                    onChanged: (v) => _updateSetting(u.uid, {'bubbleOutgoing': v ?? 'secondaryContainer'}),
-                  ),
-                ],
+              Text(t(context, 'Příchozí bublina', 'Incoming bubble'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _bubblePalette.map((p) {
+                  final selected = settings.bubbleIncoming == p.key;
+                  return GestureDetector(
+                    onTap: () => _updateSetting(u.uid, {'bubbleIncoming': p.key}),
+                    child: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: p.color,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: selected ? Theme.of(context).colorScheme.primary : Colors.white24,
+                          width: selected ? 3 : 1,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(growable: false),
+              ),
+              const SizedBox(height: 14),
+              Text(t(context, 'Odchozí bublina', 'Outgoing bubble'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _bubblePalette.map((p) {
+                  final selected = settings.bubbleOutgoing == p.key;
+                  return GestureDetector(
+                    onTap: () => _updateSetting(u.uid, {'bubbleOutgoing': p.key}),
+                    child: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: p.color,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: selected ? Theme.of(context).colorScheme.primary : Colors.white24,
+                          width: selected ? 3 : 1,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(growable: false),
               ),
               const SizedBox(height: 12),
               _ChatPreview(settings: settings),
@@ -4907,36 +5046,6 @@ class _ChatPreview extends StatelessWidget {
 
   final UserSettings settings;
 
-  Color _bubbleColor(BuildContext context, String key, {required bool outgoing}) {
-    final cs = Theme.of(context).colorScheme;
-    switch (key) {
-      case 'surfaceVariant':
-        return cs.surfaceVariant;
-      case 'primaryContainer':
-        return cs.primaryContainer;
-      case 'secondaryContainer':
-        return cs.secondaryContainer;
-      case 'surface':
-      default:
-        return cs.surface;
-    }
-  }
-
-  Color _bubbleTextColor(BuildContext context, String key) {
-    final cs = Theme.of(context).colorScheme;
-    switch (key) {
-      case 'surfaceVariant':
-        return cs.onSurfaceVariant;
-      case 'primaryContainer':
-        return cs.onPrimaryContainer;
-      case 'secondaryContainer':
-        return cs.onSecondaryContainer;
-      case 'surface':
-      default:
-        return cs.onSurface;
-    }
-  }
-
   Color? _backgroundColor(BuildContext context, String key) {
     final k = key.trim();
     if (k.isEmpty) return null;
@@ -4965,10 +5074,10 @@ class _ChatPreview extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
     );
 
-    final inColor = _bubbleColor(context, settings.bubbleIncoming, outgoing: false);
-    final outColor = _bubbleColor(context, settings.bubbleOutgoing, outgoing: true);
-    final inText = _bubbleTextColor(context, settings.bubbleIncoming);
-    final outText = _bubbleTextColor(context, settings.bubbleOutgoing);
+    final inColor = _resolveBubbleColor(context, settings.bubbleIncoming);
+    final outColor = _resolveBubbleColor(context, settings.bubbleOutgoing);
+    final inText = _resolveBubbleTextColor(context, settings.bubbleIncoming);
+    final outText = _resolveBubbleTextColor(context, settings.bubbleOutgoing);
 
     Widget bubble({required bool outgoing, required String text, required double maxWidth}) {
       final color = outgoing ? outColor : inColor;
@@ -6240,6 +6349,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   bool _groupTypingOn = false;
   String? _groupTypingGroupId;
   late final AnimationController _typingAnim;
+  bool _prewarmDecryptStarted = false;
 
   Future<File> _attachmentFile(String cacheKey, String ext) async {
     final dir = await getApplicationDocumentsDirectory();
@@ -7146,6 +7256,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     _typingAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
     _activeLogin = widget.initialOpenLogin;
     _activeAvatarUrl = widget.initialOpenAvatarUrl;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _prewarmDmDecryptAfterJoin();
+    });
   }
 
   @override
@@ -7229,6 +7342,83 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     if (v == null) return null;
     final s = v.toString().trim();
     return s.isEmpty ? null : s;
+  }
+
+  Future<void> _prewarmDmDecryptAfterJoin() async {
+    if (_prewarmDecryptStarted) return;
+    _prewarmDecryptStarted = true;
+
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final myUid = current.uid;
+
+    try {
+      final rootSnap = await rtdb().ref('messages/$myUid').get();
+      final rootValue = rootSnap.value;
+      final root = (rootValue is Map) ? rootValue : null;
+      if (root == null) return;
+
+      final peerUidByLoginLower = <String, String?>{};
+
+      for (final threadEntry in root.entries) {
+        if (!mounted) return;
+
+        final login = threadEntry.key.toString();
+        final loginLower = login.trim().toLowerCase();
+        if (loginLower.isEmpty) continue;
+
+        if (!peerUidByLoginLower.containsKey(loginLower)) {
+          peerUidByLoginLower[loginLower] = await _lookupUidForLoginLower(loginLower);
+        }
+        final peerUid = peerUidByLoginLower[loginLower];
+
+        final threadRaw = threadEntry.value;
+        if (threadRaw is! Map) continue;
+
+        final items = <Map<String, dynamic>>[];
+        for (final msgEntry in threadRaw.entries) {
+          if (msgEntry.value is! Map) continue;
+          final m = Map<String, dynamic>.from(msgEntry.value as Map);
+          m['__key'] = msgEntry.key.toString();
+          items.add(m);
+        }
+
+        items.sort((a, b) {
+          final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+          final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+          return bt.compareTo(at);
+        });
+
+        for (final m in items.take(60)) {
+          if (!mounted) return;
+
+          final key = (m['__key'] ?? '').toString();
+          if (key.isEmpty) continue;
+
+          final plaintext = (m['text'] ?? '').toString();
+          final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
+          if (!hasCipher || plaintext.isNotEmpty) continue;
+
+          final persisted = PlaintextCache.tryGetDm(otherLoginLower: loginLower, messageKey: key);
+          if (persisted != null && persisted.isNotEmpty) continue;
+
+          final fromUid = (m['fromUid'] ?? '').toString();
+          final otherUid = (fromUid == myUid)
+              ? (peerUid ?? '')
+              : (fromUid.isNotEmpty ? fromUid : (peerUid ?? ''));
+          if (otherUid.isEmpty) continue;
+
+          try {
+            final plain = await E2ee.decryptFromUser(otherUid: otherUid, message: m);
+            PlaintextCache.putDm(otherLoginLower: loginLower, messageKey: key, plaintext: plain);
+          } catch (_) {
+            // best-effort: warm-up should never break UI flow
+          }
+        }
+      }
+    } catch (_) {
+      // best-effort
+    }
   }
 
   Future<String?> _ensureActiveOtherUid() async {
@@ -7759,33 +7949,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   }
 
   Color _bubbleColor(BuildContext context, String key) {
-    final cs = Theme.of(context).colorScheme;
-    switch (key) {
-      case 'surfaceVariant':
-        return cs.surfaceVariant;
-      case 'primaryContainer':
-        return cs.primaryContainer;
-      case 'secondaryContainer':
-        return cs.secondaryContainer;
-      case 'surface':
-      default:
-        return cs.surface;
-    }
+    return _resolveBubbleColor(context, key);
   }
 
   Color _bubbleTextColor(BuildContext context, String key) {
-    final cs = Theme.of(context).colorScheme;
-    switch (key) {
-      case 'surfaceVariant':
-        return cs.onSurfaceVariant;
-      case 'primaryContainer':
-        return cs.onPrimaryContainer;
-      case 'secondaryContainer':
-        return cs.onSecondaryContainer;
-      case 'surface':
-      default:
-        return cs.onSurface;
-    }
+    return _resolveBubbleTextColor(context, key);
   }
 
   Future<void> _send() async {
