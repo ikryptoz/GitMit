@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:gitmit/app_language.dart';
 import 'package:gitmit/rtdb.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -49,6 +50,12 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
+    final title = AppLanguage.tr(context, 'Registrace do GitMit', 'Register to GitMit');
+    final emailLabel = AppLanguage.tr(context, 'Email', 'Email');
+    final passwordLabel = AppLanguage.tr(context, 'Heslo', 'Password');
+    final registerLabel = AppLanguage.tr(context, 'Registrovat', 'Register');
+    final hasAccount = AppLanguage.tr(context, 'Už máš účet? Přihlásit se', 'Already have an account? Sign in');
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Center(
@@ -62,7 +69,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 32),
                 Center(
                   child: Text(
-                    'Register to GitMit',
+                    title,
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -74,13 +81,13 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 40),
                 TextField(
                   controller: _emailController,
-                  decoration: const InputDecoration(labelText: 'Email'),
+                  decoration: InputDecoration(labelText: emailLabel),
                   keyboardType: TextInputType.emailAddress,
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _passwordController,
-                  decoration: const InputDecoration(labelText: 'Password'),
+                  decoration: InputDecoration(labelText: passwordLabel),
                   obscureText: true,
                 ),
                 const SizedBox(height: 24),
@@ -88,7 +95,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   onPressed: _loading ? null : _register,
                   child: _loading
                       ? const CircularProgressIndicator(color: Colors.black)
-                      : const Text('Register'),
+                      : Text(registerLabel),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: Colors.black,
@@ -102,7 +109,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 24),
                 TextButton(
                   onPressed: () => Navigator.of(context).pushReplacementNamed('/login'),
-                  child: const Text('Already have an account? Sign in'),
+                  child: Text(hasAccount),
                   style: TextButton.styleFrom(foregroundColor: Colors.white),
                 ),
               ],

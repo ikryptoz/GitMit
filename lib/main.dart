@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:gitmit/app_language.dart';
 import 'package:gitmit/register.dart';
 import 'package:gitmit/dashboard.dart';
 import 'package:gitmit/notifications_service.dart';
@@ -33,85 +35,100 @@ class MyApp extends StatelessWidget {
     const gray5 = Color(0xFF232925); // #232925
     const gray6 = Color(0xFF101411); // #101411
 
-    return MaterialApp(
-      navigatorKey: DeepLinks.navigatorKey,
-      title: 'GitMit',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        fontFamily: 'monospace',
-        scaffoldBackgroundColor: gray6,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: gray5,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          iconTheme: IconThemeData(color: Colors.white),
-        ),
-        colorScheme: const ColorScheme(
-          brightness: Brightness.dark,
-          primary: Colors.white,
-          onPrimary: Colors.black,
-          secondary: Colors.white,
-          onSecondary: Colors.black,
-          error: Colors.redAccent,
-          onError: Colors.white,
-          background: gray6,
-          onBackground: Colors.white,
-          surface: gray5,
-          onSurface: Colors.white,
-        ),
-        inputDecorationTheme: const InputDecorationTheme(
-          filled: true,
-          fillColor: gray5,
-          labelStyle: TextStyle(color: Colors.white),
-          border: OutlineInputBorder(),
-          enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: Colors.white24),
+    return ValueListenableBuilder<String>(
+      valueListenable: AppLanguage.code,
+      builder: (context, lang, _) {
+        return MaterialApp(
+          navigatorKey: DeepLinks.navigatorKey,
+          title: 'GitMit',
+          locale: AppLanguage.locale,
+          supportedLocales: const [
+            Locale('cs'),
+            Locale('en'),
+          ],
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          theme: ThemeData(
+            brightness: Brightness.dark,
+            fontFamily: 'monospace',
+            scaffoldBackgroundColor: gray6,
+            appBarTheme: const AppBarTheme(
+              backgroundColor: gray5,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              iconTheme: IconThemeData(color: Colors.white),
+            ),
+            colorScheme: const ColorScheme(
+              brightness: Brightness.dark,
+              primary: Colors.white,
+              onPrimary: Colors.black,
+              secondary: Colors.white,
+              onSecondary: Colors.black,
+              error: Colors.redAccent,
+              onError: Colors.white,
+              background: gray6,
+              onBackground: Colors.white,
+              surface: gray5,
+              onSurface: Colors.white,
+            ),
+            inputDecorationTheme: const InputDecorationTheme(
+              filled: true,
+              fillColor: gray5,
+              labelStyle: TextStyle(color: Colors.white),
+              border: OutlineInputBorder(),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.white24),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.white, width: 2),
+              ),
+            ),
+            switchTheme: SwitchThemeData(
+              thumbColor: MaterialStateProperty.resolveWith((states) {
+                if (states.contains(MaterialState.disabled)) return Colors.white24;
+                return states.contains(MaterialState.selected) ? Colors.white : Colors.white70;
+              }),
+              trackColor: MaterialStateProperty.resolveWith((states) {
+                if (states.contains(MaterialState.disabled)) return Colors.white10;
+                return states.contains(MaterialState.selected) ? Colors.white38 : Colors.white24;
+              }),
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ButtonStyle(
+                backgroundColor: MaterialStatePropertyAll(Colors.white),
+                foregroundColor: MaterialStatePropertyAll(Colors.black),
+                textStyle: MaterialStatePropertyAll(TextStyle(fontWeight: FontWeight.bold)),
+                shape: MaterialStatePropertyAll(RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(8)),
+                )),
+                padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: ButtonStyle(
+                foregroundColor: const MaterialStatePropertyAll(Colors.white),
+                side: MaterialStatePropertyAll(BorderSide(color: Colors.white38)),
+                shape: MaterialStatePropertyAll(RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(8)),
+                )),
+                padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+            ),
           ),
-          focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: Colors.white, width: 2),
-          ),
-        ),
-        switchTheme: SwitchThemeData(
-          thumbColor: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.disabled)) return Colors.white24;
-            return states.contains(MaterialState.selected) ? Colors.white : Colors.white70;
-          }),
-          trackColor: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.disabled)) return Colors.white10;
-            return states.contains(MaterialState.selected) ? Colors.white38 : Colors.white24;
-          }),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ButtonStyle(
-            backgroundColor: MaterialStatePropertyAll(Colors.white),
-            foregroundColor: MaterialStatePropertyAll(Colors.black),
-            textStyle: MaterialStatePropertyAll(TextStyle(fontWeight: FontWeight.bold)),
-            shape: MaterialStatePropertyAll(RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(8)),
-            )),
-            padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: ButtonStyle(
-            foregroundColor: const MaterialStatePropertyAll(Colors.white),
-            side: MaterialStatePropertyAll(BorderSide(color: Colors.white38)),
-            shape: MaterialStatePropertyAll(RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(8)),
-            )),
-            padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(foregroundColor: Colors.white),
-        ),
-      ),
-      routes: {
-        '/login': (context) => const LoginPage(),
-        '/register': (context) => const RegisterPage(),
-        '/dashboard': (context) => const DashboardPage(),
+          routes: {
+            '/login': (context) => const LoginPage(),
+            '/register': (context) => const RegisterPage(),
+            '/dashboard': (context) => const DashboardPage(),
+          },
+          home: const AuthGate(),
+        );
       },
-      home: const AuthGate(),
     );
   }
 }
@@ -147,6 +164,7 @@ class _AuthGateState extends State<AuthGate> {
         }
       }();
       AppNotifications.setUser(u);
+      AppLanguage.bindUser(u?.uid);
       DeepLinks.onAuthChanged(u);
       if (mounted) setState(() {});
     });
@@ -155,6 +173,7 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void dispose() {
     _sub?.cancel();
+    AppLanguage.dispose();
     super.dispose();
   }
 
@@ -182,8 +201,8 @@ class _AuthGateState extends State<AuthGate> {
         if (provider == 'github') {
           if (githubUsername.isEmpty) {
             return _AccountSetupScreen(
-              title: 'Dokončuji registraci…',
-              message: 'Načítám profil a připravuji účet.',
+              title: AppLanguage.tr(context, 'Dokončuji registraci…', 'Finishing registration…'),
+              message: AppLanguage.tr(context, 'Načítám profil a připravuji účet.', 'Loading profile and preparing your account.'),
             );
           }
           final lower = githubUsername.toLowerCase();
@@ -197,15 +216,23 @@ class _AuthGateState extends State<AuthGate> {
                 // Best-effort: fill mapping once it's known.
                 mapRef.set(user.uid);
                 return _AccountSetupScreen(
-                  title: 'Dokončuji registraci…',
-                  message: 'Nastavuji mapování @${githubUsername.toLowerCase()} → UID.',
+                  title: AppLanguage.tr(context, 'Dokončuji registraci…', 'Finishing registration…'),
+                  message: AppLanguage.tr(
+                    context,
+                    'Nastavuji mapování @${githubUsername.toLowerCase()} → UID.',
+                    'Setting mapping @${githubUsername.toLowerCase()} → UID.',
+                  ),
                 );
               }
 
               if (mapped != user.uid) {
                 return _AccountSetupScreen(
-                  title: 'Chyba registrace',
-                  message: 'Username @$githubUsername už je spárovaný s jiným účtem. Odhlas se a zkus to znovu.',
+                  title: AppLanguage.tr(context, 'Chyba registrace', 'Registration error'),
+                  message: AppLanguage.tr(
+                    context,
+                    'Username @$githubUsername už je spárovaný s jiným účtem. Odhlas se a zkus to znovu.',
+                    'Username @$githubUsername is already linked to another account. Sign out and try again.',
+                  ),
                   showSignOut: true,
                 );
               }
@@ -252,7 +279,7 @@ class _AccountSetupScreen extends StatelessWidget {
                 const SizedBox(height: 8),
                 OutlinedButton(
                   onPressed: () => FirebaseAuth.instance.signOut(),
-                  child: const Text('Odhlásit'),
+                  child: Text(AppLanguage.tr(context, 'Odhlásit', 'Sign out')),
                 ),
               ],
             ],
@@ -356,7 +383,13 @@ class _LoginPageState extends State<LoginPage> {
         // Avoid leaving the app in a "half-logged-in" state where AuthGate waits forever.
         await FirebaseAuth.instance.signOut();
         if (mounted) {
-          setState(() => _errorMessage = 'Nepodařilo se zjistit GitHub username. Zkus to prosím znovu.');
+          setState(
+            () => _errorMessage = AppLanguage.tr(
+              context,
+              'Nepodařilo se zjistit GitHub username. Zkus to prosím znovu.',
+              'Could not resolve GitHub username. Please try again.',
+            ),
+          );
         }
       }
       // Navigation is handled by AuthGate reacting to authStateChanges.
@@ -379,6 +412,9 @@ class _LoginPageState extends State<LoginPage> {
           return const AuthGate();
         }
 
+        final signInTitle = AppLanguage.tr(context, 'Přihlásit do GitMit', 'Sign in to GitMit');
+        final signInWithGithub = AppLanguage.tr(context, 'Přihlásit přes GitHub', 'Sign in with GitHub');
+
         return Scaffold(
           backgroundColor: Colors.black,
           body: Center(
@@ -391,7 +427,7 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 32),
                   Center(
                     child: Text(
-                      'Sign in to GitMit',
+                      signInTitle,
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -411,9 +447,9 @@ class _LoginPageState extends State<LoginPage> {
                         borderRadius: BorderRadius.all(Radius.circular(8)),
                       ),
                     ),
-                    child: const Text(
-                      'Sign in with GitHub',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                    child: Text(
+                      signInWithGithub,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                   if (_errorMessage != null) ...[

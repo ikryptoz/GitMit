@@ -14,6 +14,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
 import 'package:gitmit/e2ee.dart';
+import 'package:gitmit/app_language.dart';
 import 'package:gitmit/group_invites.dart';
 import 'package:gitmit/github_api.dart';
 import 'package:gitmit/join_group_via_link_qr_page.dart';
@@ -614,7 +615,7 @@ class _UserProfilePageState extends State<_UserProfilePage> {
   Widget build(BuildContext context) {
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) {
-      return const Scaffold(body: Center(child: Text('Nejsi přihlášen.')));
+      return Scaffold(body: Center(child: Text(AppLanguage.tr(context, 'Nejsi přihlášen.', 'You are not signed in.'))));
     }
 
     final myUid = current.uid;
@@ -668,7 +669,7 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                       Center(child: avatarWidget),
                       const SizedBox(height: 16),
                       StreamBuilder<DatabaseEvent>(
-                        stream: hasOtherUid ? otherUserRef.child(otherUid).onValue : const Stream.empty(),
+                        stream: hasOtherUid ? otherUserRef.child(otherUid).onValue : null,
                         builder: (context, userSnap) {
                           final v = userSnap.data?.snapshot.value;
                           final m = (v is Map) ? v : null;
@@ -688,10 +689,10 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                       FilledButton.tonalIcon(
                         onPressed: () => _openRepoUrl(context, 'https://github.com/${widget.login}'),
                         icon: const Icon(Icons.open_in_new),
-                        label: const Text('Zobrazit na GitHubu'),
+                        label: Text(AppLanguage.tr(context, 'Zobrazit na GitHubu', 'View on GitHub')),
                       ),
                       const SizedBox(height: 10),
-                      if (!hasOtherUid) const Text('Účet není propojený v databázi.'),
+                      if (!hasOtherUid) Text(AppLanguage.tr(context, 'Účet není propojený v databázi.', 'Account is not linked in database.')),
 
                       if (hasOtherUid)
                         FutureBuilder<String?>(
@@ -757,16 +758,20 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                         ),
 
                       const Divider(height: 32),
-                      const Text('Aktivita na GitHubu',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                      Text(
+                        AppLanguage.tr(context, 'Aktivita na GitHubu', 'GitHub activity'),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
                       const SizedBox(height: 8),
                       if (activitySvg != null)
                         SizedBox(height: 120, child: _SvgWidget(svg: activitySvg))
                       else
                         const Text('Načítání aktivity...'),
                       const SizedBox(height: 24),
-                      const Text('Top repozitáře',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                      Text(
+                        AppLanguage.tr(context, 'Top repozitáře', 'Top repositories'),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
                       const SizedBox(height: 8),
                       if (topRepos != null && topRepos.isNotEmpty)
                         Column(
@@ -805,10 +810,10 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                             return Column(
                               children: [
                                 _ProfileSectionCard(
-                                  title: 'Achievementy na GitMitu',
+                                  title: AppLanguage.tr(context, 'Achievementy na GitMitu', 'GitMit achievements'),
                                   icon: Icons.emoji_events_outlined,
                                   child: badges.isEmpty
-                                      ? const Text('Zatím žádné achievementy.')
+                                      ? Text(AppLanguage.tr(context, 'Zatím žádné achievementy.', 'No achievements yet.'))
                                       : Wrap(
                                           spacing: 8,
                                           runSpacing: 8,
@@ -824,22 +829,31 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                 ),
                                 const SizedBox(height: 12),
                                 _ProfileSectionCard(
-                                  title: 'Aktivita v GitMitu',
+                                  title: AppLanguage.tr(context, 'Aktivita v GitMitu', 'GitMit activity'),
                                   icon: Icons.insights_outlined,
                                   child: FutureBuilder<_GitmitStats?>(
                                     future: _loadGitmitStats(otherUid),
                                     builder: (context, statsSnap) {
                                       final stats = statsSnap.data;
                                       if (stats == null) {
-                                        return const Text('Načítání aktivity...');
+                                        return Text(AppLanguage.tr(context, 'Načítání aktivity...', 'Loading activity...'));
                                       }
                                       return Wrap(
                                         spacing: 8,
                                         runSpacing: 8,
                                         children: [
-                                          _ProfileMetricTile(label: 'Priváty', value: '${stats.privateChats}'),
-                                          _ProfileMetricTile(label: 'Skupiny', value: '${stats.groups}'),
-                                          _ProfileMetricTile(label: 'Odeslané', value: '${stats.messagesSent}'),
+                                          _ProfileMetricTile(
+                                            label: AppLanguage.tr(context, 'Priváty', 'DMs'),
+                                            value: '${stats.privateChats}',
+                                          ),
+                                          _ProfileMetricTile(
+                                            label: AppLanguage.tr(context, 'Skupiny', 'Groups'),
+                                            value: '${stats.groups}',
+                                          ),
+                                          _ProfileMetricTile(
+                                            label: AppLanguage.tr(context, 'Odeslané', 'Sent'),
+                                            value: '${stats.messagesSent}',
+                                          ),
                                         ],
                                       );
                                     },
@@ -1885,13 +1899,22 @@ class _DashboardPageState extends State<DashboardPage> {
 
   final GlobalKey<_ChatsTabState> _chatsKey = GlobalKey<_ChatsTabState>();
 
-  static const _titles = <String>[
-    'Jobs',
-    'Chaty',
-    'Kontakty',
-    'Nastavení',
-    'Profil',
-  ];
+  String _titleForIndex(BuildContext context, int index) {
+    switch (index) {
+      case 0:
+        return 'Jobs';
+      case 1:
+        return AppLanguage.tr(context, 'Chaty', 'Chats');
+      case 2:
+        return AppLanguage.tr(context, 'Kontakty', 'Contacts');
+      case 3:
+        return AppLanguage.tr(context, 'Nastavení', 'Settings');
+      case 4:
+        return AppLanguage.tr(context, 'Profil', 'Profile');
+      default:
+        return 'GitMit';
+    }
+  }
 
   Future<bool> _onWillPop() async {
     // Never exit the app from a nested step; step back instead.
@@ -1913,7 +1936,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   PreferredSizeWidget _pillAppBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final title = _titles[_index];
+    final title = _titleForIndex(context, _index);
     return AppBar(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
@@ -1938,12 +1961,12 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _pillBottomNav(BuildContext context, {required bool vibrationEnabled}) {
     final cs = Theme.of(context).colorScheme;
-    const items = <({IconData icon, String label})>[
+    final items = <({IconData icon, String label})>[
       (icon: Icons.dashboard, label: 'Jobs'),
-      (icon: Icons.chat_bubble_outline, label: 'Chaty'),
-      (icon: Icons.people_outline, label: 'Kontakty'),
-      (icon: Icons.settings_outlined, label: 'Nastavení'),
-      (icon: Icons.person_outline, label: 'Profil'),
+      (icon: Icons.chat_bubble_outline, label: AppLanguage.tr(context, 'Chaty', 'Chats')),
+      (icon: Icons.people_outline, label: AppLanguage.tr(context, 'Kontakty', 'Contacts')),
+      (icon: Icons.settings_outlined, label: AppLanguage.tr(context, 'Nastavení', 'Settings')),
+      (icon: Icons.person_outline, label: AppLanguage.tr(context, 'Profil', 'Profile')),
     ];
 
     return SafeArea(
@@ -4687,12 +4710,15 @@ class _SettingsLanguagePage extends StatelessWidget {
 
   Future<void> _reset(String uid) async {
     await _update(uid, {'language': 'cs'});
+    AppLanguage.setLanguage('cs');
   }
 
   @override
   Widget build(BuildContext context) {
     final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    if (u == null) {
+      return Center(child: Text(AppLanguage.tr(context, 'Nepřihlášen.', 'Not signed in.')));
+    }
     final settingsRef = rtdb().ref('settings/${u.uid}');
 
     return StreamBuilder<DatabaseEvent>(
@@ -4700,23 +4726,27 @@ class _SettingsLanguagePage extends StatelessWidget {
       builder: (context, snap) {
         final s = UserSettings.fromSnapshot(snap.data?.snapshot.value);
         return Scaffold(
-          appBar: AppBar(title: const Text('Jazyk')),
+          appBar: AppBar(title: Text(AppLanguage.tr(context, 'Jazyk', 'Language'))),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               DropdownButtonFormField<String>(
                 value: s.language,
-                decoration: const InputDecoration(labelText: 'Jazyk'),
-                items: const [
-                  DropdownMenuItem(value: 'cs', child: Text('Čeština')),
-                  DropdownMenuItem(value: 'en', child: Text('English')),
+                decoration: InputDecoration(labelText: AppLanguage.tr(context, 'Jazyk', 'Language')),
+                items: [
+                  DropdownMenuItem(value: 'cs', child: Text(AppLanguage.tr(context, 'Čeština', 'Czech'))),
+                  const DropdownMenuItem(value: 'en', child: Text('English')),
                 ],
-                onChanged: (v) => _update(u.uid, {'language': v ?? 'cs'}),
+                onChanged: (v) async {
+                  final lang = v ?? 'cs';
+                  AppLanguage.setLanguage(lang);
+                  await _update(u.uid, {'language': lang});
+                },
               ),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () => _reset(u.uid),
-                child: const Text('Reset'),
+                child: Text(AppLanguage.tr(context, 'Reset', 'Reset')),
               ),
             ],
           ),
@@ -7688,7 +7718,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     final replyToPreview = _replyToPreview;
 
     String outgoingText;
-    if (isPendingCodeText && pendingCode != null) {
+    if (isPendingCodeText) {
       outgoingText = jsonEncode(pendingCode.toJson());
     } else {
       outgoingText = text;
@@ -7992,7 +8022,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
               final hasNew = myReq?['hasNewModeratorMessage'] == true;
 
               return StreamBuilder<DatabaseEvent>(
-                stream: isModerator ? allVerifyReqsRef.onValue : const Stream.empty(),
+                stream: isModerator ? allVerifyReqsRef.onValue : null,
                 builder: (context, allReqSnap) {
                   final allVal = allReqSnap.data?.snapshot.value;
                   final allMap = (allVal is Map) ? allVal : null;
@@ -8341,7 +8371,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                     final targetLogin = (item['targetLogin'] ?? '').toString();
                                     final requestedBy = (item['requestedByGithub'] ?? '').toString();
                                     return StreamBuilder<DatabaseEvent>(
-                                      stream: (groupId.isEmpty) ? const Stream.empty() : rtdb().ref('groups/$groupId').onValue,
+                                      stream: (groupId.isEmpty) ? null : rtdb().ref('groups/$groupId').onValue,
                                       builder: (context, gSnap) {
                                         final gv = gSnap.data?.snapshot.value;
                                         final gm = (gv is Map) ? gv : null;
@@ -9442,7 +9472,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                     final replyToPreview = _replyToPreview;
 
                     String outgoingText;
-                    if (isPendingCodeText && pendingCode != null) {
+                    if (isPendingCodeText) {
                       outgoingText = jsonEncode(pendingCode.toJson());
                     } else {
                       outgoingText = text;
