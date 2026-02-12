@@ -10407,7 +10407,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
               builder: (context, bSnap) {
                 final blocked = bSnap.data?.snapshot.value == true;
 
-                final canSend = accepted && !lockedIncoming;
+                // Allow composing even before acceptance (first/next sends keep
+                // updating DM request). Only incoming request stays locked until
+                // user explicitly accepts/rejects.
+                final canSend = !lockedIncoming;
 
                 return Expanded(
                   child: Column(
