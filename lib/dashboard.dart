@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
@@ -19,6 +20,8 @@ import 'package:gitmit/join_group_via_link_qr_page.dart';
 import 'package:gitmit/plaintext_cache.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:gitmit/data_usage.dart';
+import 'package:image_editor_plus/image_editor_plus.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -76,6 +79,99 @@ Future<String> _uploadGroupLogo({required String groupId, required Uint8List byt
 
   if (lastFirebaseError != null) throw lastFirebaseError;
   throw Exception('Logo upload failed: ${lastError ?? 'unknown error'}');
+}
+
+class _AttachmentPayload {
+  const _AttachmentPayload({
+    required this.type,
+    required this.path,
+    required this.nonceB64,
+    required this.keyB64,
+    required this.size,
+    required this.mime,
+    required this.ext,
+  });
+
+  final String type;
+  final String path;
+  final String nonceB64;
+  final String keyB64;
+  final int size;
+  final String mime;
+  final String ext;
+
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'path': path,
+        'nonce': nonceB64,
+        'key': keyB64,
+        'size': size,
+        'mime': mime,
+        'ext': ext,
+      };
+
+  static _AttachmentPayload? tryParse(String text) {
+    if (!text.trim().startsWith('{')) return null;
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is! Map) return null;
+      final m = Map<String, dynamic>.from(decoded);
+      if ((m['type'] ?? '').toString() != 'image') return null;
+      final path = (m['path'] ?? '').toString();
+      final nonce = (m['nonce'] ?? '').toString();
+      final key = (m['key'] ?? '').toString();
+      final size = (m['size'] is int) ? m['size'] as int : int.tryParse((m['size'] ?? '').toString()) ?? 0;
+      final mime = (m['mime'] ?? '').toString();
+      final ext = (m['ext'] ?? '').toString();
+      if (path.isEmpty || nonce.isEmpty || key.isEmpty || ext.isEmpty) return null;
+      return _AttachmentPayload(
+        type: 'image',
+        path: path,
+        nonceB64: nonce,
+        keyB64: key,
+        size: size,
+        mime: mime.isEmpty ? 'image/jpeg' : mime,
+        ext: ext,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+final _attachmentAead = Chacha20.poly1305Aead();
+final _attachmentRng = Random.secure();
+
+List<int> _randomBytes(int length) =>
+    List<int>.generate(length, (_) => _attachmentRng.nextInt(256), growable: false);
+
+String _b64(List<int> bytes) => base64UrlEncode(bytes);
+List<int> _unb64(String s) => base64Url.decode(s);
+
+Future<({List<int> cipher, String nonceB64, String keyB64})> _encryptAttachmentBytes(List<int> clearBytes) async {
+  final key = _randomBytes(32);
+  final nonce = _randomBytes(12);
+  final box = await _attachmentAead.encrypt(
+    clearBytes,
+    secretKey: SecretKey(key),
+    nonce: nonce,
+  );
+  return (cipher: box.cipherText + box.mac.bytes, nonceB64: _b64(nonce), keyB64: _b64(key));
+}
+
+Future<List<int>> _decryptAttachmentBytes({
+  required List<int> cipher,
+  required String nonceB64,
+  required String keyB64,
+}) async {
+  if (cipher.length < 16) return const [];
+  final nonce = _unb64(nonceB64);
+  final key = _unb64(keyB64);
+  final macBytes = cipher.sublist(cipher.length - 16);
+  final ct = cipher.sublist(0, cipher.length - 16);
+  final box = SecretBox(ct, nonce: nonce, mac: Mac(macBytes));
+  final clear = await _attachmentAead.decrypt(box, secretKey: SecretKey(key));
+  return clear;
 }
 
 Future<String?> _myGithubUsernameFromRtdb(String myUid) async {
@@ -2655,13 +2751,17 @@ class _SettingsChatPage extends StatefulWidget {
 }
 
 class _SettingsChatPageState extends State<_SettingsChatPage> {
-  final _wallpaper = TextEditingController();
-  final _debouncer = _Debouncer(const Duration(milliseconds: 600));
+  static const _bgPalette = <({String key, String label, Color color})>[
+    (key: 'none', label: 'Default', color: Color(0x00000000)),
+    (key: 'graphite', label: 'Graphite', color: Color(0xFF1B1F1D)),
+    (key: 'teal', label: 'Teal', color: Color(0xFF1A2B2C)),
+    (key: 'pine', label: 'Pine', color: Color(0xFF1C2A24)),
+    (key: 'sand', label: 'Sand', color: Color(0xFF2B241C)),
+    (key: 'slate', label: 'Slate', color: Color(0xFF20242C)),
+  ];
 
   @override
   void dispose() {
-    _debouncer.dispose();
-    _wallpaper.dispose();
     super.dispose();
   }
 
@@ -2694,10 +2794,6 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
       stream: settingsRef.onValue,
       builder: (context, snap) {
         final settings = UserSettings.fromSnapshot(snap.data?.snapshot.value);
-        if (_wallpaper.text != settings.wallpaperUrl) {
-          _wallpaper.text = settings.wallpaperUrl;
-          _wallpaper.selection = TextSelection.fromPosition(TextPosition(offset: _wallpaper.text.length));
-        }
 
         return Scaffold(
           appBar: AppBar(title: const Text('Nastavení chatů')),
@@ -2725,12 +2821,41 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                 trailing: Text(settings.bubbleRadius.toStringAsFixed(0)),
               ),
               const SizedBox(height: 8),
-              TextField(
-                controller: _wallpaper,
-                decoration: const InputDecoration(labelText: 'Wallpaper URL (volitelné)'),
-                onChanged: (_) => _debouncer.run(() => _updateSetting(u.uid, {'wallpaperUrl': _wallpaper.text.trim()})),
-              ),
+              const Text('Pozadí chatu', style: TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: _bgPalette.map((bg) {
+                  final selected = (settings.wallpaperUrl.isEmpty && bg.key == 'none') || settings.wallpaperUrl == bg.key;
+                  final swatchColor = bg.key == 'none' ? Theme.of(context).colorScheme.surface : bg.color;
+                  return GestureDetector(
+                    onTap: () => _updateSetting(u.uid, {'wallpaperUrl': bg.key == 'none' ? '' : bg.key}),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: swatchColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: selected ? Theme.of(context).colorScheme.primary : Colors.white24,
+                              width: selected ? 2 : 1,
+                            ),
+                          ),
+                          child: bg.key == 'none'
+                              ? const Icon(Icons.block, size: 20)
+                              : null,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(bg.label, style: const TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  );
+                }).toList(growable: false),
+              ),
               Column(
                 children: [
                   DropdownButtonFormField<String>(
@@ -4829,7 +4954,7 @@ class _ChatsTab extends StatefulWidget {
   State<_ChatsTab> createState() => _ChatsTabState();
 }
 
-class _ChatsTabState extends State<_ChatsTab> {
+class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixin {
   String? _activeLogin;
   String? _activeAvatarUrl;
   String? _activeOtherUid;
@@ -4844,6 +4969,484 @@ class _ChatsTabState extends State<_ChatsTab> {
   final Set<String> _decrypting = {};
   final Set<String> _migrating = {};
   final Map<String, SecretKey> _groupKeyCache = {};
+  final Map<String, String> _attachmentCache = {};
+  final Set<String> _attachmentLoading = {};
+  final Set<String> _deliveredMarked = {};
+  final Set<String> _readMarked = {};
+  Timer? _typingTimeout;
+  bool _typingOn = false;
+  bool _groupTypingOn = false;
+  String? _groupTypingGroupId;
+  late final AnimationController _typingAnim;
+
+  Future<File> _attachmentFile(String cacheKey, String ext) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final folder = Directory('${dir.path}/attachments');
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+    return File('${folder.path}/$cacheKey.$ext');
+  }
+
+  Future<void> _ensureAttachmentCached({
+    required String cacheKey,
+    required _AttachmentPayload payload,
+  }) async {
+    if (_attachmentCache.containsKey(cacheKey) || _attachmentLoading.contains(cacheKey)) return;
+
+    _attachmentLoading.add(cacheKey);
+    try {
+      final file = await _attachmentFile(cacheKey, payload.ext);
+      if (await file.exists()) {
+        if (mounted) setState(() => _attachmentCache[cacheKey] = file.path);
+        return;
+      }
+
+      if (!await DataUsageTracker.canDownloadMedia()) return;
+
+      final ref = FirebaseStorage.instance.ref(payload.path);
+      final bytes = await ref.getData(payload.size > 0 ? payload.size : 50 * 1024 * 1024);
+      if (bytes == null || bytes.isEmpty) return;
+      await DataUsageTracker.recordDownload(bytes.length, category: 'media');
+      final clear = await _decryptAttachmentBytes(
+        cipher: bytes,
+        nonceB64: payload.nonceB64,
+        keyB64: payload.keyB64,
+      );
+      await file.writeAsBytes(clear, flush: true);
+      if (!mounted) return;
+      setState(() => _attachmentCache[cacheKey] = file.path);
+    } catch (_) {
+      // ignore
+    } finally {
+      _attachmentLoading.remove(cacheKey);
+    }
+  }
+
+  Future<Uint8List?> _pickAndEditImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+      maxWidth: 2048,
+      maxHeight: 2048,
+    );
+    if (picked == null) return null;
+    final bytes = await picked.readAsBytes();
+    final edited = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(
+        builder: (_) => ImageEditor(image: bytes),
+      ),
+    );
+    final out = edited ?? bytes;
+    final decoded = img.decodeImage(out);
+    if (decoded == null) return out;
+    final jpg = img.encodeJpg(decoded, quality: 82);
+    return Uint8List.fromList(jpg);
+  }
+
+  Future<_AttachmentPayload?> _uploadAttachment({
+    required Uint8List clearBytes,
+    required String storagePath,
+  }) async {
+    try {
+      final enc = await _encryptAttachmentBytes(clearBytes);
+      final ref = FirebaseStorage.instance.ref(storagePath);
+      await ref.putData(
+        Uint8List.fromList(enc.cipher),
+        SettableMetadata(contentType: 'application/octet-stream'),
+      );
+      await DataUsageTracker.recordUpload(enc.cipher.length, category: 'media');
+
+      return _AttachmentPayload(
+        type: 'image',
+        path: storagePath,
+        nonceB64: enc.nonceB64,
+        keyB64: enc.keyB64,
+        size: enc.cipher.length,
+        mime: 'image/jpeg',
+        ext: 'jpg',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _setTyping(bool value) async {
+    if (_typingOn == value) return;
+    _typingOn = value;
+    final otherUid = await _ensureActiveOtherUid();
+    if (otherUid == null || otherUid.isEmpty) return;
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final ref = rtdb().ref('typing/${current.uid}/$otherUid');
+    if (value) {
+      await ref.set({'typing': true, 'at': ServerValue.timestamp});
+    } else {
+      await ref.remove();
+    }
+  }
+
+  Future<void> _setGroupTyping({
+    required String groupId,
+    required bool value,
+    String? myGithub,
+  }) async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+
+    if (_groupTypingGroupId != null && _groupTypingGroupId != groupId && _groupTypingOn) {
+      try {
+        await rtdb().ref('typingGroups/${_groupTypingGroupId!}/${current.uid}').remove();
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    if (_groupTypingOn == value && _groupTypingGroupId == groupId) return;
+    _groupTypingOn = value;
+    _groupTypingGroupId = groupId;
+
+    final ref = rtdb().ref('typingGroups/$groupId/${current.uid}');
+    if (value) {
+      await ref.set({
+        'typing': true,
+        'at': ServerValue.timestamp,
+        if (myGithub != null && myGithub.isNotEmpty) 'github': myGithub,
+      });
+    } else {
+      await ref.remove();
+    }
+  }
+
+  void _onTypingChanged(String text) {
+    final hasText = text.trim().isNotEmpty;
+    if (hasText) {
+      _setTyping(true);
+      _typingTimeout?.cancel();
+      _typingTimeout = Timer(const Duration(seconds: 4), () {
+        _setTyping(false);
+      });
+    } else {
+      _typingTimeout?.cancel();
+      _setTyping(false);
+    }
+  }
+
+  void _onGroupTypingChanged({
+    required String groupId,
+    required String text,
+    required String myGithub,
+  }) {
+    final hasText = text.trim().isNotEmpty;
+    if (hasText) {
+      _setGroupTyping(groupId: groupId, value: true, myGithub: myGithub);
+      _typingTimeout?.cancel();
+      _typingTimeout = Timer(const Duration(seconds: 4), () {
+        _setGroupTyping(groupId: groupId, value: false, myGithub: myGithub);
+      });
+    } else {
+      _typingTimeout?.cancel();
+      _setGroupTyping(groupId: groupId, value: false, myGithub: myGithub);
+    }
+  }
+
+  String _formatShortTime(int? ms) {
+    if (ms == null || ms <= 0) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch(ms);
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
+  Future<void> _markDeliveredRead({
+    required String key,
+    required String myUid,
+    required String otherUid,
+    required String myLogin,
+    required String otherLogin,
+    required bool markRead,
+  }) async {
+    final deliveredKey = 'd:$key';
+    final readKey = 'r:$key';
+    final updates = <String, Object?>{};
+
+    if (!_deliveredMarked.contains(deliveredKey)) {
+      updates['messages/$myUid/$otherLogin/$key/deliveredTo/$myUid'] = true;
+      updates['messages/$otherUid/$myLogin/$key/deliveredTo/$myUid'] = true;
+      _deliveredMarked.add(deliveredKey);
+    }
+
+    if (markRead && !_readMarked.contains(readKey)) {
+      updates['messages/$myUid/$otherLogin/$key/readBy/$myUid'] = true;
+      updates['messages/$otherUid/$myLogin/$key/readBy/$myUid'] = true;
+      _readMarked.add(readKey);
+    }
+
+    if (updates.isNotEmpty) {
+      await rtdb().ref().update(updates);
+    }
+  }
+
+  Widget _statusChecks({
+    required Map<String, dynamic> message,
+    required String? otherUid,
+    required Color color,
+  }) {
+    if (otherUid == null || otherUid.isEmpty) return const SizedBox.shrink();
+    final delivered = (message['deliveredTo'] is Map) ? (message['deliveredTo'] as Map) : null;
+    final read = (message['readBy'] is Map) ? (message['readBy'] as Map) : null;
+    final deliveredOk = delivered?.containsKey(otherUid) == true;
+    final readOk = read?.containsKey(otherUid) == true;
+
+    if (readOk) {
+      return Icon(Icons.done_all, size: 14, color: Colors.lightBlueAccent);
+    }
+    if (deliveredOk) {
+      return Icon(Icons.done_all, size: 14, color: Colors.grey);
+    }
+    return Icon(Icons.check, size: 14, color: Colors.grey);
+  }
+
+  Widget _typingPill() {
+    final dotColor = Theme.of(context).colorScheme.onSurface.withOpacity(0.7);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: AnimatedBuilder(
+        animation: _typingAnim,
+        builder: (context, _) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(3, (i) {
+              final phase = (_typingAnim.value * 2 * pi) + (i * 0.7);
+              final opacity = 0.25 + (0.75 * (0.5 + 0.5 * sin(phase)));
+              return Padding(
+                padding: EdgeInsets.only(right: i == 2 ? 0 : 4),
+                child: Opacity(
+                  opacity: opacity,
+                  child: Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: dotColor,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _attachmentBubble({
+    required _AttachmentPayload payload,
+    required String cacheKey,
+    required double maxWidth,
+    required double radius,
+  }) {
+    final localPath = _attachmentCache[cacheKey];
+    if (localPath != null && localPath.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: Image.file(
+          File(localPath),
+          width: maxWidth,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    if (!_attachmentLoading.contains(cacheKey)) {
+      _ensureAttachmentCached(cacheKey: cacheKey, payload: payload);
+    }
+
+    return Container(
+      width: maxWidth,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.image_outlined, size: 32),
+          const SizedBox(height: 8),
+          Text(
+            _attachmentLoading.contains(cacheKey) ? 'Stahuji…' : 'Klepni pro stažení',
+            style: const TextStyle(fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendImageDm({
+    required User current,
+    required String login,
+    required String myLogin,
+    required String otherUid,
+    required bool canSend,
+  }) async {
+    if (!canSend) return;
+    final edited = await _pickAndEditImage();
+    if (edited == null || edited.isEmpty) return;
+
+    final key = rtdb().ref().push().key;
+    if (key == null || key.isEmpty) return;
+
+    final storagePath = 'attachments/dm/${current.uid}/$key.bin';
+    final payload = await _uploadAttachment(clearBytes: edited, storagePath: storagePath);
+    if (payload == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Nepodařilo se nahrát obrázek.')));
+      }
+      return;
+    }
+
+    final plaintext = jsonEncode(payload.toJson());
+    Map<String, Object?> encrypted;
+    try {
+      encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: plaintext);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Nepodařilo se zašifrovat obrázek.')));
+      }
+      return;
+    }
+
+    final msg = {
+      ...encrypted,
+      'fromUid': current.uid,
+      'createdAt': ServerValue.timestamp,
+    };
+
+    final updates = <String, Object?>{};
+    updates['messages/${current.uid}/$login/$key'] = msg;
+    updates['messages/$otherUid/$myLogin/$key'] = msg;
+    if (otherUid == current.uid) {
+      updates['messages/${current.uid}/$login/$key/deliveredTo/${current.uid}'] = true;
+      updates['messages/${current.uid}/$login/$key/readBy/${current.uid}'] = true;
+    }
+    if (otherUid == current.uid) {
+      updates['messages/${current.uid}/$login/$key/deliveredTo/${current.uid}'] = true;
+      updates['messages/${current.uid}/$login/$key/readBy/${current.uid}'] = true;
+    }
+    updates['savedChats/${current.uid}/$login/lastMessageText'] = '🖼️';
+    updates['savedChats/${current.uid}/$login/lastMessageAt'] = ServerValue.timestamp;
+    updates['savedChats/$otherUid/$myLogin/lastMessageText'] = '🖼️';
+    updates['savedChats/$otherUid/$myLogin/lastMessageAt'] = ServerValue.timestamp;
+    try {
+      await rtdb().ref().update(updates);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Nepodařilo se odeslat obrázek.')));
+      }
+      return;
+    }
+
+    final cacheKey = 'dm:${login.trim().toLowerCase()}:$key';
+    final file = await _attachmentFile(cacheKey, payload.ext);
+    await file.writeAsBytes(edited, flush: true);
+    if (mounted) {
+      setState(() {
+        _decryptedCache[key] = plaintext;
+        _attachmentCache[cacheKey] = file.path;
+      });
+    }
+
+    _typingTimeout?.cancel();
+    _setTyping(false);
+
+    PlaintextCache.putDm(otherLoginLower: login.trim().toLowerCase(), messageKey: key, plaintext: plaintext);
+  }
+
+  Future<void> _sendImageGroup({
+    required String groupId,
+    required User current,
+    required String myGithub,
+    required bool canSend,
+  }) async {
+    if (!canSend) return;
+    final edited = await _pickAndEditImage();
+    if (edited == null || edited.isEmpty) return;
+
+    final key = rtdb().ref().push().key;
+    if (key == null || key.isEmpty) return;
+
+    final storagePath = 'attachments/group/$groupId/$key.bin';
+    final payload = await _uploadAttachment(clearBytes: edited, storagePath: storagePath);
+    if (payload == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Nepodařilo se nahrát obrázek.')));
+      }
+      return;
+    }
+    final plaintext = jsonEncode(payload.toJson());
+
+    Map<String, Object?>? encrypted;
+    try {
+      encrypted = await E2ee.encryptForGroupSignalLike(groupId: groupId, myUid: current.uid, plaintext: plaintext);
+    } catch (_) {
+      encrypted = null;
+    }
+
+    if (encrypted == null) {
+      SecretKey? gk = _groupKeyCache[groupId];
+      gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
+      if (gk == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Nepodařilo se zašifrovat obrázek.')));
+        }
+        return;
+      }
+      _groupKeyCache[groupId] = gk;
+      encrypted = await E2ee.encryptForGroup(groupKey: gk, plaintext: plaintext);
+    }
+
+    try {
+      await rtdb().ref('groupMessages/$groupId/$key').set({
+        ...encrypted,
+        'fromUid': current.uid,
+        'fromGithub': myGithub,
+        'createdAt': ServerValue.timestamp,
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Nepodařilo se odeslat obrázek.')));
+      }
+      return;
+    }
+
+    final cacheKey = 'g:$groupId:$key';
+    final file = await _attachmentFile(cacheKey, payload.ext);
+    await file.writeAsBytes(edited, flush: true);
+    if (mounted) {
+      setState(() {
+        _decryptedCache[cacheKey] = plaintext;
+        _attachmentCache[cacheKey] = file.path;
+      });
+    }
+
+    _typingTimeout?.cancel();
+    _setGroupTyping(groupId: groupId, value: false, myGithub: myGithub);
+
+    PlaintextCache.putGroup(groupId: groupId, messageKey: key, plaintext: plaintext);
+  }
 
   Future<void> _warmupDmDecryptAll({
     required List<Map<String, dynamic>> items,
@@ -5242,6 +5845,8 @@ class _ChatsTabState extends State<_ChatsTab> {
       return true;
     }
     if (_activeGroupId != null) {
+      _typingTimeout?.cancel();
+      _setGroupTyping(groupId: _activeGroupId!, value: false);
       setState(() => _activeGroupId = null);
       return true;
     }
@@ -5266,6 +5871,7 @@ class _ChatsTabState extends State<_ChatsTab> {
   @override
   void initState() {
     super.initState();
+    _typingAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
     _activeLogin = widget.initialOpenLogin;
     _activeAvatarUrl = widget.initialOpenAvatarUrl;
   }
@@ -5312,6 +5918,12 @@ class _ChatsTabState extends State<_ChatsTab> {
   @override
   void dispose() {
     _messageController.dispose();
+    _typingTimeout?.cancel();
+    _setTyping(false);
+    if (_activeGroupId != null) {
+      _setGroupTyping(groupId: _activeGroupId!, value: false);
+    }
+    _typingAnim.dispose();
     super.dispose();
   }
 
@@ -5478,6 +6090,8 @@ class _ChatsTabState extends State<_ChatsTab> {
           messageText: text,
         );
         _messageController.clear();
+        _typingTimeout?.cancel();
+        _setTyping(false);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Žádost o chat byla odeslána.')),
@@ -5506,6 +6120,8 @@ class _ChatsTabState extends State<_ChatsTab> {
     }
 
     _messageController.clear();
+    _typingTimeout?.cancel();
+    _setTyping(false);
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     final burnAfterRead = _dmTtlMode == 5;
     final ttlSeconds = switch (_dmTtlMode) {
@@ -7146,6 +7762,8 @@ class _ChatsTabState extends State<_ChatsTab> {
                     final text = _messageController.text.trim();
                     if (text.isEmpty || !canSend) return;
                     _messageController.clear();
+                    _typingTimeout?.cancel();
+                    _setGroupTyping(groupId: groupId, value: false, myGithub: myGithub);
 
                     final nowMs = DateTime.now().millisecondsSinceEpoch;
                     final burnAfterRead = _dmTtlMode == 5;
@@ -7348,6 +7966,8 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 final fromGh = (m['fromGithub'] ?? '').toString();
                                 final isMe = fromUid == current.uid;
                                 final burnAfterRead = m['burnAfterRead'] == true;
+                                final createdAt = (m['createdAt'] is int) ? m['createdAt'] as int : null;
+                                final timeLabel = _formatShortTime(createdAt);
 
                                 final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
                                 final cacheKey = 'g:$groupId:$key';
@@ -7414,7 +8034,15 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   }
                                 }
 
-                                final mentioned = myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+                                final attachment = _AttachmentPayload.tryParse(text);
+                                final isAttachment = attachment != null;
+                                if (attachment != null) {
+                                  if (!_attachmentCache.containsKey(cacheKey)) {
+                                    _ensureAttachmentCached(cacheKey: cacheKey, payload: attachment);
+                                  }
+                                }
+
+                                final mentioned = !isAttachment && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
 
                                 final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
                                 final color = _bubbleColor(context, bubbleKey);
@@ -7438,10 +8066,28 @@ class _ChatsTabState extends State<_ChatsTab> {
                                               borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
                                               border: mentioned ? Border.all(color: Colors.amber, width: 2) : null,
                                             ),
-                                            child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
+                                            child: attachment != null
+                                                ? _attachmentBubble(
+                                                    payload: attachment,
+                                                    cacheKey: cacheKey,
+                                                    maxWidth: MediaQuery.of(context).size.width * 0.62,
+                                                    radius: widget.settings.bubbleRadius,
+                                                  )
+                                                : Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
                                           ),
                                         ),
                                       ),
+                                      if (timeLabel.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 4),
+                                          child: Text(
+                                            timeLabel,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                            ),
+                                          ),
+                                        ),
                                     ],
                                   ),
                                 );
@@ -7449,6 +8095,49 @@ class _ChatsTabState extends State<_ChatsTab> {
                             );
                           },
                         ),
+                      ),
+                      StreamBuilder<DatabaseEvent>(
+                        stream: rtdb().ref('typingGroups/$groupId').onValue,
+                        builder: (context, tSnap) {
+                          final tval = tSnap.data?.snapshot.value;
+                          final tmap = (tval is Map) ? tval : null;
+                          if (tmap == null || tmap.isEmpty) return const SizedBox.shrink();
+                          final names = <String>[];
+                          for (final entry in tmap.entries) {
+                            final uid = entry.key.toString();
+                            if (uid == current.uid) continue;
+                            final val = entry.value;
+                            if (val is Map) {
+                              final gh = (val['github'] ?? '').toString();
+                              if (gh.isNotEmpty) {
+                                names.add('@$gh');
+                              } else {
+                                names.add(uid);
+                              }
+                            }
+                          }
+                          if (names.isEmpty) return const SizedBox.shrink();
+                          final label = names.length == 1
+                              ? 'Píše ${names.first}'
+                              : 'Píší ${names.take(3).join(', ')}${names.length > 3 ? '…' : ''}';
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _typingPill(),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    label,
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       ),
                       Padding(
                         padding: const EdgeInsets.all(12),
@@ -7460,9 +8149,27 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 decoration: const InputDecoration(labelText: 'Zpráva'),
                                 enabled: canSend,
                                 onSubmitted: (_) => send(),
+                                onChanged: canSend
+                                    ? (text) => _onGroupTypingChanged(
+                                          groupId: groupId,
+                                          text: text,
+                                          myGithub: myGithub,
+                                        )
+                                    : null,
                               ),
                             ),
                             const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.image_outlined),
+                              onPressed: canSend
+                                  ? () => _sendImageGroup(
+                                        groupId: groupId,
+                                        current: current,
+                                        myGithub: myGithub,
+                                        canSend: canSend,
+                                      )
+                                  : null,
+                            ),
                             PopupMenuButton<int>(
                               tooltip: 'Ničení zpráv',
                               initialValue: _dmTtlMode,
@@ -7497,6 +8204,11 @@ class _ChatsTabState extends State<_ChatsTab> {
     final login = _activeLogin!;
     final messagesRef = rtdb().ref('messages/${current.uid}/$login');
     final loginLower = login.trim().toLowerCase();
+    if (_activeOtherUidLoginLower != loginLower) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _ensureActiveOtherUid();
+      });
+    }
     final blockedRef = rtdb().ref('blocked/${current.uid}/$loginLower');
     final dmContactRef = _dmContactRef(myUid: current.uid, otherLoginLower: loginLower);
     final dmReqRef = _dmRequestRef(myUid: current.uid, fromLoginLower: loginLower);
@@ -7659,6 +8371,15 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 return const Center(child: Text('Napiš první zprávu.'));
                               }
 
+                              if (_activeOtherUid == null || _activeOtherUidLoginLower != loginLower) {
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  _ensureActiveOtherUid().then((_) {
+                                    if (!mounted) return;
+                                    setState(() {});
+                                  });
+                                });
+                              }
+
                               final now = DateTime.now().millisecondsSinceEpoch;
                               final items = <Map<String, dynamic>>[];
                               for (final e in value.entries) {
@@ -7749,6 +8470,19 @@ class _ChatsTabState extends State<_ChatsTab> {
                                   final fromUid = (m['fromUid'] ?? '').toString();
                                   final isMe = fromUid == current.uid;
                                   final burnAfterRead = m['burnAfterRead'] == true;
+                                  final createdAt = (m['createdAt'] is int) ? m['createdAt'] as int : null;
+                                  final timeLabel = _formatShortTime(createdAt);
+                                  final otherUid = isMe ? (_activeOtherUid ?? '') : fromUid;
+                                  if (!isMe && otherUid.isNotEmpty && canSend && !blocked) {
+                                    _markDeliveredRead(
+                                      key: key,
+                                      myUid: current.uid,
+                                      otherUid: otherUid,
+                                      myLogin: myGithub.trim(),
+                                      otherLogin: login,
+                                      markRead: true,
+                                    );
+                                  }
 
                                   final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
                                   String text = plaintext;
@@ -7806,7 +8540,16 @@ class _ChatsTabState extends State<_ChatsTab> {
                                     }
                                   }
 
-                                  final mentioned = myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+                                  final attachment = _AttachmentPayload.tryParse(text);
+                                  final isAttachment = attachment != null;
+                                  if (attachment != null) {
+                                    final cacheKey = 'dm:$loginLower:$key';
+                                    if (!_attachmentCache.containsKey(cacheKey)) {
+                                      _ensureAttachmentCached(cacheKey: cacheKey, payload: attachment);
+                                    }
+                                  }
+
+                                  final mentioned = !isAttachment && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
 
                                   final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
                                   final color = _bubbleColor(context, bubbleKey);
@@ -7851,7 +8594,14 @@ class _ChatsTabState extends State<_ChatsTab> {
                                                 borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
                                                 border: mentioned ? Border.all(color: Colors.amber, width: 2) : null,
                                               ),
-                                              child: Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
+                                              child: attachment != null
+                                                  ? _attachmentBubble(
+                                                      payload: attachment,
+                                                      cacheKey: 'dm:$loginLower:$key',
+                                                      maxWidth: MediaQuery.of(context).size.width * 0.62,
+                                                      radius: widget.settings.bubbleRadius,
+                                                    )
+                                                  : Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
                                             ),
                                           ),
                                         ),
@@ -7859,6 +8609,32 @@ class _ChatsTabState extends State<_ChatsTab> {
                                           Wrap(
                                             alignment: WrapAlignment.end,
                                             children: reactionChips,
+                                          ),
+                                        if (timeLabel.isNotEmpty || isMe)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 4),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+                                              children: [
+                                                if (timeLabel.isNotEmpty)
+                                                  Text(
+                                                    timeLabel,
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                                    ),
+                                                  ),
+                                                if (isMe) ...[
+                                                  if (timeLabel.isNotEmpty) const SizedBox(width: 6),
+                                                  _statusChecks(
+                                                    message: m,
+                                                    otherUid: _activeOtherUid,
+                                                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
                                           ),
                                       ],
                                     ),
@@ -7869,6 +8645,32 @@ class _ChatsTabState extends State<_ChatsTab> {
                           ),
                         ),
                       ),
+                      if (!blocked && _activeOtherUid != null && _activeOtherUid!.isNotEmpty)
+                        StreamBuilder<DatabaseEvent>(
+                          stream: rtdb().ref('typing/${_activeOtherUid!}/${current.uid}').onValue,
+                          builder: (context, tSnap) {
+                            final tval = tSnap.data?.snapshot.value;
+                            final typing = (tval is Map) ? (tval['typing'] == true) : false;
+                            if (!typing) return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _typingPill(),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Píše @$login',
+                                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                       Padding(
                         padding: const EdgeInsets.all(12),
                         child: Row(
@@ -7879,9 +8681,26 @@ class _ChatsTabState extends State<_ChatsTab> {
                                 decoration: const InputDecoration(labelText: 'Zpráva'),
                                 enabled: !blocked && canSend,
                                 onSubmitted: (!blocked && canSend) ? (_) => _send() : null,
+                                onChanged: (!blocked && canSend) ? _onTypingChanged : null,
                               ),
                             ),
                             const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.image_outlined),
+                              onPressed: (!blocked && canSend)
+                                  ? () async {
+                                      final otherUid = await _ensureActiveOtherUid();
+                                      if (otherUid == null || otherUid.isEmpty) return;
+                                      await _sendImageDm(
+                                        current: current,
+                                        login: login,
+                                        myLogin: myGithub.trim(),
+                                        otherUid: otherUid,
+                                        canSend: canSend,
+                                      );
+                                    }
+                                  : null,
+                            ),
                             PopupMenuButton<int>(
                               tooltip: 'Ničení zpráv',
                               initialValue: _dmTtlMode,

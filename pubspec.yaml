@@ -38,6 +38,8 @@ dependencies:
   firebase_messaging: ^14.7.10
   flutter_local_notifications: ^17.0.0
   image_picker: ^1.1.2
+  image_editor_plus: ^1.0.5
+  image: ^4.1.7
   qr_flutter: ^4.1.0
   mobile_scanner: ^5.2.3
   app_links: ^6.3.2
