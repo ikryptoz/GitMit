@@ -45,6 +45,4 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Firebase local-only config
-android/app/google-services.json
-lib/firebase_options.dart
+# Firebase client config files are tracked in git
