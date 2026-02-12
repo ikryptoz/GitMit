@@ -192,6 +192,41 @@ class _CodeMessagePayload {
   }
 }
 
+class _VerificationRequestPayload {
+  const _VerificationRequestPayload({
+    required this.buttonText,
+    required this.note,
+  });
+
+  final String buttonText;
+  final String note;
+
+  Map<String, dynamic> toJson() => {
+        'type': 'verification_request',
+        'buttonText': buttonText,
+        'note': note,
+      };
+
+  static _VerificationRequestPayload? tryParse(String text) {
+    final t = text.trim();
+    if (!t.startsWith('{')) return null;
+    try {
+      final decoded = jsonDecode(t);
+      if (decoded is! Map) return null;
+      final m = Map<String, dynamic>.from(decoded);
+      if ((m['type'] ?? '').toString() != 'verification_request') return null;
+      final buttonText = (m['buttonText'] ?? '').toString().trim();
+      final note = (m['note'] ?? '').toString().trim();
+      return _VerificationRequestPayload(
+        buttonText: buttonText.isEmpty ? 'Potvrdit a otevřít chat' : buttonText,
+        note: note.isEmpty ? 'Po kliknutí se chat propojí a můžeš hned psát.' : note,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 final _attachmentAead = Chacha20.poly1305Aead();
 final _attachmentRng = Random.secure();
 
@@ -728,7 +763,18 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                               ),
                                             )
                                           else
-                                            const Text('Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).'),
+                                            Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                const Text('Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).'),
+                                                const SizedBox(height: 8),
+                                                FilledButton.tonalIcon(
+                                                  onPressed: () => Navigator.of(context).pop('request_verification_in_chat'),
+                                                  icon: const Icon(Icons.verified_user_outlined),
+                                                  label: const Text('Požádat o ověření v chatu'),
+                                                ),
+                                              ],
+                                            ),
                                           if (myFp != null && myFp.isNotEmpty)
                                             ListTile(
                                               contentPadding: EdgeInsets.zero,
@@ -7950,6 +7996,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     );
 
     if (!mounted) return;
+    if (res == 'request_verification_in_chat') {
+      await _requestVerificationFromProfile(login: login, avatarUrl: avatarUrl);
+      return;
+    }
     if (res == 'deleted_chat_for_me' || res == 'deleted_chat_for_both') {
       setState(() {
         _activeLogin = null;
@@ -7959,6 +8009,98 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         const SnackBar(content: Text('Chat byl smazán.')),
       );
     }
+  }
+
+  Future<void> _sendVerificationButtonPrompt({
+    required String myUid,
+    required String myLogin,
+    required String otherUid,
+    required String otherLogin,
+  }) async {
+    final key = rtdb().ref().push().key;
+    if (key == null || key.isEmpty) return;
+
+    final payload = _VerificationRequestPayload(
+      buttonText: 'Potvrdit a otevřít chat',
+      note: 'I bez předchozího ověření můžeš kliknout a hned začít psát.',
+    );
+    final text = jsonEncode(payload.toJson());
+    final msg = {
+      'fromUid': myUid,
+      'text': text,
+      'createdAt': ServerValue.timestamp,
+      'verificationButton': true,
+    };
+
+    final updates = <String, Object?>{
+      'messages/$myUid/$otherLogin/$key': msg,
+      'messages/$otherUid/$myLogin/$key': msg,
+      'savedChats/$myUid/$otherLogin/login': otherLogin,
+      'savedChats/$myUid/$otherLogin/lastMessageText': 'Žádost o ověření',
+      'savedChats/$myUid/$otherLogin/lastMessageAt': ServerValue.timestamp,
+      'savedChats/$myUid/$otherLogin/savedAt': ServerValue.timestamp,
+      'savedChats/$otherUid/$myLogin/login': myLogin,
+      'savedChats/$otherUid/$myLogin/lastMessageText': 'Žádost o ověření',
+      'savedChats/$otherUid/$myLogin/lastMessageAt': ServerValue.timestamp,
+      'savedChats/$otherUid/$myLogin/savedAt': ServerValue.timestamp,
+    };
+
+    await rtdb().ref().update(updates);
+  }
+
+  Future<void> _requestVerificationFromProfile({
+    required String login,
+    required String avatarUrl,
+  }) async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+
+    final loginLower = login.trim().toLowerCase();
+    if (loginLower.isEmpty) return;
+
+    final otherUid = await _lookupUidForLoginLower(loginLower);
+    if (otherUid == null || otherUid.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Uživatel @$login nepoužívá GitMit (nelze zjistit UID).')),
+      );
+      return;
+    }
+
+    final myLogin = await _myGithubUsername(current.uid);
+    if (myLogin == null || myLogin.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nelze zjistit tvůj GitHub username.')),
+      );
+      return;
+    }
+
+    final accepted = await _isDmAccepted(myUid: current.uid, otherLoginLower: loginLower);
+    if (!accepted) {
+      await _sendDmRequest(
+        myUid: current.uid,
+        myLogin: myLogin,
+        otherUid: otherUid,
+        otherLogin: login,
+      );
+    }
+
+    await _sendVerificationButtonPrompt(
+      myUid: current.uid,
+      myLogin: myLogin,
+      otherUid: otherUid,
+      otherLogin: login,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _activeLogin = login;
+      _activeAvatarUrl = avatarUrl;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Žádost o ověření byla odeslána do chatu.')),
+    );
   }
 
   Future<void> _sendVerified({required bool asModerator, required String moderatorGithub}) async {
@@ -10463,6 +10605,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   final isAttachment = attachment != null;
                                   final codePayload = _CodeMessagePayload.tryParse(text);
                                   final isCode = codePayload != null;
+                                  final verificationPayload = _VerificationRequestPayload.tryParse(text);
+                                  final isVerificationRequest = verificationPayload != null;
                                   if (attachment != null) {
                                     final cacheKey = 'dm:$loginLower:$key';
                                     if (!_attachmentCache.containsKey(cacheKey)) {
@@ -10470,7 +10614,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                     }
                                   }
 
-                                  final mentioned = !isAttachment && !isCode && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+                                  final mentioned =
+                                      !isAttachment && !isCode && !isVerificationRequest && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
 
                                   final replyToFrom = (m['replyToFrom'] ?? '').toString().trim();
                                   final replyToPreview = (m['replyToPreview'] ?? '').toString().trim();
@@ -10607,6 +10752,72 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                             ),
                                                           ],
                                                         ),
+                                                      ),
+                                                    )
+                                                  else if (verificationPayload != null)
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                                      decoration: BoxDecoration(
+                                                        color: Theme.of(context).colorScheme.primaryContainer,
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        border: Border.all(color: Theme.of(context).colorScheme.primary, width: 1.3),
+                                                      ),
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          Text(
+                                                            verificationPayload.note,
+                                                            style: TextStyle(
+                                                              fontSize: widget.settings.chatTextSize - 1,
+                                                              color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                                              fontWeight: FontWeight.w600,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(height: 8),
+                                                          SizedBox(
+                                                            width: double.infinity,
+                                                            child: FilledButton.icon(
+                                                              style: FilledButton.styleFrom(
+                                                                minimumSize: const Size.fromHeight(46),
+                                                              ),
+                                                              icon: const Icon(Icons.verified_user),
+                                                              onPressed: () async {
+                                                                if (isMe) {
+                                                                  if (!mounted) return;
+                                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                                    const SnackBar(content: Text('Žádost čeká na potvrzení protějšku.')),
+                                                                  );
+                                                                  return;
+                                                                }
+
+                                                                try {
+                                                                  final alreadyAccepted = await _isDmAccepted(
+                                                                    myUid: current.uid,
+                                                                    otherLoginLower: loginLower,
+                                                                  );
+                                                                  if (!alreadyAccepted) {
+                                                                    await _acceptDmRequest(myUid: current.uid, otherLogin: login);
+                                                                  }
+                                                                  if (!mounted) return;
+                                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                                    const SnackBar(content: Text('Chat propojen. Můžeš hned psát.')),
+                                                                  );
+                                                                  setState(() {});
+                                                                } catch (e) {
+                                                                  if (!mounted) return;
+                                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                                    SnackBar(content: Text('Nelze potvrdit: $e')),
+                                                                  );
+                                                                }
+                                                              },
+                                                              label: Text(
+                                                                verificationPayload.buttonText,
+                                                                style: const TextStyle(fontWeight: FontWeight.w700),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
                                                     )
                                                   else
