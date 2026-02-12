@@ -28,6 +28,11 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:highlight/highlight.dart' as highlight;
+import 'package:http/http.dart' as http;
+
+const String _githubDmFallbackUrl = String.fromEnvironment('GITMIT_GITHUB_NOTIFY_URL', defaultValue: '');
+const String _githubDmFallbackToken = String.fromEnvironment('GITMIT_GITHUB_NOTIFY_TOKEN', defaultValue: '');
 
 Future<String> _uploadGroupLogo({required String groupId, required Uint8List bytes}) async {
   String normalizeBucket(String b) {
@@ -141,6 +146,51 @@ class _AttachmentPayload {
   }
 }
 
+class _CodeMessagePayload {
+  const _CodeMessagePayload({
+    required this.title,
+    required this.language,
+    required this.code,
+  });
+
+  final String title;
+  final String language;
+  final String code;
+
+  Map<String, dynamic> toJson() => {
+        'type': 'code',
+        'title': title,
+        'language': language,
+        'code': code,
+      };
+
+  String previewLabel() {
+    final t = title.trim();
+    final l = language.trim();
+    if (t.isNotEmpty) return '<> kód ($t)';
+    if (l.isNotEmpty) return '<> kód ($l)';
+    return '<> kód';
+  }
+
+  static _CodeMessagePayload? tryParse(String text) {
+    final t = text.trim();
+    if (!t.startsWith('{')) return null;
+    try {
+      final decoded = jsonDecode(t);
+      if (decoded is! Map) return null;
+      final m = Map<String, dynamic>.from(decoded);
+      if ((m['type'] ?? '').toString() != 'code') return null;
+      final code = (m['code'] ?? '').toString();
+      if (code.trim().isEmpty) return null;
+      final title = (m['title'] ?? '').toString();
+      final language = (m['language'] ?? '').toString();
+      return _CodeMessagePayload(title: title, language: language, code: code);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 final _attachmentAead = Chacha20.poly1305Aead();
 final _attachmentRng = Random.secure();
 
@@ -149,6 +199,119 @@ List<int> _randomBytes(int length) =>
 
 String _b64(List<int> bytes) => base64UrlEncode(bytes);
 List<int> _unb64(String s) => base64Url.decode(s);
+
+class _GitmitSyntaxHighlighter extends SyntaxHighlighter {
+  _GitmitSyntaxHighlighter(this._baseStyle);
+
+  final TextStyle _baseStyle;
+
+  TextStyle _styleForClass(String? className) {
+    final c = (className ?? '').toLowerCase();
+    if (c.contains('keyword') || c.contains('built_in') || c.contains('builtin')) {
+      return _baseStyle.copyWith(color: const Color(0xFFC792EA), fontWeight: FontWeight.w600);
+    }
+    if (c.contains('string')) {
+      return _baseStyle.copyWith(color: const Color(0xFFC3E88D));
+    }
+    if (c.contains('number') || c.contains('literal')) {
+      return _baseStyle.copyWith(color: const Color(0xFFF78C6C));
+    }
+    if (c.contains('comment')) {
+      return _baseStyle.copyWith(color: const Color(0xFF8A9199), fontStyle: FontStyle.italic);
+    }
+    if (c.contains('type') || c.contains('class') || c.contains('title')) {
+      return _baseStyle.copyWith(color: const Color(0xFF82AAFF));
+    }
+    if (c.contains('function')) {
+      return _baseStyle.copyWith(color: const Color(0xFFFFCB6B));
+    }
+    if (c.contains('meta') || c.contains('attr')) {
+      return _baseStyle.copyWith(color: const Color(0xFF89DDFF));
+    }
+    return _baseStyle;
+  }
+
+  TextSpan _convert(List<dynamic>? nodes, TextStyle style) {
+    if (nodes == null || nodes.isEmpty) {
+      return TextSpan(text: '', style: style);
+    }
+
+    return TextSpan(
+      style: style,
+      children: nodes.map<TextSpan>((dynamic node) {
+        final nodeStyle = _styleForClass((node as dynamic).className?.toString());
+        final value = (node as dynamic).value?.toString();
+        if (value != null) {
+          return TextSpan(text: value, style: nodeStyle);
+        }
+        final children = (node as dynamic).nodes as List<dynamic>?;
+        return _convert(children, nodeStyle);
+      }).toList(growable: false),
+    );
+  }
+
+  @override
+  TextSpan format(String source) {
+    try {
+      final parsed = highlight.highlight.parse(source);
+      return _convert(parsed.nodes, _baseStyle);
+    } catch (_) {
+      return TextSpan(text: source, style: _baseStyle);
+    }
+  }
+}
+
+class _RichMessageText extends StatelessWidget {
+  const _RichMessageText({
+    required this.text,
+    required this.fontSize,
+    required this.textColor,
+  });
+
+  final String text;
+  final double fontSize;
+  final Color textColor;
+
+  Future<void> _openExternal(String rawUrl) async {
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = TextStyle(fontSize: fontSize, color: textColor);
+    return MarkdownBody(
+      data: text,
+      selectable: true,
+      softLineBreak: true,
+      syntaxHighlighter: _GitmitSyntaxHighlighter(
+        base.copyWith(fontFamily: 'monospace'),
+      ),
+      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+        p: base,
+        a: base.copyWith(
+          color: Theme.of(context).colorScheme.secondary,
+          decoration: TextDecoration.underline,
+        ),
+        code: base.copyWith(fontFamily: 'monospace', backgroundColor: Colors.white10),
+        codeblockPadding: const EdgeInsets.all(10),
+        codeblockDecoration: BoxDecoration(
+          color: Colors.white10,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white24),
+        ),
+        blockquote: base.copyWith(color: textColor.withOpacity(0.8)),
+        listBullet: base,
+      ),
+      onTapLink: (text, href, title) {
+        if (href != null && href.trim().isNotEmpty) {
+          _openExternal(href);
+        }
+      },
+    );
+  }
+}
 
 Future<({List<int> cipher, String nonceB64, String keyB64})> _encryptAttachmentBytes(List<int> clearBytes) async {
   final key = _randomBytes(32);
@@ -279,6 +442,65 @@ class _UserProfilePage extends StatefulWidget {
 
 class _UserProfilePageState extends State<_UserProfilePage> {
   String _loginLower() => widget.login.trim().toLowerCase();
+
+  List<String> _parseBadges(Object? raw) {
+    if (raw is List) {
+      return raw.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList(growable: false);
+    }
+    if (raw is Map) {
+      return raw.entries
+          .where((e) => e.value == true || e.value == 1)
+          .map((e) => e.key.toString())
+          .where((e) => e.trim().isNotEmpty)
+          .toList(growable: false);
+    }
+    return const [];
+  }
+
+  Future<_GitmitStats?> _loadGitmitStats(String uid) async {
+    try {
+      final savedSnap = await rtdb().ref('savedChats/$uid').get();
+      final savedVal = savedSnap.value;
+      final savedMap = (savedVal is Map) ? Map<String, dynamic>.from(savedVal) : <String, dynamic>{};
+      final privateChats = savedMap.length;
+
+      final groupsSnap = await rtdb().ref('groupMembers').get();
+      final groupsVal = groupsSnap.value;
+      var groups = 0;
+      if (groupsVal is Map) {
+        for (final entry in groupsVal.entries) {
+          final members = entry.value;
+          if (members is Map) {
+            final mm = Map<String, dynamic>.from(members);
+            final v = mm[uid];
+            if (v is Map || v == true) {
+              groups++;
+            }
+          }
+        }
+      }
+
+      final msgsSnap = await rtdb().ref('messages/$uid').get();
+      final msgsVal = msgsSnap.value;
+      var sent = 0;
+      if (msgsVal is Map) {
+        for (final entry in msgsVal.entries) {
+          final thread = entry.value;
+          if (thread is! Map) continue;
+          for (final msgEntry in thread.entries) {
+            final msg = msgEntry.value;
+            if (msg is! Map) continue;
+            final fromUid = (msg['fromUid'] ?? '').toString();
+            if (fromUid == uid) sent++;
+          }
+        }
+      }
+
+      return _GitmitStats(privateChats: privateChats, groups: groups, messagesSent: sent);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<String?> _myGithubUsername(String myUid) async {
     final snap = await rtdb().ref('users/$myUid/githubUsername').get();
@@ -463,6 +685,12 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                         },
                       ),
                       const SizedBox(height: 8),
+                      FilledButton.tonalIcon(
+                        onPressed: () => _openRepoUrl(context, 'https://github.com/${widget.login}'),
+                        icon: const Icon(Icons.open_in_new),
+                        label: const Text('Zobrazit na GitHubu'),
+                      ),
+                      const SizedBox(height: 10),
                       if (!hasOtherUid) const Text('Účet není propojený v databázi.'),
 
                       if (hasOtherUid)
@@ -565,6 +793,63 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                       else
                         const Text('Načítání repozitářů...'),
                       const SizedBox(height: 24),
+
+                      if (hasOtherUid)
+                        StreamBuilder<DatabaseEvent>(
+                          stream: otherUserRef.child(otherUid).onValue,
+                          builder: (context, otherSnap) {
+                            final vv = otherSnap.data?.snapshot.value;
+                            final mm = (vv is Map) ? vv : null;
+                            final badges = _parseBadges(mm?['badges']);
+
+                            return Column(
+                              children: [
+                                _ProfileSectionCard(
+                                  title: 'Achievementy na GitMitu',
+                                  icon: Icons.emoji_events_outlined,
+                                  child: badges.isEmpty
+                                      ? const Text('Zatím žádné achievementy.')
+                                      : Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: badges
+                                              .map(
+                                                (b) => Chip(
+                                                  label: Text(b),
+                                                  avatar: const Icon(Icons.workspace_premium_outlined, size: 18),
+                                                ),
+                                              )
+                                              .toList(growable: false),
+                                        ),
+                                ),
+                                const SizedBox(height: 12),
+                                _ProfileSectionCard(
+                                  title: 'Aktivita v GitMitu',
+                                  icon: Icons.insights_outlined,
+                                  child: FutureBuilder<_GitmitStats?>(
+                                    future: _loadGitmitStats(otherUid),
+                                    builder: (context, statsSnap) {
+                                      final stats = statsSnap.data;
+                                      if (stats == null) {
+                                        return const Text('Načítání aktivity...');
+                                      }
+                                      return Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          _ProfileMetricTile(label: 'Priváty', value: '${stats.privateChats}'),
+                                          _ProfileMetricTile(label: 'Skupiny', value: '${stats.groups}'),
+                                          _ProfileMetricTile(label: 'Odeslané', value: '${stats.messagesSent}'),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+                              ],
+                            );
+                          },
+                        ),
                     ],
                   );
                 },
@@ -2507,14 +2792,20 @@ class _JobsPostView {
     required this.id,
     required this.title,
     required this.body,
+    required this.authorUid,
     required this.author,
+    required this.authorAvatarUrl,
+    required this.stackTags,
     required this.createdAt,
   });
 
   final String id;
   final String title;
   final String body;
+  final String authorUid;
   final String author;
+  final String authorAvatarUrl;
+  final List<String> stackTags;
   final DateTime createdAt;
 }
 
@@ -2528,48 +2819,25 @@ class _JobsTab extends StatefulWidget {
 class _JobsTabState extends State<_JobsTab> {
   _JobsAudience _audience = _JobsAudience.seekers;
   bool _posting = false;
+  String _stackFilter = 'All';
 
-  @override
-  void initState() {
-    super.initState();
-    _ensureJobsMembership();
-  }
+  static const List<String> _stackFilters = <String>[
+    'All',
+    'Flutter',
+    'React',
+    'Node',
+    'Python',
+    'DevOps',
+  ];
 
-  Future<void> _ensureJobsMembership() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final updates = <String, Object?>{};
-    for (final audience in _JobsAudience.values) {
-      updates['groupMembers/${audience.groupId}/${user.uid}'] = true;
-    }
-    await rtdb().ref().update(updates);
-
-    for (final audience in _JobsAudience.values) {
-      try {
-        await E2ee.publishMyPublicKey(uid: user.uid);
-        await E2ee.fetchGroupKey(groupId: audience.groupId, myUid: user.uid);
-      } catch (_) {}
-    }
-  }
-
-  Future<SecretKey> _resolveGroupKey(_JobsAudience audience) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      throw Exception('Nepřihlášený uživatel.');
-    }
-
-    await E2ee.publishMyPublicKey(uid: user.uid);
-
-    var key = await E2ee.fetchGroupKey(groupId: audience.groupId, myUid: user.uid);
-    if (key != null) return key;
-
-    await E2ee.ensureGroupKeyDistributed(groupId: audience.groupId, myUid: user.uid);
-    key = await E2ee.fetchGroupKey(groupId: audience.groupId, myUid: user.uid);
-    if (key == null) {
-      throw Exception('Nepodařilo se načíst skupinový klíč.');
-    }
-    return key;
+  List<String> _normalizeStackTags(String raw) {
+    final tags = raw
+        .split(',')
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    return tags.take(8).toList(growable: false);
   }
 
   Future<String> _githubLoginForUid(String uid) async {
@@ -2579,29 +2847,34 @@ class _JobsTabState extends State<_JobsTab> {
     return uid;
   }
 
+  Future<String?> _avatarUrlForUid(String uid) async {
+    final snap = await rtdb().ref('users/$uid/avatarUrl').get();
+    final value = snap.value?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
   Future<void> _createPost({
     required _JobsAudience audience,
     required String title,
     required String body,
+    required List<String> stackTags,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     setState(() => _posting = true);
     try {
-      final groupKey = await _resolveGroupKey(audience);
       final author = await _githubLoginForUid(user.uid);
-      final payload = jsonEncode({
-        'title': title,
-        'body': body,
-      });
-      final encrypted = await E2ee.encryptForGroup(groupKey: groupKey, plaintext: payload);
+      final avatarUrl = await _avatarUrlForUid(user.uid);
 
       final postRef = rtdb().ref(audience.feedPath).push();
       await postRef.set({
-        ...encrypted,
+        'title': title,
+        'body': body,
+        'stackTags': stackTags,
         'authorUid': user.uid,
         'author': author,
+        if (avatarUrl != null) 'authorAvatarUrl': avatarUrl,
         'createdAt': ServerValue.timestamp,
         'updatedAt': ServerValue.timestamp,
       });
@@ -2612,14 +2885,41 @@ class _JobsTabState extends State<_JobsTab> {
     }
   }
 
-  Future<List<_JobsPostView>> _decryptPosts(_JobsAudience audience, Object? value) async {
+  Future<void> _updatePost({
+    required _JobsAudience audience,
+    required _JobsPostView post,
+    required String title,
+    required String body,
+    required List<String> stackTags,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return const [];
+    if (user == null || post.authorUid != user.uid) return;
 
+    setState(() => _posting = true);
+    try {
+      await rtdb().ref('${audience.feedPath}/${post.id}').update({
+        'title': title,
+        'body': body,
+        'stackTags': stackTags,
+        'updatedAt': ServerValue.timestamp,
+      });
+    } finally {
+      if (mounted) setState(() => _posting = false);
+    }
+  }
+
+  Future<void> _deletePost({
+    required _JobsAudience audience,
+    required _JobsPostView post,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || post.authorUid != user.uid) return;
+    await rtdb().ref('${audience.feedPath}/${post.id}').remove();
+  }
+
+  Future<List<_JobsPostView>> _readPosts(Object? value) async {
     final map = (value is Map) ? Map<dynamic, dynamic>.from(value) : <dynamic, dynamic>{};
     if (map.isEmpty) return const [];
-
-    final groupKey = await _resolveGroupKey(audience);
     final posts = <_JobsPostView>[];
 
     for (final entry in map.entries) {
@@ -2632,28 +2932,34 @@ class _JobsTabState extends State<_JobsTab> {
           ? m['createdAt'] as int
           : int.tryParse((m['createdAt'] ?? '').toString()) ?? 0;
       final author = (m['author'] ?? '').toString().trim();
-
-      try {
-        final clear = await E2ee.decryptFromGroup(groupKey: groupKey, message: m);
-        final decoded = jsonDecode(clear);
-        if (decoded is! Map) continue;
-        final payload = Map<String, dynamic>.from(decoded);
-        final title = (payload['title'] ?? '').toString().trim();
-        final body = (payload['body'] ?? '').toString();
-        if (title.isEmpty || body.trim().isEmpty) continue;
-
-        posts.add(
-          _JobsPostView(
-            id: id,
-            title: title,
-            body: body,
-            author: author.isEmpty ? 'unknown' : author,
-            createdAt: DateTime.fromMillisecondsSinceEpoch(createdMs > 0 ? createdMs : 0),
-          ),
-        );
-      } catch (_) {
-        continue;
+      final authorUid = (m['authorUid'] ?? '').toString().trim();
+        final authorAvatarUrl = (m['authorAvatarUrl'] ?? '').toString().trim();
+      final title = (m['title'] ?? '').toString().trim();
+      final body = (m['body'] ?? '').toString();
+      final stacksRaw = m['stackTags'];
+      final stackTags = <String>[];
+      if (stacksRaw is List) {
+        for (final item in stacksRaw) {
+          final s = item?.toString().trim() ?? '';
+          if (s.isNotEmpty) stackTags.add(s);
+        }
+      } else if (stacksRaw is String) {
+        stackTags.addAll(_normalizeStackTags(stacksRaw));
       }
+      if (title.isEmpty || body.trim().isEmpty) continue;
+
+      posts.add(
+        _JobsPostView(
+          id: id,
+          title: title,
+          body: body,
+          authorUid: authorUid,
+          author: author.isEmpty ? 'unknown' : author,
+          authorAvatarUrl: authorAvatarUrl,
+          stackTags: stackTags,
+          createdAt: DateTime.fromMillisecondsSinceEpoch(createdMs > 0 ? createdMs : 0),
+        ),
+      );
     }
 
     posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -2670,9 +2976,15 @@ class _JobsTabState extends State<_JobsTab> {
     return 'před ${d.inDays} d';
   }
 
-  Future<void> _openComposer(_JobsAudience audience) async {
+  Future<void> _openComposer(_JobsAudience audience, {_JobsPostView? editingPost}) async {
     final titleCtrl = TextEditingController();
     final bodyCtrl = TextEditingController();
+    final stackCtrl = TextEditingController();
+    if (editingPost != null) {
+      titleCtrl.text = editingPost.title;
+      bodyCtrl.text = editingPost.body;
+      stackCtrl.text = editingPost.stackTags.join(', ');
+    }
     String? localError;
 
     await showModalBottomSheet<void>(
@@ -2684,14 +2996,19 @@ class _JobsTabState extends State<_JobsTab> {
           builder: (ctx, setLocalState) {
             final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
             return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(bottom: bottomInset),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
                     Text(
-                      audience.composerTitle,
+                      editingPost == null ? audience.composerTitle : 'Upravit příspěvek',
                       style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 12),
@@ -2702,6 +3019,15 @@ class _JobsTabState extends State<_JobsTab> {
                       decoration: InputDecoration(
                         labelText: 'Title',
                         hintText: audience.titleHint,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: stackCtrl,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'Stack / tagy',
+                        hintText: 'Flutter, Firebase, React, DevOps...',
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -2736,6 +3062,7 @@ class _JobsTabState extends State<_JobsTab> {
                                 : () async {
                                     final title = titleCtrl.text.trim();
                                     final body = bodyCtrl.text.trim();
+                                    final stackTags = _normalizeStackTags(stackCtrl.text);
                                     if (title.isEmpty || body.isEmpty) {
                                       setLocalState(() {
                                         localError = 'Vyplň title i text.';
@@ -2744,7 +3071,22 @@ class _JobsTabState extends State<_JobsTab> {
                                     }
 
                                     try {
-                                      await _createPost(audience: audience, title: title, body: body);
+                                      if (editingPost == null) {
+                                        await _createPost(
+                                          audience: audience,
+                                          title: title,
+                                          body: body,
+                                          stackTags: stackTags,
+                                        );
+                                      } else {
+                                        await _updatePost(
+                                          audience: audience,
+                                          post: editingPost,
+                                          title: title,
+                                          body: body,
+                                          stackTags: stackTags,
+                                        );
+                                      }
                                       if (!mounted) return;
                                       Navigator.of(ctx).pop();
                                     } catch (e) {
@@ -2759,13 +3101,15 @@ class _JobsTabState extends State<_JobsTab> {
                                     height: 16,
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
-                                : const Icon(Icons.add),
-                            label: Text(_posting ? 'Ukládám...' : 'Přidat'),
+                                : Icon(editingPost == null ? Icons.add : Icons.save_outlined),
+                            label: Text(_posting ? 'Ukládám...' : (editingPost == null ? 'Přidat' : 'Uložit')),
                           ),
                         ),
                       ],
                     ),
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
             );
@@ -2804,6 +3148,26 @@ class _JobsTabState extends State<_JobsTab> {
     );
   }
 
+  Widget _stackFilterBar() {
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        itemCount: _stackFilters.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final stack = _stackFilters[index];
+          return ChoiceChip(
+            label: Text(stack),
+            selected: _stackFilter == stack,
+            onSelected: (_) => setState(() => _stackFilter = stack),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final feedRef = rtdb().ref(_audience.feedPath);
@@ -2831,6 +3195,8 @@ class _JobsTabState extends State<_JobsTab> {
             ],
           ),
         ),
+        _stackFilterBar(),
+        const SizedBox(height: 8),
         Expanded(
           child: StreamBuilder<DatabaseEvent>(
             stream: feedRef.onValue,
@@ -2840,7 +3206,7 @@ class _JobsTabState extends State<_JobsTab> {
               }
 
               return FutureBuilder<List<_JobsPostView>>(
-                future: _decryptPosts(_audience, snapshot.data?.snapshot.value),
+                future: _readPosts(snapshot.data?.snapshot.value),
                 builder: (context, postsSnap) {
                   if (postsSnap.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -2858,7 +3224,12 @@ class _JobsTabState extends State<_JobsTab> {
                     );
                   }
 
-                  final posts = postsSnap.data ?? const <_JobsPostView>[];
+                  var posts = postsSnap.data ?? const <_JobsPostView>[];
+                  if (_stackFilter != 'All') {
+                    posts = posts
+                        .where((p) => p.stackTags.any((s) => s.toLowerCase() == _stackFilter.toLowerCase()))
+                        .toList(growable: false);
+                  }
                   if (posts.isEmpty) {
                     return Center(
                       child: Padding(
@@ -2880,7 +3251,48 @@ class _JobsTabState extends State<_JobsTab> {
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final post = posts[index];
-                      return _JobsPostCard(post: post, timeLabel: _timeLabel(post.createdAt));
+                      final currentUid = FirebaseAuth.instance.currentUser?.uid;
+                      final isMine = currentUid != null && post.authorUid == currentUid;
+                      return _JobsPostCard(
+                        post: post,
+                        timeLabel: _timeLabel(post.createdAt),
+                        isMine: isMine,
+                        onOpenProfile: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => _UserProfilePage(
+                                login: post.author,
+                                avatarUrl: post.authorAvatarUrl,
+                              ),
+                            ),
+                          );
+                        },
+                        onEdit: isMine ? () => _openComposer(_audience, editingPost: post) : null,
+                        onDelete: isMine
+                            ? () async {
+                                final ok = await showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Smazat příspěvek?'),
+                                        content: const Text('Tato akce nejde vrátit zpět.'),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(ctx).pop(false),
+                                            child: const Text('Zrušit'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => Navigator.of(ctx).pop(true),
+                                            child: const Text('Smazat'),
+                                          ),
+                                        ],
+                                      ),
+                                    ) ??
+                                    false;
+                                if (!ok) return;
+                                await _deletePost(audience: _audience, post: post);
+                              }
+                            : null,
+                      );
                     },
                   );
                 },
@@ -2932,30 +3344,40 @@ class _JobsTabButton extends StatelessWidget {
 }
 
 class _JobsPostCard extends StatelessWidget {
-  const _JobsPostCard({required this.post, required this.timeLabel});
+  const _JobsPostCard({
+    required this.post,
+    required this.timeLabel,
+    required this.isMine,
+    this.onOpenProfile,
+    this.onEdit,
+    this.onDelete,
+  });
 
   final _JobsPostView post;
   final String timeLabel;
-
-  Future<void> _openExternal(String rawUrl) async {
-    final uri = Uri.tryParse(rawUrl.trim());
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
+  final bool isMine;
+  final VoidCallback? onOpenProfile;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: cs.surface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant),
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+        onTap: onOpenProfile,
+        child: Container(
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: cs.outlineVariant),
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
           Row(
             children: [
               Expanded(
@@ -2965,7 +3387,22 @@ class _JobsPostCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.lock_outline, size: 16),
+              const Icon(Icons.public, size: 16),
+              if (isMine)
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_horiz),
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      onEdit?.call();
+                    } else if (value == 'delete') {
+                      onDelete?.call();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Upravit')),
+                    PopupMenuItem(value: 'delete', child: Text('Smazat')),
+                  ],
+                ),
             ],
           ),
           const SizedBox(height: 6),
@@ -2973,30 +3410,35 @@ class _JobsPostCard extends StatelessWidget {
             '@${post.author} • $timeLabel',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
           ),
-          const SizedBox(height: 8),
-          MarkdownBody(
-            data: post.body,
-            selectable: true,
-            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-              p: Theme.of(context).textTheme.bodyMedium,
-              code: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                    backgroundColor: Colors.white10,
-                  ),
-              codeblockDecoration: BoxDecoration(
-                color: Colors.white10,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white24),
-              ),
-              blockquote: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          if (post.stackTags.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: post.stackTags
+                  .map(
+                    (tag) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white10,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Text(tag, style: Theme.of(context).textTheme.bodySmall),
+                    ),
+                  )
+                  .toList(growable: false),
             ),
-            onTapLink: (text, href, title) {
-              if (href != null && href.trim().isNotEmpty) {
-                _openExternal(href);
-              }
-            },
+          ],
+          const SizedBox(height: 8),
+          _RichMessageText(
+            text: post.body,
+            fontSize: 14,
+            textColor: Theme.of(context).colorScheme.onSurface,
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -4595,9 +5037,9 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
 
 void _openRepoUrl(BuildContext context, String? url) {
   if (url == null || url.isEmpty) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('Otevři v prohlížeči: $url')),
-  );
+  final uri = Uri.tryParse(url);
+  if (uri == null) return;
+  launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
 class _SvgWidget extends StatelessWidget {
@@ -4627,6 +5069,79 @@ class _SvgWidget extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ProfileSectionCard extends StatelessWidget {
+  const _ProfileSectionCard({
+    required this.title,
+    required this.child,
+    this.icon,
+  });
+
+  final String title;
+  final Widget child;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 18),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                title,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileMetricTile extends StatelessWidget {
+  const _ProfileMetricTile({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 96),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: Colors.white70)),
+        ],
       ),
     );
   }
@@ -4789,6 +5304,13 @@ class _ProfileTabState extends State<_ProfileTab> {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  if (githubUsername != null && githubUsername.isNotEmpty)
+                    FilledButton.tonalIcon(
+                      onPressed: () => _openRepoUrl(context, 'https://github.com/$githubUsername'),
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text('Zobrazit můj GitHub'),
+                    ),
+                  const SizedBox(height: 8),
                   const Divider(height: 32),
                   const Text('Aktivita na GitHubu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -4921,40 +5443,46 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
 
                   const SizedBox(height: 24),
-                  const Text('Achievementy na GitMitu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  if (badges.isEmpty)
-                    const Text('Zatím žádné achievementy.')
-                  else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: badges
-                          .map((b) => Chip(
-                                label: Text(b),
-                                avatar: const Icon(Icons.emoji_events_outlined, size: 18),
-                              ))
-                          .toList(growable: false),
+                  _ProfileSectionCard(
+                    title: 'Achievementy na GitMitu',
+                    icon: Icons.emoji_events_outlined,
+                    child: badges.isEmpty
+                        ? const Text('Zatím žádné achievementy.')
+                        : Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: badges
+                                .map(
+                                  (b) => Chip(
+                                    label: Text(b),
+                                    avatar: const Icon(Icons.workspace_premium_outlined, size: 18),
+                                  ),
+                                )
+                                .toList(growable: false),
+                          ),
+                  ),
+                  const SizedBox(height: 12),
+                  _ProfileSectionCard(
+                    title: 'Aktivita v GitMitu',
+                    icon: Icons.insights_outlined,
+                    child: FutureBuilder<_GitmitStats?>(
+                      future: _gitmitStatsFuture,
+                      builder: (context, statsSnap) {
+                        final stats = statsSnap.data;
+                        if (stats == null) {
+                          return const Text('Načítání aktivity...');
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _ProfileMetricTile(label: 'Priváty', value: '${stats.privateChats}'),
+                            _ProfileMetricTile(label: 'Skupiny', value: '${stats.groups}'),
+                            _ProfileMetricTile(label: 'Odeslané', value: '${stats.messagesSent}'),
+                          ],
+                        );
+                      },
                     ),
-                  const SizedBox(height: 24),
-                  const Text('Aktivita v GitMitu', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  FutureBuilder<_GitmitStats?>(
-                    future: _gitmitStatsFuture,
-                    builder: (context, statsSnap) {
-                      final stats = statsSnap.data;
-                      if (stats == null) {
-                        return const Text('Načítání aktivity...');
-                      }
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Priváty: ${stats.privateChats}'),
-                          Text('Skupiny: ${stats.groups}'),
-                          Text('Odeslané zprávy celkem: ${stats.messagesSent}'),
-                        ],
-                      );
-                    },
                   ),
                   const SizedBox(height: 32),
                   Text('UID: ${user.uid}'),
@@ -5590,6 +6118,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   final Set<String> _attachmentLoading = {};
   final Set<String> _deliveredMarked = {};
   final Set<String> _readMarked = {};
+  _CodeMessagePayload? _pendingCodePayload;
+  String? _replyToKey;
+  String? _replyToFrom;
+  String? _replyToPreview;
   Timer? _typingTimeout;
   bool _typingOn = false;
   bool _groupTypingOn = false;
@@ -6458,13 +6990,23 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         _activeAvatarUrl = null;
         _activeOtherUid = null;
         _activeOtherUidLoginLower = null;
+        _pendingCodePayload = null;
+        _replyToKey = null;
+        _replyToFrom = null;
+        _replyToPreview = null;
       });
       return true;
     }
     if (_activeGroupId != null) {
       _typingTimeout?.cancel();
       _setGroupTyping(groupId: _activeGroupId!, value: false);
-      setState(() => _activeGroupId = null);
+      setState(() {
+        _activeGroupId = null;
+        _pendingCodePayload = null;
+        _replyToKey = null;
+        _replyToFrom = null;
+        _replyToPreview = null;
+      });
       return true;
     }
     if (_activeVerifiedUid != null) {
@@ -6508,6 +7050,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         _activeVerifiedGithub = null;
         _activeFolderId = null;
         _overviewMode = 0;
+        _pendingCodePayload = null;
+        _replyToKey = null;
+        _replyToFrom = null;
+        _replyToPreview = null;
       });
       return;
     }
@@ -6518,6 +7064,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         _activeAvatarUrl = widget.initialOpenAvatarUrl;
         _activeOtherUid = null;
         _activeOtherUidLoginLower = null;
+        _pendingCodePayload = null;
+        _replyToKey = null;
+        _replyToFrom = null;
+        _replyToPreview = null;
       });
       return;
     }
@@ -6528,6 +7078,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         _activeAvatarUrl = widget.initialOpenAvatarUrl;
         _activeOtherUid = null;
         _activeOtherUidLoginLower = null;
+        _pendingCodePayload = null;
+        _replyToKey = null;
+        _replyToFrom = null;
+        _replyToPreview = null;
       });
     }
   }
@@ -6578,6 +7132,440 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
       _activeOtherUidLoginLower = loginLower;
     });
     return uid;
+  }
+
+  void _setReplyTarget({required String key, required String from, required String preview}) {
+    setState(() {
+      _replyToKey = key;
+      _replyToFrom = from;
+      _replyToPreview = preview;
+    });
+  }
+
+  void _clearReplyTarget() {
+    if (_replyToKey == null && _replyToFrom == null && _replyToPreview == null) return;
+    setState(() {
+      _replyToKey = null;
+      _replyToFrom = null;
+      _replyToPreview = null;
+    });
+  }
+
+  String? _firstUrlInText(String text) {
+    final markdownLink = RegExp(r'\[[^\]]+\]\((https?:\/\/[^\s)]+)\)', caseSensitive: false);
+    final m1 = markdownLink.firstMatch(text);
+    if (m1 != null) {
+      final u = (m1.group(1) ?? '').trim();
+      if (u.isNotEmpty) return u;
+    }
+
+    final plainUrl = RegExp(r'(https?:\/\/[^\s]+)', caseSensitive: false);
+    final m2 = plainUrl.firstMatch(text);
+    if (m2 != null) {
+      final u = (m2.group(1) ?? '').trim();
+      if (u.isNotEmpty) return u;
+    }
+    return null;
+  }
+
+  Future<void> _openCodeSnippetSheet(_CodeMessagePayload payload) async {
+    final codeBlock = payload.language.trim().isEmpty
+        ? '```\n${payload.code}\n```'
+        : '```' + payload.language.trim() + '\n${payload.code}\n```';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  payload.title.trim().isEmpty ? 'Code snippet' : payload.title.trim(),
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                if (payload.language.trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(payload.language.trim(), style: const TextStyle(color: Colors.white70)),
+                ],
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: _RichMessageText(
+                      text: codeBlock,
+                      fontSize: widget.settings.chatTextSize,
+                      textColor: Theme.of(ctx).colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await Clipboard.setData(ClipboardData(text: payload.code));
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kód zkopírován.')));
+                        },
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Kopírovat kód'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('Zavřít'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _forwardToUsername({
+    required String targetLogin,
+    required String messageText,
+  }) async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final myLogin = await _myGithubUsername(current.uid);
+    if (myLogin == null || myLogin.trim().isEmpty) return;
+
+    final cleaned = targetLogin.trim().replaceFirst(RegExp(r'^@+'), '');
+    if (cleaned.isEmpty) return;
+    final otherUid = await _lookupUidForLoginLower(cleaned.toLowerCase());
+    if (otherUid == null || otherUid.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cílový uživatel není v GitMit.')));
+      return;
+    }
+
+    final forwardedText = 'Přeposláno:\n$messageText';
+    final accepted = await _isDmAccepted(myUid: current.uid, otherLoginLower: cleaned.toLowerCase());
+    if (!accepted) {
+      await _sendDmRequest(
+        myUid: current.uid,
+        myLogin: myLogin,
+        otherUid: otherUid,
+        otherLogin: cleaned,
+        messageText: forwardedText,
+      );
+      return;
+    }
+
+    final encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: forwardedText);
+    final key = rtdb().ref().push().key;
+    if (key == null || key.isEmpty) return;
+    final nowPayload = {
+      ...encrypted,
+      'fromUid': current.uid,
+      'createdAt': ServerValue.timestamp,
+      'forwarded': true,
+    };
+
+    final myAvatar = await _myAvatarUrl(current.uid);
+    final updates = <String, Object?>{};
+    updates['messages/${current.uid}/$cleaned/$key'] = nowPayload;
+    updates['messages/$otherUid/$myLogin/$key'] = nowPayload;
+    updates['savedChats/${current.uid}/$cleaned'] = {
+      'login': cleaned,
+      'status': 'accepted',
+      'lastMessageText': '🔒',
+      'lastMessageAt': ServerValue.timestamp,
+      'savedAt': ServerValue.timestamp,
+    };
+    updates['savedChats/$otherUid/$myLogin'] = {
+      'login': myLogin,
+      if (myAvatar != null) 'avatarUrl': myAvatar,
+      'status': 'accepted',
+      'lastMessageText': '🔒',
+      'lastMessageAt': ServerValue.timestamp,
+      'savedAt': ServerValue.timestamp,
+    };
+    await rtdb().ref().update(updates);
+  }
+
+  Future<void> _showMessageActions({
+    required bool isGroup,
+    required String chatTarget,
+    required String messageKey,
+    required String fromLabel,
+    required String text,
+    required bool canDelete,
+    Future<void> Function(String key)? onDelete,
+  }) async {
+    final codePayload = _CodeMessagePayload.tryParse(text);
+    final link = _firstUrlInText(text);
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        const emojis = ['👍', '❤️', '😂', '😮', '😢'];
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: emojis
+                      .map(
+                        (e) => TextButton(
+                          onPressed: () => Navigator.of(ctx).pop('react:$e'),
+                          child: Text(e, style: const TextStyle(fontSize: 22)),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.reply),
+                title: const Text('Odpovědět'),
+                onTap: () => Navigator.of(ctx).pop('reply'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: const Text('Kopírovat'),
+                onTap: () => Navigator.of(ctx).pop('copy'),
+              ),
+              if (link != null)
+                ListTile(
+                  leading: const Icon(Icons.link),
+                  title: const Text('Kopírovat odkaz'),
+                  onTap: () => Navigator.of(ctx).pop('copy_link'),
+                ),
+              ListTile(
+                leading: const Icon(Icons.forward_to_inbox_outlined),
+                title: const Text('Přeposlat'),
+                onTap: () => Navigator.of(ctx).pop('forward'),
+              ),
+              if (codePayload != null)
+                ListTile(
+                  leading: const Icon(Icons.code),
+                  title: const Text('Otevřít kód'),
+                  onTap: () => Navigator.of(ctx).pop('open_code'),
+                ),
+              if (canDelete && onDelete != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: const Text('Smazat zprávu'),
+                  onTap: () => Navigator.of(ctx).pop('delete'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (action == null) return;
+
+    if (action.startsWith('react:')) {
+      final emoji = action.substring('react:'.length);
+      if (isGroup) {
+        final current = FirebaseAuth.instance.currentUser;
+        if (current != null) {
+          await rtdb().ref('groupMessages/$chatTarget/$messageKey/reactions/$emoji/${current.uid}').set(true);
+        }
+      } else {
+        await _reactToMessage(login: chatTarget, messageKey: messageKey, emoji: emoji);
+      }
+      return;
+    }
+
+    switch (action) {
+      case 'reply':
+        final preview = codePayload?.previewLabel() ?? text.replaceAll('\n', ' ').trim();
+        final limited = preview.length > 120 ? '${preview.substring(0, 120)}…' : preview;
+        _setReplyTarget(key: messageKey, from: fromLabel, preview: limited);
+        return;
+      case 'copy':
+        final copied = codePayload?.code ?? text;
+        await Clipboard.setData(ClipboardData(text: copied));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Zkopírováno.')));
+        return;
+      case 'copy_link':
+        if (link != null) {
+          await Clipboard.setData(ClipboardData(text: link));
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Odkaz zkopírován.')));
+        }
+        return;
+      case 'forward':
+        final targetCtrl = TextEditingController();
+        final ok = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Přeposlat zprávu'),
+                content: TextField(
+                  controller: targetCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'GitHub username',
+                    prefixText: '@',
+                  ),
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Zrušit')),
+                  TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Přeposlat')),
+                ],
+              ),
+            ) ??
+            false;
+        if (!ok) return;
+        final target = targetCtrl.text.trim();
+        if (target.isEmpty) return;
+        await _forwardToUsername(targetLogin: target, messageText: codePayload?.code ?? text);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Přeposláno.')));
+        return;
+      case 'open_code':
+        if (codePayload != null) {
+          await _openCodeSnippetSheet(codePayload);
+        }
+        return;
+      case 'delete':
+        if (canDelete && onDelete != null) {
+          await onDelete(messageKey);
+        }
+        return;
+    }
+  }
+
+  Future<void> _insertCodeBlockTemplate() async {
+    final langCtrl = TextEditingController();
+    final titleCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Vložit code block',
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: langCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Jazyk (volitelné)',
+                    hintText: 'dart, js, ts, python, ...',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Název snippetu (volitelné)',
+                    hintText: 'Např. Login handler',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: codeCtrl,
+                  minLines: 6,
+                  maxLines: 14,
+                  decoration: const InputDecoration(
+                    labelText: 'Kód',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('Zrušit'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          final lang = langCtrl.text.trim();
+                          final title = titleCtrl.text.trim();
+                          final code = codeCtrl.text;
+                          if (code.trim().isEmpty) return;
+
+                          final payload = _CodeMessagePayload(
+                            title: title,
+                            language: lang,
+                            code: code,
+                          );
+
+                          setState(() {
+                            _pendingCodePayload = payload;
+                            _messageController.value = TextEditingValue(
+                              text: payload.previewLabel(),
+                              selection: TextSelection.collapsed(offset: payload.previewLabel().length),
+                            );
+                          });
+
+                          Navigator.of(ctx).pop();
+                        },
+                        icon: const Icon(Icons.code),
+                        label: const Text('Vložit'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<bool> _notifyGithubNonGitmit({
+    required String targetLogin,
+    required String fromLogin,
+    required String preview,
+  }) async {
+    final endpoint = _githubDmFallbackUrl.trim();
+    if (endpoint.isEmpty) return false;
+
+    final uri = Uri.tryParse(endpoint);
+    if (uri == null) return false;
+
+    final payload = jsonEncode({
+      'targetLogin': targetLogin,
+      'fromLogin': fromLogin,
+      'preview': preview,
+      'source': 'gitmit',
+    });
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (_githubDmFallbackToken.trim().isNotEmpty) 'Authorization': 'Bearer ${_githubDmFallbackToken.trim()}',
+    };
+
+    final response = await http.post(uri, headers: headers, body: payload);
+    return response.statusCode >= 200 && response.statusCode < 300;
   }
 
   Future<void> _moveChatToFolder({required String myUid, required String login}) async {
@@ -6669,20 +7657,22 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     final text = _messageController.text.trim();
     if (current == null || login == null || text.isEmpty) return;
 
-    final otherUid = await _ensureActiveOtherUid();
-    if (otherUid == null || otherUid.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('E2EE: nelze zjistit UID uživatele.')),
-        );
-      }
-      return;
+    final pendingCode = _pendingCodePayload;
+    final isPendingCodeText = pendingCode != null && text.startsWith('<> kód');
+    final replyToKey = _replyToKey;
+    final replyToFrom = _replyToFrom;
+    final replyToPreview = _replyToPreview;
+
+    String outgoingText;
+    if (isPendingCodeText && pendingCode != null) {
+      outgoingText = jsonEncode(pendingCode.toJson());
+    } else {
+      outgoingText = text;
     }
 
-    try {
-      await E2ee.publishMyPublicKey(uid: current.uid);
-    } catch (_) {
-      // best-effort
+    if (replyToFrom != null && replyToFrom.trim().isNotEmpty && !outgoingText.trim().startsWith('@')) {
+      final cleanFrom = replyToFrom.trim().replaceFirst(RegExp(r'^@+'), '');
+      outgoingText = '@$cleanFrom $outgoingText';
     }
 
     final myLogin = await _myGithubUsername(current.uid);
@@ -6695,6 +7685,39 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
       return;
     }
 
+    final otherUid = await _ensureActiveOtherUid();
+    if (otherUid == null || otherUid.isEmpty) {
+      var sentFallback = false;
+      try {
+        sentFallback = await _notifyGithubNonGitmit(
+          targetLogin: login,
+          fromLogin: myLogin,
+          preview: outgoingText,
+        );
+      } catch (_) {
+        sentFallback = false;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              sentFallback
+                  ? 'Uživatel není v GitMit. Poslán GitHub ping přes backend.'
+                  : 'Uživatel není v GitMit (nenalezené UID).',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      await E2ee.publishMyPublicKey(uid: current.uid);
+    } catch (_) {
+      // best-effort
+    }
+
     final otherLoginLower = login.trim().toLowerCase();
     final accepted = await _isDmAccepted(myUid: current.uid, otherLoginLower: otherLoginLower);
     if (!accepted) {
@@ -6704,9 +7727,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           myLogin: myLogin,
           otherUid: otherUid,
           otherLogin: login,
-          messageText: text,
+          messageText: outgoingText,
         );
         _messageController.clear();
+        _pendingCodePayload = null;
+        _clearReplyTarget();
         _typingTimeout?.cancel();
         _setTyping(false);
         if (mounted) {
@@ -6726,7 +7751,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
     Map<String, Object?> encrypted;
     try {
-      encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: text);
+      encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: outgoingText);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -6758,6 +7783,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
       ...encrypted,
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
+      if (replyToKey != null && replyToKey.trim().isNotEmpty) 'replyToKey': replyToKey,
+      if (replyToFrom != null && replyToFrom.trim().isNotEmpty) 'replyToFrom': replyToFrom,
+      if (replyToPreview != null && replyToPreview.trim().isNotEmpty) 'replyToPreview': replyToPreview,
       if (expiresAt != null) 'expiresAt': expiresAt,
       if (burnAfterRead) 'burnAfterRead': true,
     };
@@ -6789,9 +7817,13 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
     // Show our own message immediately (avoid "🔒 …" placeholder).
     if (mounted) {
-      setState(() => _decryptedCache[key] = text);
-      PlaintextCache.putDm(otherLoginLower: otherLoginLower, messageKey: key, plaintext: text);
+      setState(() {
+        _decryptedCache[key] = outgoingText;
+        _pendingCodePayload = null;
+      });
+      PlaintextCache.putDm(otherLoginLower: otherLoginLower, messageKey: key, plaintext: outgoingText);
     }
+    _clearReplyTarget();
 
     if (widget.settings.vibrationEnabled) {
       HapticFeedback.lightImpact();
@@ -8378,6 +9410,25 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                   Future<void> send() async {
                     final text = _messageController.text.trim();
                     if (text.isEmpty || !canSend) return;
+
+                    final pendingCode = _pendingCodePayload;
+                    final isPendingCodeText = pendingCode != null && text.startsWith('<> kód');
+                    final replyToKey = _replyToKey;
+                    final replyToFrom = _replyToFrom;
+                    final replyToPreview = _replyToPreview;
+
+                    String outgoingText;
+                    if (isPendingCodeText && pendingCode != null) {
+                      outgoingText = jsonEncode(pendingCode.toJson());
+                    } else {
+                      outgoingText = text;
+                    }
+
+                    if (replyToFrom != null && replyToFrom.trim().isNotEmpty && !outgoingText.trim().startsWith('@')) {
+                      final cleanFrom = replyToFrom.trim().replaceFirst(RegExp(r'^@+'), '');
+                      outgoingText = '@$cleanFrom $outgoingText';
+                    }
+
                     _messageController.clear();
                     _typingTimeout?.cancel();
                     _setGroupTyping(groupId: groupId, value: false, myGithub: myGithub);
@@ -8401,7 +9452,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                     // Prefer stronger v2 group encryption (Signal-like sender key) when possible.
                     Map<String, Object?>? encrypted;
                     try {
-                      encrypted = await E2ee.encryptForGroupSignalLike(groupId: groupId, myUid: current.uid, plaintext: text);
+                      encrypted = await E2ee.encryptForGroupSignalLike(groupId: groupId, myUid: current.uid, plaintext: outgoingText);
                     } catch (_) {
                       encrypted = null;
                     }
@@ -8437,7 +9488,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                       _groupKeyCache[groupId] = gk;
 
                       try {
-                        encrypted = await E2ee.encryptForGroup(groupKey: gk, plaintext: text);
+                        encrypted = await E2ee.encryptForGroup(groupKey: gk, plaintext: outgoingText);
                       } catch (e) {
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -8455,15 +9506,22 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                       'fromUid': current.uid,
                       'fromGithub': myGithub,
                       'createdAt': ServerValue.timestamp,
+                      if (replyToKey != null && replyToKey.trim().isNotEmpty) 'replyToKey': replyToKey,
+                      if (replyToFrom != null && replyToFrom.trim().isNotEmpty) 'replyToFrom': replyToFrom,
+                      if (replyToPreview != null && replyToPreview.trim().isNotEmpty) 'replyToPreview': replyToPreview,
                       if (expiresAt != null) 'expiresAt': expiresAt,
                       if (burnAfterRead) 'burnAfterRead': true,
                     });
 
                     // Show our own message immediately (avoid "🔒 …" placeholder).
                     if (newKey != null && newKey.isNotEmpty && mounted) {
-                      setState(() => _decryptedCache['g:$groupId:$newKey'] = text);
-                      PlaintextCache.putGroup(groupId: groupId, messageKey: newKey, plaintext: text);
+                      setState(() {
+                        _decryptedCache['g:$groupId:$newKey'] = outgoingText;
+                        _pendingCodePayload = null;
+                      });
+                      PlaintextCache.putGroup(groupId: groupId, messageKey: newKey, plaintext: outgoingText);
                     }
+                    _clearReplyTarget();
                     if (widget.settings.vibrationEnabled) {
                       HapticFeedback.lightImpact();
                     }
@@ -8653,13 +9711,42 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
                                 final attachment = _AttachmentPayload.tryParse(text);
                                 final isAttachment = attachment != null;
+                                final codePayload = _CodeMessagePayload.tryParse(text);
+                                final isCode = codePayload != null;
                                 if (attachment != null) {
                                   if (!_attachmentCache.containsKey(cacheKey)) {
                                     _ensureAttachmentCached(cacheKey: cacheKey, payload: attachment);
                                   }
                                 }
 
-                                final mentioned = !isAttachment && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+                                final mentioned = !isAttachment && !isCode && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+
+                                final replyToFrom = (m['replyToFrom'] ?? '').toString().trim();
+                                final replyToPreview = (m['replyToPreview'] ?? '').toString().trim();
+                                final hasReply = replyToFrom.isNotEmpty && replyToPreview.isNotEmpty;
+
+                                final reactions = (m['reactions'] is Map) ? (m['reactions'] as Map) : null;
+                                final reactionChips = <Widget>[];
+                                if (reactions != null) {
+                                  for (final re in reactions.entries) {
+                                    final emoji = re.key.toString();
+                                    final voters = (re.value is Map) ? (re.value as Map) : null;
+                                    final count = voters?.length ?? 0;
+                                    if (count > 0) {
+                                      reactionChips.add(
+                                        Container(
+                                          margin: const EdgeInsets.only(top: 4, right: 6),
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context).colorScheme.surface,
+                                            borderRadius: BorderRadius.circular(999),
+                                          ),
+                                          child: Text('$emoji $count', style: TextStyle(fontSize: widget.settings.chatTextSize - 4)),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                }
 
                                 final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
                                 final color = _bubbleColor(context, bubbleKey);
@@ -8667,14 +9754,23 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
                                 return Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 6),
-                                  child: Column(
-                                    crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                    children: [
-                                      if (fromGh.isNotEmpty)
-                                        Text('@$fromGh', style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                                      GestureDetector(
-                                        onLongPress: isAdmin ? () => showAdminMenu(key) : null,
-                                        child: Align(
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.translucent,
+                                    onLongPress: () => _showMessageActions(
+                                      isGroup: true,
+                                      chatTarget: groupId,
+                                      messageKey: key,
+                                      fromLabel: fromGh.isNotEmpty ? fromGh : (isMe ? myGithub : 'user'),
+                                      text: text,
+                                      canDelete: isAdmin,
+                                      onDelete: (msgKey) => deleteMessage(msgKey),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                      children: [
+                                        if (fromGh.isNotEmpty)
+                                          Text('@$fromGh', style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                                        Align(
                                           alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -8683,29 +9779,97 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                               borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
                                               border: mentioned ? Border.all(color: Colors.amber, width: 2) : null,
                                             ),
-                                            child: attachment != null
-                                                ? _attachmentBubble(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                if (hasReply)
+                                                  Container(
+                                                    margin: const EdgeInsets.only(bottom: 8),
+                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.black26,
+                                                      borderRadius: BorderRadius.circular(8),
+                                                      border: Border.all(color: Colors.white24),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        const Icon(Icons.subdirectory_arrow_right, size: 14, color: Colors.white70),
+                                                        const SizedBox(width: 6),
+                                                        Flexible(
+                                                          child: Text(
+                                                            '@$replyToFrom • $replyToPreview',
+                                                            maxLines: 2,
+                                                            overflow: TextOverflow.ellipsis,
+                                                            style: TextStyle(fontSize: widget.settings.chatTextSize - 2, color: Colors.white70),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                if (attachment != null)
+                                                  _attachmentBubble(
                                                     payload: attachment,
                                                     cacheKey: cacheKey,
                                                     maxWidth: MediaQuery.of(context).size.width * 0.62,
                                                     radius: widget.settings.bubbleRadius,
                                                   )
-                                                : Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
-                                          ),
-                                        ),
-                                      ),
-                                      if (timeLabel.isNotEmpty)
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 4),
-                                          child: Text(
-                                            timeLabel,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                                else if (codePayload != null)
+                                                  InkWell(
+                                                    onTap: () => _openCodeSnippetSheet(codePayload),
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.white10,
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        border: Border.all(color: Colors.white24),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          const Icon(Icons.code, size: 16),
+                                                          const SizedBox(width: 8),
+                                                          Flexible(
+                                                            child: Text(
+                                                              codePayload.previewLabel(),
+                                                              maxLines: 2,
+                                                              overflow: TextOverflow.ellipsis,
+                                                              style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  )
+                                                else
+                                                  _RichMessageText(
+                                                    text: text,
+                                                    fontSize: widget.settings.chatTextSize,
+                                                    textColor: tcolor,
+                                                  ),
+                                              ],
                                             ),
                                           ),
                                         ),
-                                    ],
+                                        if (reactionChips.isNotEmpty)
+                                          Wrap(
+                                            alignment: WrapAlignment.end,
+                                            children: reactionChips,
+                                          ),
+                                        if (timeLabel.isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 4),
+                                            child: Text(
+                                              timeLabel,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
                                 );
                               },
@@ -8756,6 +9920,38 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           );
                         },
                       ),
+                      if (_replyToPreview != null && _replyToPreview!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.subdirectory_arrow_right, size: 16),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '@${_replyToFrom ?? ''} • ${_replyToPreview ?? ''}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: Colors.white70),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, size: 18),
+                                  onPressed: _clearReplyTarget,
+                                  tooltip: 'Zrušit odpověď',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       Padding(
                         padding: const EdgeInsets.all(12),
                         child: Row(
@@ -8763,43 +9959,84 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             Expanded(
                               child: TextField(
                                 controller: _messageController,
-                                decoration: const InputDecoration(labelText: 'Zpráva'),
+                                decoration: const InputDecoration(labelText: 'Zpráva / Markdown'),
                                 enabled: canSend,
+                                minLines: 1,
+                                maxLines: 6,
                                 onSubmitted: (_) => send(),
                                 onChanged: canSend
-                                    ? (text) => _onGroupTypingChanged(
+                                    ? (text) {
+                                        if (_pendingCodePayload != null && !text.trim().startsWith('<> kód')) {
+                                          setState(() => _pendingCodePayload = null);
+                                        }
+                                        _onGroupTypingChanged(
                                           groupId: groupId,
                                           text: text,
                                           myGithub: myGithub,
-                                        )
+                                        );
+                                      }
                                     : null,
                               ),
                             ),
                             const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.image_outlined),
-                              onPressed: canSend
-                                  ? () => _sendImageGroup(
-                                        groupId: groupId,
-                                        current: current,
-                                        myGithub: myGithub,
-                                        canSend: canSend,
-                                      )
-                                  : null,
-                            ),
-                            PopupMenuButton<int>(
-                              tooltip: 'Ničení zpráv',
-                              initialValue: _dmTtlMode,
-                              onSelected: (v) => setState(() => _dmTtlMode = v),
+                            PopupMenuButton<String>(
+                              tooltip: 'Více',
+                              enabled: canSend,
+                              onSelected: (value) async {
+                                if (value == 'image') {
+                                  await _sendImageGroup(
+                                    groupId: groupId,
+                                    current: current,
+                                    myGithub: myGithub,
+                                    canSend: canSend,
+                                  );
+                                  return;
+                                }
+                                if (value == 'code') {
+                                  await _insertCodeBlockTemplate();
+                                  return;
+                                }
+                                if (value.startsWith('ttl:')) {
+                                  final ttl = int.tryParse(value.split(':').last);
+                                  if (ttl != null) {
+                                    setState(() => _dmTtlMode = ttl);
+                                  }
+                                }
+                              },
                               itemBuilder: (context) => [
-                                PopupMenuItem(value: 0, child: Text('Ničení: ${ttlLabel(0)}')),
-                                PopupMenuItem(value: 1, child: Text('Ničení: ${ttlLabel(1)}')),
-                                PopupMenuItem(value: 2, child: Text('Ničení: ${ttlLabel(2)}')),
-                                PopupMenuItem(value: 3, child: Text('Ničení: ${ttlLabel(3)}')),
-                                PopupMenuItem(value: 4, child: Text('Ničení: ${ttlLabel(4)}')),
-                                PopupMenuItem(value: 5, child: Text('Ničení: ${ttlLabel(5)}')),
+                                const PopupMenuItem<String>(
+                                  value: 'image',
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Icon(Icons.image_outlined),
+                                    title: Text('Poslat obrázek'),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                                const PopupMenuItem<String>(
+                                  value: 'code',
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Icon(Icons.code),
+                                    title: Text('Vložit kód'),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                for (final ttl in const [0, 1, 2, 3, 4, 5])
+                                  PopupMenuItem<String>(
+                                    value: 'ttl:$ttl',
+                                    child: ListTile(
+                                      dense: true,
+                                      leading: Icon(
+                                        _dmTtlMode == ttl ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                                      ),
+                                      title: Text('Ničení: ${ttlLabel(ttl)}'),
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  ),
                               ],
-                              icon: const Icon(Icons.timer_outlined),
+                              icon: const Icon(Icons.more_vert),
                             ),
                             IconButton(
                               icon: const Icon(Icons.send),
@@ -9159,6 +10396,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
                                   final attachment = _AttachmentPayload.tryParse(text);
                                   final isAttachment = attachment != null;
+                                  final codePayload = _CodeMessagePayload.tryParse(text);
+                                  final isCode = codePayload != null;
                                   if (attachment != null) {
                                     final cacheKey = 'dm:$loginLower:$key';
                                     if (!_attachmentCache.containsKey(cacheKey)) {
@@ -9166,7 +10405,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                     }
                                   }
 
-                                  final mentioned = !isAttachment && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+                                  final mentioned = !isAttachment && !isCode && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+
+                                  final replyToFrom = (m['replyToFrom'] ?? '').toString().trim();
+                                  final replyToPreview = (m['replyToPreview'] ?? '').toString().trim();
+                                  final hasReply = replyToFrom.isNotEmpty && replyToPreview.isNotEmpty;
 
                                   final bubbleKey = isMe ? widget.settings.bubbleOutgoing : widget.settings.bubbleIncoming;
                                   final color = _bubbleColor(context, bubbleKey);
@@ -9197,12 +10440,22 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
                                   return Padding(
                                     padding: const EdgeInsets.symmetric(vertical: 6),
-                                    child: Column(
-                                      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                      children: [
-                                        GestureDetector(
-                                          onLongPress: blocked ? null : () => _showReactionsMenu(login: login, messageKey: key),
-                                          child: Align(
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.translucent,
+                                      onLongPress: blocked
+                                          ? null
+                                          : () => _showMessageActions(
+                                                isGroup: false,
+                                                chatTarget: login,
+                                                messageKey: key,
+                                                fromLabel: isMe ? myGithub : login,
+                                                text: text,
+                                                canDelete: false,
+                                              ),
+                                      child: Column(
+                                        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                        children: [
+                                          Align(
                                             alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                                             child: Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -9211,49 +10464,112 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                 borderRadius: BorderRadius.circular(widget.settings.bubbleRadius),
                                                 border: mentioned ? Border.all(color: Colors.amber, width: 2) : null,
                                               ),
-                                              child: attachment != null
-                                                  ? _attachmentBubble(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  if (hasReply)
+                                                    Container(
+                                                      margin: const EdgeInsets.only(bottom: 8),
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black26,
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        border: Border.all(color: Colors.white24),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          const Icon(Icons.subdirectory_arrow_right, size: 14, color: Colors.white70),
+                                                          const SizedBox(width: 6),
+                                                          Flexible(
+                                                            child: Text(
+                                                              '@$replyToFrom • $replyToPreview',
+                                                              maxLines: 2,
+                                                              overflow: TextOverflow.ellipsis,
+                                                              style: TextStyle(fontSize: widget.settings.chatTextSize - 2, color: Colors.white70),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  if (attachment != null)
+                                                    _attachmentBubble(
                                                       payload: attachment,
                                                       cacheKey: 'dm:$loginLower:$key',
                                                       maxWidth: MediaQuery.of(context).size.width * 0.62,
                                                       radius: widget.settings.bubbleRadius,
                                                     )
-                                                  : Text(text, style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor)),
-                                            ),
-                                          ),
-                                        ),
-                                        if (reactionChips.isNotEmpty)
-                                          Wrap(
-                                            alignment: WrapAlignment.end,
-                                            children: reactionChips,
-                                          ),
-                                        if (timeLabel.isNotEmpty || isMe)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 4),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-                                              children: [
-                                                if (timeLabel.isNotEmpty)
-                                                  Text(
-                                                    timeLabel,
-                                                    style: TextStyle(
-                                                      fontSize: 11,
-                                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                                  else if (codePayload != null)
+                                                    InkWell(
+                                                      onTap: () => _openCodeSnippetSheet(codePayload),
+                                                      borderRadius: BorderRadius.circular(8),
+                                                      child: Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.white10,
+                                                          borderRadius: BorderRadius.circular(8),
+                                                          border: Border.all(color: Colors.white24),
+                                                        ),
+                                                        child: Row(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            const Icon(Icons.code, size: 16),
+                                                            const SizedBox(width: 8),
+                                                            Flexible(
+                                                              child: Text(
+                                                                codePayload.previewLabel(),
+                                                                maxLines: 2,
+                                                                overflow: TextOverflow.ellipsis,
+                                                                style: TextStyle(fontSize: widget.settings.chatTextSize, color: tcolor),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    )
+                                                  else
+                                                    _RichMessageText(
+                                                      text: text,
+                                                      fontSize: widget.settings.chatTextSize,
+                                                      textColor: tcolor,
                                                     ),
-                                                  ),
-                                                if (isMe) ...[
-                                                  if (timeLabel.isNotEmpty) const SizedBox(width: 6),
-                                                  _statusChecks(
-                                                    message: m,
-                                                    otherUid: _activeOtherUid,
-                                                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                                                  ),
                                                 ],
-                                              ],
+                                              ),
                                             ),
                                           ),
-                                      ],
+                                          if (reactionChips.isNotEmpty)
+                                            Wrap(
+                                              alignment: WrapAlignment.end,
+                                              children: reactionChips,
+                                            ),
+                                          if (timeLabel.isNotEmpty || isMe)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 4),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+                                                children: [
+                                                  if (timeLabel.isNotEmpty)
+                                                    Text(
+                                                      timeLabel,
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                                      ),
+                                                    ),
+                                                  if (isMe) ...[
+                                                    if (timeLabel.isNotEmpty) const SizedBox(width: 6),
+                                                    _statusChecks(
+                                                      message: m,
+                                                      otherUid: _activeOtherUid,
+                                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   );
                                 },
@@ -9288,6 +10604,38 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             );
                           },
                         ),
+                      if (_replyToPreview != null && _replyToPreview!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.subdirectory_arrow_right, size: 16),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '@${_replyToFrom ?? ''} • ${_replyToPreview ?? ''}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: Colors.white70),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, size: 18),
+                                  onPressed: _clearReplyTarget,
+                                  tooltip: 'Zrušit odpověď',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       Padding(
                         padding: const EdgeInsets.all(12),
                         child: Row(
@@ -9295,42 +10643,83 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             Expanded(
                               child: TextField(
                                 controller: _messageController,
-                                decoration: const InputDecoration(labelText: 'Zpráva'),
+                                decoration: const InputDecoration(labelText: 'Zpráva / Markdown'),
                                 enabled: !blocked && canSend,
+                                minLines: 1,
+                                maxLines: 6,
                                 onSubmitted: (!blocked && canSend) ? (_) => _send() : null,
-                                onChanged: (!blocked && canSend) ? _onTypingChanged : null,
+                                onChanged: (!blocked && canSend)
+                                    ? (text) {
+                                        if (_pendingCodePayload != null && !text.trim().startsWith('<> kód')) {
+                                          setState(() => _pendingCodePayload = null);
+                                        }
+                                        _onTypingChanged(text);
+                                      }
+                                    : null,
                               ),
                             ),
                             const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.image_outlined),
-                              onPressed: (!blocked && canSend)
-                                  ? () async {
-                                      final otherUid = await _ensureActiveOtherUid();
-                                      if (otherUid == null || otherUid.isEmpty) return;
-                                      await _sendImageDm(
-                                        current: current,
-                                        login: login,
-                                        myLogin: myGithub.trim(),
-                                        otherUid: otherUid,
-                                        canSend: canSend,
-                                      );
-                                    }
-                                  : null,
-                            ),
-                            PopupMenuButton<int>(
-                              tooltip: 'Ničení zpráv',
-                              initialValue: _dmTtlMode,
-                              onSelected: (v) => setState(() => _dmTtlMode = v),
+                            PopupMenuButton<String>(
+                              tooltip: 'Více',
+                              enabled: (!blocked && canSend),
+                              onSelected: (value) async {
+                                if (value == 'image') {
+                                  final otherUid = await _ensureActiveOtherUid();
+                                  if (otherUid == null || otherUid.isEmpty) return;
+                                  await _sendImageDm(
+                                    current: current,
+                                    login: login,
+                                    myLogin: myGithub.trim(),
+                                    otherUid: otherUid,
+                                    canSend: canSend,
+                                  );
+                                  return;
+                                }
+                                if (value == 'code') {
+                                  await _insertCodeBlockTemplate();
+                                  return;
+                                }
+                                if (value.startsWith('ttl:')) {
+                                  final ttl = int.tryParse(value.split(':').last);
+                                  if (ttl != null) {
+                                    setState(() => _dmTtlMode = ttl);
+                                  }
+                                }
+                              },
                               itemBuilder: (context) => [
-                                PopupMenuItem(value: 0, child: Text('Ničení: ${ttlLabel(0)}')),
-                                PopupMenuItem(value: 1, child: Text('Ničení: ${ttlLabel(1)}')),
-                                PopupMenuItem(value: 2, child: Text('Ničení: ${ttlLabel(2)}')),
-                                PopupMenuItem(value: 3, child: Text('Ničení: ${ttlLabel(3)}')),
-                                PopupMenuItem(value: 4, child: Text('Ničení: ${ttlLabel(4)}')),
-                                PopupMenuItem(value: 5, child: Text('Ničení: ${ttlLabel(5)}')),
+                                const PopupMenuItem<String>(
+                                  value: 'image',
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Icon(Icons.image_outlined),
+                                    title: Text('Poslat obrázek'),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                                const PopupMenuItem<String>(
+                                  value: 'code',
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Icon(Icons.code),
+                                    title: Text('Vložit kód'),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                for (final ttl in const [0, 1, 2, 3, 4, 5])
+                                  PopupMenuItem<String>(
+                                    value: 'ttl:$ttl',
+                                    child: ListTile(
+                                      dense: true,
+                                      leading: Icon(
+                                        _dmTtlMode == ttl ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                                      ),
+                                      title: Text('Ničení: ${ttlLabel(ttl)}'),
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  ),
                               ],
-                              icon: const Icon(Icons.timer_outlined),
+                              icon: const Icon(Icons.more_vert),
                             ),
                             IconButton(
                               icon: const Icon(Icons.send),
