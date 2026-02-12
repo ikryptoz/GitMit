@@ -7303,8 +7303,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     required String messageKey,
     required String fromLabel,
     required String text,
-    required bool canDelete,
-    Future<void> Function(String key)? onDelete,
+    required bool canDeleteForMe,
+    required bool canDeleteForAll,
+    Future<void> Function()? onDeleteForMe,
+    Future<void> Function()? onDeleteForAll,
   }) async {
     final codePayload = _CodeMessagePayload.tryParse(text);
     final link = _firstUrlInText(text);
@@ -7360,11 +7362,17 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                   title: const Text('Otevřít kód'),
                   onTap: () => Navigator.of(ctx).pop('open_code'),
                 ),
-              if (canDelete && onDelete != null)
+              if (canDeleteForMe && onDeleteForMe != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_sweep_outlined),
+                  title: const Text('Smazat u mě'),
+                  onTap: () => Navigator.of(ctx).pop('delete_me'),
+                ),
+              if (canDeleteForAll && onDeleteForAll != null)
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
-                  title: const Text('Smazat zprávu'),
-                  onTap: () => Navigator.of(ctx).pop('delete'),
+                  title: const Text('Smazat u všech'),
+                  onTap: () => Navigator.of(ctx).pop('delete_all'),
                 ),
             ],
           ),
@@ -7438,9 +7446,14 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           await _openCodeSnippetSheet(codePayload);
         }
         return;
-      case 'delete':
-        if (canDelete && onDelete != null) {
-          await onDelete(messageKey);
+      case 'delete_me':
+        if (canDeleteForMe && onDeleteForMe != null) {
+          await onDeleteForMe();
+        }
+        return;
+      case 'delete_all':
+        if (canDeleteForAll && onDeleteForAll != null) {
+          await onDeleteForAll();
         }
         return;
     }
@@ -7456,84 +7469,95 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
       isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) {
+        final mq = MediaQuery.of(ctx);
         return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Vložit code block',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: langCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Jazyk (volitelné)',
-                    hintText: 'dart, js, ts, python, ...',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: titleCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Název snippetu (volitelné)',
-                    hintText: 'Např. Login handler',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: codeCtrl,
-                  minLines: 6,
-                  maxLines: 14,
-                  decoration: const InputDecoration(
-                    labelText: 'Kód',
-                    alignLabelWithHint: true,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+            child: FractionallySizedBox(
+              heightFactor: 0.9,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.of(ctx).pop(),
-                        child: const Text('Zrušit'),
+                    Text(
+                      'Vložit code block',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: langCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Jazyk (volitelné)',
+                        hintText: 'dart, js, ts, python, ...',
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          final lang = langCtrl.text.trim();
-                          final title = titleCtrl.text.trim();
-                          final code = codeCtrl.text;
-                          if (code.trim().isEmpty) return;
-
-                          final payload = _CodeMessagePayload(
-                            title: title,
-                            language: lang,
-                            code: code,
-                          );
-
-                          setState(() {
-                            _pendingCodePayload = payload;
-                            _messageController.value = TextEditingValue(
-                              text: payload.previewLabel(),
-                              selection: TextSelection.collapsed(offset: payload.previewLabel().length),
-                            );
-                          });
-
-                          Navigator.of(ctx).pop();
-                        },
-                        icon: const Icon(Icons.code),
-                        label: const Text('Vložit'),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: titleCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Název snippetu (volitelné)',
+                        hintText: 'Např. Login handler',
                       ),
+                    ),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: codeCtrl,
+                        minLines: null,
+                        maxLines: null,
+                        expands: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Kód',
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            child: const Text('Zrušit'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              final lang = langCtrl.text.trim();
+                              final title = titleCtrl.text.trim();
+                              final code = codeCtrl.text;
+                              if (code.trim().isEmpty) return;
+
+                              final payload = _CodeMessagePayload(
+                                title: title,
+                                language: lang,
+                                code: code,
+                              );
+
+                              setState(() {
+                                _pendingCodePayload = payload;
+                                _messageController.value = TextEditingValue(
+                                  text: payload.previewLabel(),
+                                  selection: TextSelection.collapsed(offset: payload.previewLabel().length),
+                                );
+                              });
+
+                              Navigator.of(ctx).pop();
+                            },
+                            icon: const Icon(Icons.code),
+                            label: const Text('Vložit'),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
         );
@@ -9566,6 +9590,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                               final m = Map<String, dynamic>.from(e.value as Map);
                               m['__key'] = e.key.toString();
                               final expiresAt = (m['expiresAt'] is int) ? m['expiresAt'] as int : null;
+                              final deletedFor = (m['deletedFor'] is Map) ? (m['deletedFor'] as Map) : null;
+                              if (deletedFor?.containsKey(current.uid) == true) {
+                                continue;
+                              }
                               if (expiresAt != null && expiresAt <= now) {
                                 final k = (m['__key'] ?? '').toString();
                                 final delKey = 'g:$groupId:$k';
@@ -9762,8 +9790,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                       messageKey: key,
                                       fromLabel: fromGh.isNotEmpty ? fromGh : (isMe ? myGithub : 'user'),
                                       text: text,
-                                      canDelete: isAdmin,
-                                      onDelete: (msgKey) => deleteMessage(msgKey),
+                                      canDeleteForMe: true,
+                                      canDeleteForAll: isAdmin || isMe,
+                                      onDeleteForMe: () => msgsRef.child(key).child('deletedFor').child(current.uid).set(true),
+                                      onDeleteForAll: () => deleteMessage(key),
                                     ),
                                     child: Column(
                                       crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
@@ -10450,7 +10480,24 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                 messageKey: key,
                                                 fromLabel: isMe ? myGithub : login,
                                                 text: text,
-                                                canDelete: false,
+                                                canDeleteForMe: true,
+                                                canDeleteForAll: isMe,
+                                                onDeleteForMe: () async {
+                                                  await messagesRef.child(key).remove();
+                                                },
+                                                onDeleteForAll: isMe
+                                                    ? () async {
+                                                        final peerUid = await _ensureActiveOtherUid();
+                                                        final myLogin = myGithub.trim();
+                                                        final updates = <String, Object?>{
+                                                          'messages/${current.uid}/$login/$key': null,
+                                                        };
+                                                        if (peerUid != null && peerUid.isNotEmpty && myLogin.isNotEmpty) {
+                                                          updates['messages/$peerUid/$myLogin/$key'] = null;
+                                                        }
+                                                        await rtdb().ref().update(updates);
+                                                      }
+                                                    : null,
                                               ),
                                       child: Column(
                                         crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,

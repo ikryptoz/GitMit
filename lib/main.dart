@@ -38,6 +38,7 @@ class MyApp extends StatelessWidget {
       title: 'GitMit',
       theme: ThemeData(
         brightness: Brightness.dark,
+        fontFamily: 'monospace',
         scaffoldBackgroundColor: gray6,
         appBarTheme: const AppBarTheme(
           backgroundColor: gray5,
