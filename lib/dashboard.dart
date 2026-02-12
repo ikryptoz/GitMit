@@ -192,41 +192,6 @@ class _CodeMessagePayload {
   }
 }
 
-class _VerificationRequestPayload {
-  const _VerificationRequestPayload({
-    required this.buttonText,
-    required this.note,
-  });
-
-  final String buttonText;
-  final String note;
-
-  Map<String, dynamic> toJson() => {
-        'type': 'verification_request',
-        'buttonText': buttonText,
-        'note': note,
-      };
-
-  static _VerificationRequestPayload? tryParse(String text) {
-    final t = text.trim();
-    if (!t.startsWith('{')) return null;
-    try {
-      final decoded = jsonDecode(t);
-      if (decoded is! Map) return null;
-      final m = Map<String, dynamic>.from(decoded);
-      if ((m['type'] ?? '').toString() != 'verification_request') return null;
-      final buttonText = (m['buttonText'] ?? '').toString().trim();
-      final note = (m['note'] ?? '').toString().trim();
-      return _VerificationRequestPayload(
-        buttonText: buttonText.isEmpty ? 'Potvrdit a otevřít chat' : buttonText,
-        note: note.isEmpty ? 'Po kliknutí se chat propojí a můžeš hned psát.' : note,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-}
-
 final _attachmentAead = Chacha20.poly1305Aead();
 final _attachmentRng = Random.secure();
 
@@ -377,14 +342,6 @@ Future<List<int>> _decryptAttachmentBytes({
 
 Future<String?> _myGithubUsernameFromRtdb(String myUid) async {
   final snap = await rtdb().ref('users/$myUid/githubUsername').get();
-  final v = snap.value;
-  if (v == null) return null;
-  final s = v.toString().trim();
-  return s.isEmpty ? null : s;
-}
-
-Future<String?> _myAvatarUrlFromRtdb(String myUid) async {
-  final snap = await rtdb().ref('users/$myUid/avatarUrl').get();
   final v = snap.value;
   if (v == null) return null;
   final s = v.toString().trim();
@@ -767,12 +724,6 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
                                                 const Text('Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).'),
-                                                const SizedBox(height: 8),
-                                                FilledButton.tonalIcon(
-                                                  onPressed: () => Navigator.of(context).pop('request_verification_in_chat'),
-                                                  icon: const Icon(Icons.verified_user_outlined),
-                                                  label: const Text('Požádat o ověření v chatu'),
-                                                ),
                                               ],
                                             ),
                                           if (myFp != null && myFp.isNotEmpty)
@@ -2776,15 +2727,6 @@ class _ChatLoginAvatarState extends State<_ChatLoginAvatar> {
   }
 }
 
-class _PlaceholderTab extends StatelessWidget {
-  const _PlaceholderTab({required this.text});
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(child: Text(text));
-  }
-}
 
 enum _JobsAudience {
   seekers,
@@ -2792,14 +2734,7 @@ enum _JobsAudience {
 }
 
 extension on _JobsAudience {
-  String get groupId {
-    switch (this) {
-      case _JobsAudience.seekers:
-        return 'jobs_seekers';
-      case _JobsAudience.companies:
-        return 'jobs_companies';
-    }
-  }
+  // Removed unused getter groupId
 
   String get feedPath {
     switch (this) {
@@ -4920,6 +4855,61 @@ class _ChatPreview extends StatelessWidget {
 
 // -------------------- Ověření (verified) --------------------
 
+// Improved invite sending logic: validate fields, catch errors, show SnackBar
+Future<void> sendInviteWithMessage({
+  required String groupId,
+  required String targetLogin,
+  required String message,
+  required String groupTitle,
+  required String? logoUrl,
+  required String invitedByUid,
+  required String invitedByGithub,
+  required BuildContext context,
+}) async {
+  if (groupId.isEmpty || targetLogin.isEmpty || invitedByUid.isEmpty || invitedByGithub.isEmpty) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chyba: Povinná pole pozvánky chybí.')),
+      );
+    }
+    return;
+  }
+  final lower = targetLogin.toLowerCase();
+  try {
+    final snap = await rtdb().ref('usernames/$lower').get();
+    final uid = snap.value?.toString();
+    if (uid == null || uid.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Uživatel není registrovaný v GitMitu.')),
+        );
+      }
+      return;
+    }
+    final payload = {
+      'groupId': groupId,
+      'groupTitle': groupTitle,
+      if (logoUrl != null && logoUrl.isNotEmpty) 'groupLogoUrl': logoUrl,
+      'invitedByUid': invitedByUid,
+      'invitedByGithub': invitedByGithub,
+      'createdAt': ServerValue.timestamp,
+      if (message.isNotEmpty) 'message': message,
+    };
+    await rtdb().ref('groupInvites/$uid/$groupId').set(payload);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pozvánka odeslána.')),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Chyba při odesílání pozvánky: $e')),
+      );
+    }
+  }
+}
+
 DatabaseReference _verifiedRequestRef(String uid) => rtdb().ref('verifiedRequests/$uid');
 DatabaseReference _verifiedMessagesRef(String uid) => rtdb().ref('verifiedMessages/$uid');
 
@@ -5759,125 +5749,7 @@ class _ContactsTabState extends State<_ContactsTab> {
       return;
     }
 
-    final acceptedSnap = await rtdb().ref('dmContacts/${current.uid}/$otherLower').get();
-    final accepted = acceptedSnap.exists && acceptedSnap.value != false;
-    if (accepted) {
-      widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
-      return;
-    }
-
-    if (!mounted) return;
-    final msgCtrl = TextEditingController();
-    bool sending = false;
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Future<void> sendInvite() async {
-              if (sending) return;
-              var didPop = false;
-              setSheetState(() => sending = true);
-              try {
-                final myLogin = await _myGithubUsernameFromRtdb(current.uid);
-                if (myLogin == null || myLogin.trim().isEmpty) {
-                  throw Exception('Nepodařilo se zjistit tvůj GitHub username.');
-                }
-                final myAvatar = await _myAvatarUrlFromRtdb(current.uid);
-                await _sendDmRequestCore(
-                  myUid: current.uid,
-                  myLogin: myLogin,
-                  myAvatarUrl: myAvatar,
-                  otherUid: otherUid,
-                  otherLogin: otherLogin,
-                  otherAvatarUrl: avatarUrl,
-                  messageText: msgCtrl.text,
-                );
-                if (!mounted) return;
-                if (context.mounted) {
-                  didPop = true;
-                  Navigator.of(context).pop();
-                }
-                // Switch tabs only after the sheet is fully closed.
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!mounted) return;
-                  widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
-                });
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
-                }
-              } finally {
-                if (!didPop && context.mounted) setSheetState(() => sending = false);
-              }
-            }
-
-            final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundImage: avatarUrl.trim().isNotEmpty ? NetworkImage(avatarUrl.trim()) : null,
-                          child: avatarUrl.trim().isEmpty ? const Icon(Icons.person) : null,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text('@$otherLogin', style: const TextStyle(fontWeight: FontWeight.w700))),
-                        IconButton(
-                          tooltip: 'Profil + fingerprint',
-                          icon: const Icon(Icons.fingerprint),
-                          onPressed: () async {
-                            Navigator.of(context).pop();
-                            await Navigator.of(this.context).push(
-                              MaterialPageRoute(builder: (_) => _UserProfilePage(login: otherLogin, avatarUrl: avatarUrl)),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Pošli invajt. Můžeš přidat jednu zprávu – odešle se šifrovaně a chat se odemkne až po přijetí.',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: msgCtrl,
-                      minLines: 1,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        labelText: 'Zpráva (volitelné)',
-                        hintText: 'Napiš jednu zprávu…',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: sending ? null : sendInvite,
-                            child: Text(sending ? 'Odesílám…' : 'Poslat invajt'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-    msgCtrl.dispose();
+    widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
   }
 
   Future<void> _refreshLocalRecommendations() async {
@@ -7824,35 +7696,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     }
 
     final otherLoginLower = login.trim().toLowerCase();
-    final accepted = await _isDmAccepted(myUid: current.uid, otherLoginLower: otherLoginLower);
-    if (!accepted) {
-      try {
-        await _sendDmRequest(
-          myUid: current.uid,
-          myLogin: myLogin,
-          otherUid: otherUid,
-          otherLogin: login,
-          messageText: outgoingText,
-        );
-        _messageController.clear();
-        _pendingCodePayload = null;
-        _clearReplyTarget();
-        _typingTimeout?.cancel();
-        _setTyping(false);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Žádost o chat byla odeslána.')),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Nelze odeslat žádost: $e')),
-          );
-        }
-      }
-      return;
-    }
 
     Map<String, Object?> encrypted;
     try {
@@ -7960,34 +7803,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     await rtdb().ref().update(updates);
   }
 
-  Future<void> _showReactionsMenu({required String login, required String messageKey}) async {
-    if (!widget.settings.reactionsEnabled) return;
-    final emoji = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) {
-        const items = ['👍', '❤️', '😂', '😮', '😢'];
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: items
-                  .map(
-                    (e) => TextButton(
-                      onPressed: () => Navigator.of(context).pop(e),
-                      child: Text(e, style: const TextStyle(fontSize: 22)),
-                    ),
-                  )
-                  .toList(growable: false),
-            ),
-          ),
-        );
-      },
-    );
-    if (emoji == null) return;
-    await _reactToMessage(login: login, messageKey: messageKey, emoji: emoji);
-  }
-
   Future<void> _openUserProfile({required String login, required String avatarUrl}) async {
     final res = await Navigator.of(context).push<String>(
       MaterialPageRoute(
@@ -7996,10 +7811,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     );
 
     if (!mounted) return;
-    if (res == 'request_verification_in_chat') {
-      await _requestVerificationFromProfile(login: login, avatarUrl: avatarUrl);
-      return;
-    }
     if (res == 'deleted_chat_for_me' || res == 'deleted_chat_for_both') {
       setState(() {
         _activeLogin = null;
@@ -8009,98 +7820,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         const SnackBar(content: Text('Chat byl smazán.')),
       );
     }
-  }
-
-  Future<void> _sendVerificationButtonPrompt({
-    required String myUid,
-    required String myLogin,
-    required String otherUid,
-    required String otherLogin,
-  }) async {
-    final key = rtdb().ref().push().key;
-    if (key == null || key.isEmpty) return;
-
-    final payload = _VerificationRequestPayload(
-      buttonText: 'Potvrdit a otevřít chat',
-      note: 'I bez předchozího ověření můžeš kliknout a hned začít psát.',
-    );
-    final text = jsonEncode(payload.toJson());
-    final msg = {
-      'fromUid': myUid,
-      'text': text,
-      'createdAt': ServerValue.timestamp,
-      'verificationButton': true,
-    };
-
-    final updates = <String, Object?>{
-      'messages/$myUid/$otherLogin/$key': msg,
-      'messages/$otherUid/$myLogin/$key': msg,
-      'savedChats/$myUid/$otherLogin/login': otherLogin,
-      'savedChats/$myUid/$otherLogin/lastMessageText': 'Žádost o ověření',
-      'savedChats/$myUid/$otherLogin/lastMessageAt': ServerValue.timestamp,
-      'savedChats/$myUid/$otherLogin/savedAt': ServerValue.timestamp,
-      'savedChats/$otherUid/$myLogin/login': myLogin,
-      'savedChats/$otherUid/$myLogin/lastMessageText': 'Žádost o ověření',
-      'savedChats/$otherUid/$myLogin/lastMessageAt': ServerValue.timestamp,
-      'savedChats/$otherUid/$myLogin/savedAt': ServerValue.timestamp,
-    };
-
-    await rtdb().ref().update(updates);
-  }
-
-  Future<void> _requestVerificationFromProfile({
-    required String login,
-    required String avatarUrl,
-  }) async {
-    final current = FirebaseAuth.instance.currentUser;
-    if (current == null) return;
-
-    final loginLower = login.trim().toLowerCase();
-    if (loginLower.isEmpty) return;
-
-    final otherUid = await _lookupUidForLoginLower(loginLower);
-    if (otherUid == null || otherUid.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Uživatel @$login nepoužívá GitMit (nelze zjistit UID).')),
-      );
-      return;
-    }
-
-    final myLogin = await _myGithubUsername(current.uid);
-    if (myLogin == null || myLogin.trim().isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nelze zjistit tvůj GitHub username.')),
-      );
-      return;
-    }
-
-    final accepted = await _isDmAccepted(myUid: current.uid, otherLoginLower: loginLower);
-    if (!accepted) {
-      await _sendDmRequest(
-        myUid: current.uid,
-        myLogin: myLogin,
-        otherUid: otherUid,
-        otherLogin: login,
-      );
-    }
-
-    await _sendVerificationButtonPrompt(
-      myUid: current.uid,
-      myLogin: myLogin,
-      otherUid: otherUid,
-      otherLogin: login,
-    );
-
-    if (!mounted) return;
-    setState(() {
-      _activeLogin = login;
-      _activeAvatarUrl = avatarUrl;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Žádost o ověření byla odeslána do chatu.')),
-    );
   }
 
   Future<void> _sendVerified({required bool asModerator, required String moderatorGithub}) async {
@@ -9584,30 +9303,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                     await msgsRef.child(key).remove();
                   }
 
-                  Future<void> showAdminMenu(String key) async {
-                    if (!isAdmin) return;
-                    final action = await showModalBottomSheet<String>(
-                      context: context,
-                      builder: (context) {
-                        return SafeArea(
-                          child: ListView(
-                            shrinkWrap: true,
-                            children: [
-                              ListTile(
-                                leading: const Icon(Icons.delete_outline),
-                                title: const Text('Smazat zprávu'),
-                                onTap: () => Navigator.of(context).pop('delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    );
-                    if (action == 'delete') {
-                      await deleteMessage(key);
-                    }
-                  }
-
                   Future<void> send() async {
                     final text = _messageController.text.trim();
                     if (text.isEmpty || !canSend) return;
@@ -10272,7 +9967,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     }
     final blockedRef = rtdb().ref('blocked/${current.uid}/$loginLower');
     final dmContactRef = _dmContactRef(myUid: current.uid, otherLoginLower: loginLower);
-    final dmReqRef = _dmRequestRef(myUid: current.uid, fromLoginLower: loginLower);
 
     final bg = widget.settings.wallpaperUrl.trim();
     Color? bgColor;
@@ -10308,37 +10002,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         return StreamBuilder<DatabaseEvent>(
           stream: dmContactRef.onValue,
           builder: (context, cSnap) {
-            final accepted = cSnap.data?.snapshot.exists == true && (cSnap.data?.snapshot.value != false);
-
-            return StreamBuilder<DatabaseEvent>(
-              stream: dmReqRef.onValue,
-              builder: (context, rSnap) {
-                final hasIncomingReq = rSnap.data?.snapshot.exists == true;
-
-                Future<void> acceptReq() async {
-                  try {
-                    await _acceptDmRequest(myUid: current.uid, otherLogin: login);
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Žádost přijata.')));
-                  } catch (e) {
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nelze přijmout: $e')));
-                  }
-                }
-
-                Future<void> rejectReq() async {
-                  await dmReqRef.remove();
-                  await rtdb().ref('savedChats/${current.uid}/$login').remove();
-                  if (!mounted) return;
-                  setState(() {
-                    _activeLogin = null;
-                    _activeAvatarUrl = null;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Žádost odmítnuta.')));
-                }
-
-                final lockedIncoming = hasIncomingReq && !accepted;
-                final lockedOutgoing = !accepted && !hasIncomingReq;
 
                 String ttlLabel(int v) {
                   return switch (v) {
@@ -10382,35 +10045,12 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
               onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
             ),
             const Divider(height: 1),
-            if (lockedIncoming)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                color: Theme.of(context).colorScheme.surface,
-                child: Row(
-                  children: [
-                    const Expanded(child: Text('Žádost o chat. Přijmout?')),
-                    TextButton(onPressed: acceptReq, child: const Text('Přijmout')),
-                    TextButton(onPressed: rejectReq, child: const Text('Odmítnout')),
-                  ],
-                ),
-              ),
-            if (lockedOutgoing)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                color: Theme.of(context).colorScheme.surface,
-                child: const Text('Chat čeká na potvrzení. První zpráva odešle žádost.'),
-              ),
             StreamBuilder<DatabaseEvent>(
               stream: blockedRef.onValue,
               builder: (context, bSnap) {
                 final blocked = bSnap.data?.snapshot.value == true;
 
-                // Allow composing even before acceptance (first/next sends keep
-                // updating DM request). Only incoming request stays locked until
-                // user explicitly accepts/rejects.
-                final canSend = !lockedIncoming;
+                final canSend = true;
 
                 return Expanded(
                   child: Column(
@@ -10608,8 +10248,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   final isAttachment = attachment != null;
                                   final codePayload = _CodeMessagePayload.tryParse(text);
                                   final isCode = codePayload != null;
-                                  final verificationPayload = _VerificationRequestPayload.tryParse(text);
-                                  final isVerificationRequest = verificationPayload != null;
                                   if (attachment != null) {
                                     final cacheKey = 'dm:$loginLower:$key';
                                     if (!_attachmentCache.containsKey(cacheKey)) {
@@ -10618,7 +10256,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   }
 
                                   final mentioned =
-                                      !isAttachment && !isCode && !isVerificationRequest && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
+                                      !isAttachment && !isCode && myGithubLower.isNotEmpty && text.toLowerCase().contains('@$myGithubLower');
 
                                   final replyToFrom = (m['replyToFrom'] ?? '').toString().trim();
                                   final replyToPreview = (m['replyToPreview'] ?? '').toString().trim();
@@ -10755,72 +10393,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                             ),
                                                           ],
                                                         ),
-                                                      ),
-                                                    )
-                                                  else if (verificationPayload != null)
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                                      decoration: BoxDecoration(
-                                                        color: Theme.of(context).colorScheme.primaryContainer,
-                                                        borderRadius: BorderRadius.circular(8),
-                                                        border: Border.all(color: Theme.of(context).colorScheme.primary, width: 1.3),
-                                                      ),
-                                                      child: Column(
-                                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        children: [
-                                                          Text(
-                                                            verificationPayload.note,
-                                                            style: TextStyle(
-                                                              fontSize: widget.settings.chatTextSize - 1,
-                                                              color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                                              fontWeight: FontWeight.w600,
-                                                            ),
-                                                          ),
-                                                          const SizedBox(height: 8),
-                                                          SizedBox(
-                                                            width: double.infinity,
-                                                            child: FilledButton.icon(
-                                                              style: FilledButton.styleFrom(
-                                                                minimumSize: const Size.fromHeight(46),
-                                                              ),
-                                                              icon: const Icon(Icons.verified_user),
-                                                              onPressed: () async {
-                                                                if (isMe) {
-                                                                  if (!mounted) return;
-                                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                                    const SnackBar(content: Text('Žádost čeká na potvrzení protějšku.')),
-                                                                  );
-                                                                  return;
-                                                                }
-
-                                                                try {
-                                                                  final alreadyAccepted = await _isDmAccepted(
-                                                                    myUid: current.uid,
-                                                                    otherLoginLower: loginLower,
-                                                                  );
-                                                                  if (!alreadyAccepted) {
-                                                                    await _acceptDmRequest(myUid: current.uid, otherLogin: login);
-                                                                  }
-                                                                  if (!mounted) return;
-                                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                                    const SnackBar(content: Text('Chat propojen. Můžeš hned psát.')),
-                                                                  );
-                                                                  setState(() {});
-                                                                } catch (e) {
-                                                                  if (!mounted) return;
-                                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                                    SnackBar(content: Text('Nelze potvrdit: $e')),
-                                                                  );
-                                                                }
-                                                              },
-                                                              label: Text(
-                                                                verificationPayload.buttonText,
-                                                                style: const TextStyle(fontWeight: FontWeight.w700),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
                                                       ),
                                                     )
                                                   else
@@ -11031,8 +10603,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
             ),
                   ],
                 );
-              },
-            );
           },
         );
       },
