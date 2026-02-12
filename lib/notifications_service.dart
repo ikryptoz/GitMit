@@ -15,7 +15,10 @@ class AppNotifications {
   static final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
 
-  static const String _onlineNotifyBackendUrl = String.fromEnvironment('GITMIT_NOTIFY_BACKEND_URL', defaultValue: '');
+  static const String _onlineNotifyBackendUrl = String.fromEnvironment(
+    'GITMIT_NOTIFY_BACKEND_URL',
+    defaultValue: 'https://us-central1-githubmessenger-7d2c6.cloudfunctions.net/notifyOnlinePresence',
+  );
   static const String _onlineNotifyBackendToken = String.fromEnvironment('GITMIT_NOTIFY_BACKEND_TOKEN', defaultValue: '');
 
   static const _storage = FlutterSecureStorage();
@@ -192,6 +195,31 @@ class AppNotifications {
       }
       // best-effort
       return false;
+    }
+  }
+
+  static Future<void> sendLoginNotification(String userId, String userName) async {
+    try {
+      final response = await http.post(
+        Uri.parse(_onlineNotifyBackendUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_onlineNotifyBackendToken',
+        },
+        body: jsonEncode({
+          'userId': userId,
+          'userName': userName,
+          'event': 'login',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        debugPrint('Login notification sent successfully.');
+      } else {
+        debugPrint('Failed to send login notification: \\${response.statusCode} - \\${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Error sending login notification: \\${e.toString()}');
     }
   }
 }

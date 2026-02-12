@@ -27,6 +27,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 Future<String> _uploadGroupLogo({required String groupId, required Uint8List bytes}) async {
   String normalizeBucket(String b) {
@@ -2032,7 +2033,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final settings = UserSettings.fromSnapshot(snapshot.data?.snapshot.value);
 
         final pages = <Widget>[
-          const _PlaceholderTab(text: 'Jobs'),
+          const _JobsTab(),
           _ChatsTab(
             key: _chatsKey,
             initialOpenLogin: _openChatLogin,
@@ -2428,6 +2429,576 @@ class _PlaceholderTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(child: Text(text));
+  }
+}
+
+enum _JobsAudience {
+  seekers,
+  companies,
+}
+
+extension on _JobsAudience {
+  String get groupId {
+    switch (this) {
+      case _JobsAudience.seekers:
+        return 'jobs_seekers';
+      case _JobsAudience.companies:
+        return 'jobs_companies';
+    }
+  }
+
+  String get feedPath {
+    switch (this) {
+      case _JobsAudience.seekers:
+        return 'jobs/posts/seekers';
+      case _JobsAudience.companies:
+        return 'jobs/posts/companies';
+    }
+  }
+
+  String get tabTitle {
+    switch (this) {
+      case _JobsAudience.seekers:
+        return 'Hledám práci';
+      case _JobsAudience.companies:
+        return 'Hledám lidi';
+    }
+  }
+
+  String get addLabel {
+    switch (this) {
+      case _JobsAudience.seekers:
+        return 'Přidat profil';
+      case _JobsAudience.companies:
+        return 'Přidat nabídku';
+    }
+  }
+
+  String get composerTitle {
+    switch (this) {
+      case _JobsAudience.seekers:
+        return 'Nový profil kandidáta';
+      case _JobsAudience.companies:
+        return 'Nová pracovní nabídka';
+    }
+  }
+
+  String get titleHint {
+    switch (this) {
+      case _JobsAudience.seekers:
+        return 'Např. Flutter vývojář / Remote / Senior';
+      case _JobsAudience.companies:
+        return 'Např. ACME hledá Senior Flutter vývojáře';
+    }
+  }
+
+  String get bodyHint {
+    switch (this) {
+      case _JobsAudience.seekers:
+        return 'Napiš krátké info o sobě, stack, zkušenosti, dostupnost.\n\nPodporujeme emoji, odrážky, odkazy a kód:\n- Dart\n- Flutter\n\n```dart\nprint("hello");\n```';
+      case _JobsAudience.companies:
+        return 'Popiš roli, požadavky, benefity a kontakt.\n\nPodporujeme emoji, odrážky, odkazy a kód:\n- TypeScript\n- CI/CD\n\n```yaml\nname: build\n```';
+    }
+  }
+}
+
+class _JobsPostView {
+  const _JobsPostView({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.author,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String author;
+  final DateTime createdAt;
+}
+
+class _JobsTab extends StatefulWidget {
+  const _JobsTab();
+
+  @override
+  State<_JobsTab> createState() => _JobsTabState();
+}
+
+class _JobsTabState extends State<_JobsTab> {
+  _JobsAudience _audience = _JobsAudience.seekers;
+  bool _posting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureJobsMembership();
+  }
+
+  Future<void> _ensureJobsMembership() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final updates = <String, Object?>{};
+    for (final audience in _JobsAudience.values) {
+      updates['groupMembers/${audience.groupId}/${user.uid}'] = true;
+    }
+    await rtdb().ref().update(updates);
+
+    for (final audience in _JobsAudience.values) {
+      try {
+        await E2ee.publishMyPublicKey(uid: user.uid);
+        await E2ee.fetchGroupKey(groupId: audience.groupId, myUid: user.uid);
+      } catch (_) {}
+    }
+  }
+
+  Future<SecretKey> _resolveGroupKey(_JobsAudience audience) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw Exception('Nepřihlášený uživatel.');
+    }
+
+    await E2ee.publishMyPublicKey(uid: user.uid);
+
+    var key = await E2ee.fetchGroupKey(groupId: audience.groupId, myUid: user.uid);
+    if (key != null) return key;
+
+    await E2ee.ensureGroupKeyDistributed(groupId: audience.groupId, myUid: user.uid);
+    key = await E2ee.fetchGroupKey(groupId: audience.groupId, myUid: user.uid);
+    if (key == null) {
+      throw Exception('Nepodařilo se načíst skupinový klíč.');
+    }
+    return key;
+  }
+
+  Future<String> _githubLoginForUid(String uid) async {
+    final snap = await rtdb().ref('users/$uid/githubUsername').get();
+    final value = snap.value?.toString().trim() ?? '';
+    if (value.isNotEmpty) return value;
+    return uid;
+  }
+
+  Future<void> _createPost({
+    required _JobsAudience audience,
+    required String title,
+    required String body,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    setState(() => _posting = true);
+    try {
+      final groupKey = await _resolveGroupKey(audience);
+      final author = await _githubLoginForUid(user.uid);
+      final payload = jsonEncode({
+        'title': title,
+        'body': body,
+      });
+      final encrypted = await E2ee.encryptForGroup(groupKey: groupKey, plaintext: payload);
+
+      final postRef = rtdb().ref(audience.feedPath).push();
+      await postRef.set({
+        ...encrypted,
+        'authorUid': user.uid,
+        'author': author,
+        'createdAt': ServerValue.timestamp,
+        'updatedAt': ServerValue.timestamp,
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _posting = false);
+      }
+    }
+  }
+
+  Future<List<_JobsPostView>> _decryptPosts(_JobsAudience audience, Object? value) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const [];
+
+    final map = (value is Map) ? Map<dynamic, dynamic>.from(value) : <dynamic, dynamic>{};
+    if (map.isEmpty) return const [];
+
+    final groupKey = await _resolveGroupKey(audience);
+    final posts = <_JobsPostView>[];
+
+    for (final entry in map.entries) {
+      final id = entry.key.toString();
+      final raw = entry.value;
+      if (raw is! Map) continue;
+
+      final m = Map<String, dynamic>.from(raw);
+      final createdMs = (m['createdAt'] is int)
+          ? m['createdAt'] as int
+          : int.tryParse((m['createdAt'] ?? '').toString()) ?? 0;
+      final author = (m['author'] ?? '').toString().trim();
+
+      try {
+        final clear = await E2ee.decryptFromGroup(groupKey: groupKey, message: m);
+        final decoded = jsonDecode(clear);
+        if (decoded is! Map) continue;
+        final payload = Map<String, dynamic>.from(decoded);
+        final title = (payload['title'] ?? '').toString().trim();
+        final body = (payload['body'] ?? '').toString();
+        if (title.isEmpty || body.trim().isEmpty) continue;
+
+        posts.add(
+          _JobsPostView(
+            id: id,
+            title: title,
+            body: body,
+            author: author.isEmpty ? 'unknown' : author,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(createdMs > 0 ? createdMs : 0),
+          ),
+        );
+      } catch (_) {
+        continue;
+      }
+    }
+
+    posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return posts;
+  }
+
+  String _timeLabel(DateTime dt) {
+    if (dt.millisecondsSinceEpoch <= 0) return 'teď';
+    final now = DateTime.now();
+    final d = now.difference(dt);
+    if (d.inMinutes < 1) return 'právě teď';
+    if (d.inHours < 1) return 'před ${d.inMinutes} min';
+    if (d.inDays < 1) return 'před ${d.inHours} h';
+    return 'před ${d.inDays} d';
+  }
+
+  Future<void> _openComposer(_JobsAudience audience) async {
+    final titleCtrl = TextEditingController();
+    final bodyCtrl = TextEditingController();
+    String? localError;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      audience.composerTitle,
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: titleCtrl,
+                      textInputAction: TextInputAction.next,
+                      maxLength: 140,
+                      decoration: InputDecoration(
+                        labelText: 'Title',
+                        hintText: audience.titleHint,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: bodyCtrl,
+                      minLines: 7,
+                      maxLines: 14,
+                      decoration: InputDecoration(
+                        labelText: 'Text (Markdown)',
+                        hintText: audience.bodyHint,
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                    if (localError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(localError!, style: const TextStyle(color: Colors.redAccent)),
+                    ],
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _posting ? null : () => Navigator.of(ctx).pop(),
+                            child: const Text('Zrušit'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _posting
+                                ? null
+                                : () async {
+                                    final title = titleCtrl.text.trim();
+                                    final body = bodyCtrl.text.trim();
+                                    if (title.isEmpty || body.isEmpty) {
+                                      setLocalState(() {
+                                        localError = 'Vyplň title i text.';
+                                      });
+                                      return;
+                                    }
+
+                                    try {
+                                      await _createPost(audience: audience, title: title, body: body);
+                                      if (!mounted) return;
+                                      Navigator.of(ctx).pop();
+                                    } catch (e) {
+                                      setLocalState(() {
+                                        localError = e.toString();
+                                      });
+                                    }
+                                  },
+                            icon: _posting
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.add),
+                            label: Text(_posting ? 'Ukládám...' : 'Přidat'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _audienceSwitch() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(
+            child: _JobsTabButton(
+              label: _JobsAudience.seekers.tabTitle,
+              selected: _audience == _JobsAudience.seekers,
+              onTap: () => setState(() => _audience = _JobsAudience.seekers),
+            ),
+          ),
+          Expanded(
+            child: _JobsTabButton(
+              label: _JobsAudience.companies.tabTitle,
+              selected: _audience == _JobsAudience.companies,
+              onTap: () => setState(() => _audience = _JobsAudience.companies),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final feedRef = rtdb().ref(_audience.feedPath);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+          child: _audienceSwitch(),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 2, 10, 8),
+          child: Row(
+            children: [
+              Text(
+                _audience == _JobsAudience.seekers ? 'Lidé, kteří hledají práci' : 'Firmy, které hledají lidi',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: _audience.addLabel,
+                onPressed: _posting ? null : () => _openComposer(_audience),
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<DatabaseEvent>(
+            stream: feedRef.onValue,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              return FutureBuilder<List<_JobsPostView>>(
+                future: _decryptPosts(_audience, snapshot.data?.snapshot.value),
+                builder: (context, postsSnap) {
+                  if (postsSnap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (postsSnap.hasError) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'Nepodařilo se načíst Jobs feed. ${postsSnap.error}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    );
+                  }
+
+                  final posts = postsSnap.data ?? const <_JobsPostView>[];
+                  if (posts.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          _audience == _JobsAudience.seekers
+                              ? 'Zatím tu nejsou žádné profily. Přidej první přes +.'
+                              : 'Zatím tu nejsou žádné nabídky. Přidej první přes +.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+                    itemCount: posts.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final post = posts[index];
+                      return _JobsPostCard(post: post, timeLabel: _timeLabel(post.createdAt));
+                    },
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _JobsTabButton extends StatelessWidget {
+  const _JobsTabButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? cs.secondary : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: selected ? cs.onSecondary : cs.onSurface,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _JobsPostCard extends StatelessWidget {
+  const _JobsPostCard({required this.post, required this.timeLabel});
+
+  final _JobsPostView post;
+  final String timeLabel;
+
+  Future<void> _openExternal(String rawUrl) async {
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  post.title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.lock_outline, size: 16),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '@${post.author} • $timeLabel',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 8),
+          MarkdownBody(
+            data: post.body,
+            selectable: true,
+            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+              p: Theme.of(context).textTheme.bodyMedium,
+              code: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    backgroundColor: Colors.white10,
+                  ),
+              codeblockDecoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white24),
+              ),
+              blockquote: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
+            onTapLink: (text, href, title) {
+              if (href != null && href.trim().isNotEmpty) {
+                _openExternal(href);
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 }
 
