@@ -503,11 +503,37 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     return s.isEmpty ? null : s;
   }
 
+  Future<String?> _myAvatarUrl(String myUid) async {
+    final snap = await rtdb().ref('users/$myUid/avatarUrl').get();
+    final v = snap.value;
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
   Future<String?> _lookupUidForLogin(String loginLower) async {
     final snap = await rtdb().ref('usernames/$loginLower').get();
     final v = snap.value;
     if (v == null) return null;
     return v.toString();
+  }
+
+  Future<void> _requestKeySharing({required String myUid, required String otherUid}) async {
+    final myLogin = await _myGithubUsername(myUid);
+    if (myLogin == null || myLogin.trim().isEmpty) {
+      throw Exception('Nepodařilo se zjistit tvůj GitHub username.');
+    }
+
+    final myAvatar = await _myAvatarUrl(myUid);
+    await _sendDmRequestCore(
+      myUid: myUid,
+      myLogin: myLogin,
+      otherUid: otherUid,
+      otherLogin: widget.login,
+      myAvatarUrl: myAvatar,
+      otherAvatarUrl: widget.avatarUrl,
+      messageText: '🔐 Prosím povol sdílení E2EE klíče, ať se naváže šifrovaná komunikace.',
+    );
   }
 
   Future<void> _toggleBlock({required String myUid, required bool currentlyBlocked}) async {
@@ -683,6 +709,18 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                         icon: const Icon(Icons.open_in_new),
                         label: Text(AppLanguage.tr(context, 'Zobrazit na GitHubu', 'View on GitHub')),
                       ),
+                      if (hasOtherUid) ...[
+                        const SizedBox(height: 8),
+                        FilledButton.icon(
+                          onPressed: () => _confirmAndRun(
+                            title: 'Poslat žádost o sdílení klíče?',
+                            message: 'Protistraně se pošle upozornění do Chatů. Po přijetí se naváže E2EE komunikace (klíče/fingerprint).',
+                            action: () => _requestKeySharing(myUid: myUid, otherUid: otherUid),
+                          ),
+                          icon: const Icon(Icons.key_outlined),
+                          label: const Text('Poprosit sdílet klíč'),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       if (!hasOtherUid) Text(AppLanguage.tr(context, 'Účet není propojený v databázi.', 'Account is not linked in database.')),
 
@@ -2084,11 +2122,114 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  DatabaseReference _dmContactRef({required String myUid, required String otherLoginLower}) {
+    return rtdb().ref('dmContacts/$myUid/$otherLoginLower');
+  }
+
+  Future<bool> _isDmAccepted({required String myUid, required String otherLoginLower}) async {
+    final snap = await _dmContactRef(myUid: myUid, otherLoginLower: otherLoginLower).get();
+    if (!snap.exists) return false;
+    final v = snap.value;
+    if (v is bool) return v;
+    return true;
+  }
+
+  Future<String?> _myAvatarUrl(String myUid) async {
+    final snap = await rtdb().ref('users/$myUid/avatarUrl').get();
+    final v = snap.value;
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  Future<void> _sendDmRequestCore({
+    required String myUid,
+    required String myLogin,
+    required String otherUid,
+    required String otherLogin,
+    String? myAvatarUrl,
+    String? otherAvatarUrl,
+    String? messageText,
+  }) async {
+    final myLoginLower = myLogin.trim().toLowerCase();
+    final otherLoginLower = otherLogin.trim().toLowerCase();
+    if (myLoginLower.isEmpty || otherLoginLower.isEmpty) return;
+
+    // Publish my public bundle before sending an invite, so the other side can
+    // immediately fetch my keys/fingerprint and establish encrypted comms.
+    try {
+      await E2ee.publishMyPublicKey(uid: myUid);
+    } catch (_) {
+      // best-effort
+    }
+
+    Map<String, Object?>? encrypted;
+    final pt = (messageText ?? '').trim();
+    if (pt.isNotEmpty) {
+      try {
+        encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: pt);
+      } catch (_) {
+        encrypted = null;
+      }
+    }
+
+    final updates = <String, Object?>{
+      'dmRequests/$otherUid/$myLoginLower': {
+        'fromUid': myUid,
+        'fromLogin': myLogin,
+        if (myAvatarUrl != null && myAvatarUrl.trim().isNotEmpty) 'fromAvatarUrl': myAvatarUrl.trim(),
+        'createdAt': ServerValue.timestamp,
+        if (encrypted != null) ...encrypted,
+      },
+      'savedChats/$myUid/$otherLogin': {
+        'login': otherLogin,
+        if (otherAvatarUrl != null && otherAvatarUrl.trim().isNotEmpty) 'avatarUrl': otherAvatarUrl.trim(),
+        'status': 'pending_out',
+        'lastMessageText': '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+      'savedChats/$otherUid/$myLogin': {
+        'login': myLogin,
+        if (myAvatarUrl != null) 'avatarUrl': myAvatarUrl,
+        'status': 'pending_in',
+        'lastMessageText': '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+    };
+
+    await rtdb().ref().update(updates);
+  }
+
+  Future<void> _sendDmRequest({
+    required String myUid,
+    required String myLogin,
+    required String otherUid,
+    required String otherLogin,
+    String? messageText,
+    String? otherAvatarUrl,
+  }) async {
+    final myAvatar = await _myAvatarUrl(myUid);
+    await _sendDmRequestCore(
+      myUid: myUid,
+      myLogin: myLogin,
+      myAvatarUrl: myAvatar,
+      otherUid: otherUid,
+      otherLogin: otherLogin,
+      otherAvatarUrl: otherAvatarUrl,
+      messageText: messageText,
+    );
+  }
+
   void _openChat({required String login, required String avatarUrl}) {
     final key = login.trim().toLowerCase();
     if (key.isEmpty) return;
 
     () async {
+      final current = FirebaseAuth.instance.currentUser;
+      if (current == null) return;
+
       final snap = await rtdb().ref('usernames/$key').get();
       final v = snap.value;
       final uid = (v == null) ? '' : v.toString().trim();
@@ -2099,6 +2240,25 @@ class _DashboardPageState extends State<DashboardPage> {
           SnackBar(content: Text('Uživatel @$login nepoužívá GitMit (nelze zjistit UID).')),
         );
         return;
+      }
+
+      final myLogin = await _myGithubUsernameFromRtdb(current.uid);
+      if (myLogin == null || myLogin.trim().isEmpty) return;
+
+      final accepted = await _isDmAccepted(myUid: current.uid, otherLoginLower: key);
+      if (!accepted) {
+        try {
+          await _sendDmRequest(
+            myUid: current.uid,
+            myLogin: myLogin,
+            otherUid: uid,
+            otherLogin: login,
+            messageText: '', // Send invite without message
+            otherAvatarUrl: avatarUrl,
+          );
+        } catch (_) {
+          // Ignore errors when sending invite
+        }
       }
 
       setState(() {
@@ -10045,6 +10205,96 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
               onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
             ),
             const Divider(height: 1),
+            // DM žádosti – zobrazené i během chatu
+            StreamBuilder<DatabaseEvent>(
+              stream: rtdb().ref('dmRequests/${current.uid}').onValue,
+              builder: (context, reqSnap) {
+                final v = reqSnap.data?.snapshot.value;
+                final m = (v is Map) ? v : null;
+
+                final items = <Map<String, dynamic>>[];
+                if (m != null) {
+                  for (final e in m.entries) {
+                    if (e.value is! Map) continue;
+                    final mm = Map<String, dynamic>.from(e.value as Map);
+                    mm['__key'] = e.key.toString();
+                    items.add(mm);
+                  }
+                  items.sort((a, b) {
+                    final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+                    final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+                    return bt.compareTo(at);
+                  });
+                }
+
+                if (items.isEmpty) return const SizedBox.shrink();
+
+                Future<void> accept(Map<String, dynamic> req) async {
+                  final fromLogin = (req['fromLogin'] ?? '').toString();
+                  if (fromLogin.trim().isEmpty) return;
+                  try {
+                    await _acceptDmRequest(myUid: current.uid, otherLogin: fromLogin);
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                    }
+                  }
+                }
+
+                Future<void> reject(Map<String, dynamic> req) async {
+                  final fromLogin = (req['fromLogin'] ?? '').toString();
+                  if (fromLogin.trim().isEmpty) return;
+                  try {
+                    await _rejectDmRequest(myUid: current.uid, otherLogin: fromLogin);
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                    }
+                  }
+                }
+
+                return Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.mail_lock_outlined),
+                      title: const Text('Žádosti o chat'),
+                      subtitle: Text('Čeká: ${items.length}'),
+                    ),
+                    ...items.map((req) {
+                      final fromLogin = (req['fromLogin'] ?? '').toString();
+                      final fromUid = (req['fromUid'] ?? '').toString();
+                      final fromAvatar = (req['fromAvatarUrl'] ?? '').toString();
+                      final hasEncryptedText = ((req['ciphertext'] ?? req['ct'] ?? req['cipher'])?.toString().isNotEmpty ?? false);
+                      return ListTile(
+                        leading: fromUid.isNotEmpty
+                            ? _AvatarWithPresenceDot(uid: fromUid, avatarUrl: fromAvatar, radius: 18)
+                            : CircleAvatar(
+                                radius: 18,
+                                backgroundImage: fromAvatar.isNotEmpty ? NetworkImage(fromAvatar) : null,
+                                child: fromAvatar.isEmpty ? const Icon(Icons.person, size: 18) : null,
+                              ),
+                        title: Text('@$fromLogin'),
+                        subtitle: hasEncryptedText ? const Text('Zpráva: 🔒 (šifrovaně)') : const Text('Invajt do privátu'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => reject(req),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.check),
+                              onPressed: () => accept(req),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const Divider(height: 1),
+                  ],
+                );
+              },
+            ),
             StreamBuilder<DatabaseEvent>(
               stream: blockedRef.onValue,
               builder: (context, bSnap) {
