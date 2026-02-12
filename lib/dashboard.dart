@@ -20,6 +20,7 @@ import 'package:gitmit/join_group_via_link_qr_page.dart';
 import 'package:gitmit/plaintext_cache.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:gitmit/data_usage.dart';
+import 'package:gitmit/notifications_service.dart';
 import 'package:image_editor_plus/image_editor_plus.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -1591,6 +1592,7 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _presenceInitialized = false;
   bool _presenceEnabled = true;
   String _presenceStatus = 'online';
+  bool _onlinePresenceNotifySent = false;
   String? _presenceSessionId;
   static const Duration _presenceSessionTtl = Duration(days: 3);
   late final _AppLifecycleObserver _lifecycleObserver;
@@ -1896,6 +1898,7 @@ class _DashboardPageState extends State<DashboardPage> {
         _connectedSub?.cancel();
         _connectedSub = null;
         _presenceInitialized = false;
+        _onlinePresenceNotifySent = false;
         rtdb().ref('presence/${current.uid}').set({
           'enabled': false,
           'status': _presenceStatus,
@@ -1928,6 +1931,41 @@ class _DashboardPageState extends State<DashboardPage> {
       'status': _presenceStatus,
       'lastSeenAt': ServerValue.timestamp,
     });
+
+    // Send online notification to all DM contacts if just went online
+    if (!online) {
+      _onlinePresenceNotifySent = false;
+      return;
+    }
+
+    if (!_onlinePresenceNotifySent) {
+      _onlinePresenceNotifySent = true;
+      unawaited(_notifyContactsOnline(uid));
+    }
+  }
+
+  Future<void> _notifyContactsOnline(String myUid) async {
+    var myLogin = await _myGithubUsernameFromRtdb(myUid) ?? '';
+    if (myLogin.isEmpty) {
+      final current = FirebaseAuth.instance.currentUser;
+      myLogin = (current?.displayName ?? '').trim();
+    }
+    if (myLogin.isEmpty) {
+      myLogin = myUid.substring(0, myUid.length < 8 ? myUid.length : 8);
+    }
+    // Find all DM contacts
+    final snap = await rtdb().ref('savedChats/$myUid').get();
+    final v = snap.value;
+    if (v is! Map) return;
+    for (final entry in v.entries) {
+      final contact = entry.value;
+      if (contact is! Map) continue;
+      final login = (contact['login'] ?? '').toString();
+      if (login.isEmpty) continue;
+      final contactUid = await _lookupUidForLoginLower(login.trim().toLowerCase());
+      if (contactUid == null || contactUid == myUid) continue;
+      await AppNotifications.notifyOnlinePresence(toUid: contactUid, fromUid: myUid, fromLogin: myLogin);
+    }
   }
 
   void _initPresence() {
@@ -1944,7 +1982,10 @@ class _DashboardPageState extends State<DashboardPage> {
 
     _connectedSub = connectedRef.onValue.listen((event) async {
       final connected = event.snapshot.value == true;
-      if (!connected) return;
+      if (!connected) {
+        _onlinePresenceNotifySent = false;
+        return;
+      }
 
       final online = _presenceStatus != 'hidden';
 
@@ -1971,6 +2012,11 @@ class _DashboardPageState extends State<DashboardPage> {
           'platform': Platform.operatingSystem,
           'lastSeenAt': ServerValue.timestamp,
         });
+      }
+
+      if (online && !_onlinePresenceNotifySent) {
+        _onlinePresenceNotifySent = true;
+        await _notifyContactsOnline(current.uid);
       }
     });
   }

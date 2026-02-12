@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:gitmit/rtdb.dart';
@@ -12,6 +14,9 @@ import 'package:gitmit/rtdb.dart';
 class AppNotifications {
   static final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
+
+  static const String _onlineNotifyBackendUrl = String.fromEnvironment('GITMIT_NOTIFY_BACKEND_URL', defaultValue: '');
+  static const String _onlineNotifyBackendToken = String.fromEnvironment('GITMIT_NOTIFY_BACKEND_TOKEN', defaultValue: '');
 
   static const _storage = FlutterSecureStorage();
   static const _fcmLastTokenPrefix = 'fcm_last_token_v1_';
@@ -141,6 +146,52 @@ class AppNotifications {
       });
     } catch (_) {
       // Ignore token errors; app should still work.
+    }
+  }
+
+  static Future<bool> notifyOnlinePresence({
+    required String toUid,
+    required String fromUid,
+    required String fromLogin,
+  }) async {
+    final baseUrl = _onlineNotifyBackendUrl.trim();
+    if (baseUrl.isEmpty) {
+      if (!kReleaseMode) {
+        debugPrint('[NotifyOnline] Missing GITMIT_NOTIFY_BACKEND_URL. Notification skipped.');
+      }
+      return false;
+    }
+
+    final uri = Uri.parse(baseUrl.endsWith('/') ? '${baseUrl}notify-online' : '$baseUrl/notify-online');
+
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    if (_onlineNotifyBackendToken.trim().isNotEmpty) {
+      headers['x-api-key'] = _onlineNotifyBackendToken.trim();
+    }
+
+    try {
+      final res = await http
+          .post(
+        uri,
+        headers: headers,
+        body: jsonEncode({
+          'toUid': toUid,
+          'fromUid': fromUid,
+          'fromLogin': fromLogin,
+        }),
+      )
+          .timeout(const Duration(seconds: 8));
+      final ok = res.statusCode >= 200 && res.statusCode < 300;
+      if (!ok && !kReleaseMode) {
+        debugPrint('[NotifyOnline] Backend ${res.statusCode}: ${res.body}');
+      }
+      return ok;
+    } catch (e) {
+      if (!kReleaseMode) {
+        debugPrint('[NotifyOnline] Request failed: $e');
+      }
+      // best-effort
+      return false;
     }
   }
 }
