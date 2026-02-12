@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:gitmit/app_language.dart';
 import 'package:gitmit/group_invites.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -55,7 +56,7 @@ class _JoinGroupViaLinkQrPageState extends State<JoinGroupViaLinkQrPage> {
     final parsed = parseGroupInvite(raw);
     if (parsed == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Neplatná pozvánka.')),
+        SnackBar(content: Text(AppLanguage.tr(context, 'Neplatná pozvánka.', 'Invalid invite.'))),
       );
       return;
     }
@@ -69,16 +70,16 @@ class _JoinGroupViaLinkQrPageState extends State<JoinGroupViaLinkQrPage> {
       final gv = gSnap.value;
       final gm = (gv is Map) ? gv : null;
       if (gm == null) {
-        throw Exception('Skupina neexistuje.');
+        throw Exception(AppLanguage.tr(context, 'Skupina neexistuje.', 'Group does not exist.'));
       }
       final perms = (gm['permissions'] is Map) ? (gm['permissions'] as Map) : null;
       final enabled = perms?['inviteLinkEnabled'] == true;
       if (!enabled) {
-        throw Exception('Pozvánka přes link/QR je vypnutá.');
+        throw Exception(AppLanguage.tr(context, 'Pozvánka přes link/QR je vypnutá.', 'Invite via link/QR is disabled.'));
       }
       final expected = (gm['inviteCode'] ?? '').toString().trim();
       if (expected.isEmpty || expected != code.trim()) {
-        throw Exception('Pozvánka je neplatná nebo expirovaná.');
+        throw Exception(AppLanguage.tr(context, 'Pozvánka je neplatná nebo expirovaná.', 'Invite is invalid or expired.'));
       }
 
       final existing = await rtdb().ref('groupMembers/$gid/${current.uid}').get();
@@ -108,7 +109,9 @@ class _JoinGroupViaLinkQrPageState extends State<JoinGroupViaLinkQrPage> {
       Navigator.of(context).pop(gid);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${AppLanguage.tr(context, 'Chyba', 'Error')}: $e')),
+        );
       }
     } finally {
       if (mounted) setState(() => _joining = false);
@@ -117,16 +120,22 @@ class _JoinGroupViaLinkQrPageState extends State<JoinGroupViaLinkQrPage> {
 
   @override
   Widget build(BuildContext context) {
+    final joinGroupTitle = AppLanguage.tr(context, 'Připojit se do skupiny', 'Join group');
+    final inviteLabel = AppLanguage.tr(context, 'Link / kód pozvánky', 'Invite link / code');
+    final inviteHint = AppLanguage.tr(context, 'Vlož link nebo naskenuj QR', 'Paste link or scan QR');
+    final joinLabel = AppLanguage.tr(context, 'Připojit se', 'Join');
+    final scanLabel = AppLanguage.tr(context, 'Skenovat QR', 'Scan QR');
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Připojit se do skupiny')),
+      appBar: AppBar(title: Text(joinGroupTitle)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           TextField(
             controller: _ctrl,
-            decoration: const InputDecoration(
-              labelText: 'Link / kód pozvánky',
-              hintText: 'Vlož link nebo naskenuj QR',
+            decoration: InputDecoration(
+              labelText: inviteLabel,
+              hintText: inviteHint,
             ),
             minLines: 1,
             maxLines: 3,
@@ -140,7 +149,7 @@ class _JoinGroupViaLinkQrPageState extends State<JoinGroupViaLinkQrPage> {
                   icon: _joining
                       ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator())
                       : const Icon(Icons.login),
-                  label: const Text('Připojit se'),
+                  label: Text(joinLabel),
                 ),
               ),
             ],
@@ -157,7 +166,7 @@ class _JoinGroupViaLinkQrPageState extends State<JoinGroupViaLinkQrPage> {
                     _ctrl.text = res.trim();
                   },
             icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Skenovat QR'),
+            label: Text(scanLabel),
           ),
         ],
       ),
@@ -178,7 +187,7 @@ class _ScanQrPageState extends State<ScanQrPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Skenovat QR')),
+      appBar: AppBar(title: Text(AppLanguage.tr(context, 'Skenovat QR', 'Scan QR'))),
       body: MobileScanner(
         onDetect: (capture) {
           if (_done) return;

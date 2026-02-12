@@ -3780,20 +3780,21 @@ class _SettingsAccountPageState extends State<_SettingsAccountPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
     return Scaffold(
-      appBar: AppBar(title: const Text('Účet')),
+      appBar: AppBar(title: Text(t(context, 'Účet', 'Account'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           TextField(
             controller: _phone,
-            decoration: const InputDecoration(labelText: 'Telefon (volitelné)'),
+            decoration: InputDecoration(labelText: t(context, 'Telefon (volitelné)', 'Phone (optional)')),
             onChanged: (_) => _autoSave(),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: _birthday,
-            decoration: const InputDecoration(labelText: 'Narozeniny (např. 2000-01-31)'),
+            decoration: InputDecoration(labelText: t(context, 'Narozeniny (např. 2000-01-31)', 'Birthday (e.g. 2000-01-31)')),
             onChanged: (_) => _autoSave(),
           ),
           const SizedBox(height: 8),
@@ -3801,23 +3802,23 @@ class _SettingsAccountPageState extends State<_SettingsAccountPage> {
             controller: _bio,
             minLines: 2,
             maxLines: 5,
-            decoration: const InputDecoration(labelText: 'Bio'),
+            decoration: InputDecoration(labelText: t(context, 'Bio', 'Bio')),
             onChanged: (_) => _autoSave(),
           ),
           const SizedBox(height: 12),
           OutlinedButton(
             onPressed: widget.onLogout,
-            child: const Text('Odhlásit se'),
+            child: Text(t(context, 'Odhlásit se', 'Sign out')),
           ),
           const SizedBox(height: 12),
           OutlinedButton(
             onPressed: _openGitHubLogout,
-            child: const Text('Odhlásit z GitHubu'),
+            child: Text(t(context, 'Odhlásit z GitHubu', 'Sign out from GitHub')),
           ),
           const SizedBox(height: 12),
           OutlinedButton(
             onPressed: _reset,
-            child: const Text('Reset'),
+            child: Text(t(context, 'Reset', 'Reset')),
           ),
         ],
       ),
@@ -3868,8 +3869,9 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
     final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+    if (u == null) return Scaffold(body: Center(child: Text(t(context, 'Nepřihlášen.', 'Not signed in.'))));
     final settingsRef = rtdb().ref('settings/${u.uid}');
 
     return StreamBuilder<DatabaseEvent>(
@@ -3878,12 +3880,12 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
         final settings = UserSettings.fromSnapshot(snap.data?.snapshot.value);
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Nastavení chatů')),
+          appBar: AppBar(title: Text(t(context, 'Nastavení chatů', 'Chat settings'))),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               ListTile(
-                title: const Text('Velikost textu'),
+                title: Text(t(context, 'Velikost textu', 'Text size')),
                 subtitle: Slider(
                   min: 12,
                   max: 24,
@@ -3893,7 +3895,7 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                 trailing: Text(settings.chatTextSize.toStringAsFixed(0)),
               ),
               ListTile(
-                title: const Text('Zaoblení bublin'),
+                title: Text(t(context, 'Zaoblení bublin', 'Bubble radius')),
                 subtitle: Slider(
                   min: 4,
                   max: 28,
@@ -3903,7 +3905,7 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                 trailing: Text(settings.bubbleRadius.toStringAsFixed(0)),
               ),
               const SizedBox(height: 8),
-              const Text('Pozadí chatu', style: TextStyle(fontWeight: FontWeight.w700)),
+              Text(t(context, 'Pozadí chatu', 'Chat background'), style: const TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 12,
@@ -3943,7 +3945,7 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                   DropdownButtonFormField<String>(
                     isExpanded: true,
                     value: settings.bubbleIncoming,
-                    decoration: const InputDecoration(labelText: 'Příchozí bublina'),
+                    decoration: InputDecoration(labelText: t(context, 'Příchozí bublina', 'Incoming bubble')),
                     items: const [
                       DropdownMenuItem(value: 'surface', child: Text('Surface')),
                       DropdownMenuItem(value: 'surfaceVariant', child: Text('Surface Variant')),
@@ -3955,7 +3957,7 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                   DropdownButtonFormField<String>(
                     isExpanded: true,
                     value: settings.bubbleOutgoing,
-                    decoration: const InputDecoration(labelText: 'Odchozí bublina'),
+                    decoration: InputDecoration(labelText: t(context, 'Odchozí bublina', 'Outgoing bubble')),
                     items: const [
                       DropdownMenuItem(value: 'secondaryContainer', child: Text('Secondary Container')),
                       DropdownMenuItem(value: 'primaryContainer', child: Text('Primary Container')),
@@ -3971,19 +3973,19 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
               SwitchListTile(
                 value: settings.reactionsEnabled,
                 onChanged: (v) => _updateSetting(u.uid, {'reactionsEnabled': v}),
-                title: const Text('Reakce na zprávy'),
-                subtitle: const Text('Dlouhé podržení na zprávě'),
+                title: Text(t(context, 'Reakce na zprávy', 'Message reactions')),
+                subtitle: Text(t(context, 'Dlouhé podržení na zprávě', 'Long press on a message')),
               ),
               SwitchListTile(
                 value: settings.stickersEnabled,
                 onChanged: (v) => _updateSetting(u.uid, {'stickersEnabled': v}),
-                title: const Text('Samolepky'),
-                subtitle: const Text('Obrázkové nálepky / GIF v chatu'),
+                title: Text(t(context, 'Samolepky', 'Stickers')),
+                subtitle: Text(t(context, 'Obrázkové nálepky / GIF v chatu', 'Image stickers / GIF in chat')),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () => _reset(u.uid),
-                child: const Text('Reset'),
+                child: Text(t(context, 'Reset', 'Reset')),
               ),
             ],
           ),
@@ -4014,8 +4016,9 @@ class _SettingsPrivacyPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
     final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    if (u == null) return Center(child: Text(t(context, 'Nepřihlášen.', 'Not signed in.')));
     final settingsRef = rtdb().ref('settings/${u.uid}');
 
     return StreamBuilder<DatabaseEvent>(
@@ -4023,18 +4026,18 @@ class _SettingsPrivacyPage extends StatelessWidget {
       builder: (context, snap) {
         final s = UserSettings.fromSnapshot(snap.data?.snapshot.value);
         return Scaffold(
-          appBar: AppBar(title: const Text('Soukromí')),
+          appBar: AppBar(title: Text(t(context, 'Soukromí', 'Privacy'))),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               DropdownButtonFormField<int>(
                 value: s.autoDeleteSeconds,
-                decoration: const InputDecoration(labelText: 'Auto-delete zpráv'),
-                items: const [
-                  DropdownMenuItem(value: 0, child: Text('Vypnuto')),
-                  DropdownMenuItem(value: 86400, child: Text('24 hodin')),
-                  DropdownMenuItem(value: 604800, child: Text('7 dní')),
-                  DropdownMenuItem(value: 2592000, child: Text('30 dní')),
+                decoration: InputDecoration(labelText: t(context, 'Auto-delete zpráv', 'Auto-delete messages')),
+                items: [
+                  DropdownMenuItem(value: 0, child: Text(t(context, 'Vypnuto', 'Off'))),
+                  DropdownMenuItem(value: 86400, child: Text(t(context, '24 hodin', '24 hours'))),
+                  DropdownMenuItem(value: 604800, child: Text(t(context, '7 dní', '7 days'))),
+                  DropdownMenuItem(value: 2592000, child: Text(t(context, '30 dní', '30 days'))),
                 ],
                 onChanged: (v) => _update(u.uid, {'autoDeleteSeconds': v ?? 0}),
               ),
@@ -4042,15 +4045,15 @@ class _SettingsPrivacyPage extends StatelessWidget {
               SwitchListTile(
                 value: s.presenceEnabled,
                 onChanged: (v) => _update(u.uid, {'presenceEnabled': v}),
-                title: const Text('Presence (online/offline)'),
+                title: Text(t(context, 'Přítomnost (online/offline)', 'Presence (online/offline)')),
               ),
               DropdownButtonFormField<String>(
                 value: s.presenceStatus,
-                decoration: const InputDecoration(labelText: 'Status'),
-                items: const [
-                  DropdownMenuItem(value: 'online', child: Text('Online')),
-                  DropdownMenuItem(value: 'dnd', child: Text('Nerušit')),
-                  DropdownMenuItem(value: 'hidden', child: Text('Hidden')),
+                decoration: InputDecoration(labelText: t(context, 'Status', 'Status')),
+                items: [
+                  const DropdownMenuItem(value: 'online', child: Text('Online')),
+                  DropdownMenuItem(value: 'dnd', child: Text(t(context, 'Nerušit', 'Do not disturb'))),
+                  DropdownMenuItem(value: 'hidden', child: Text(t(context, 'Skrytý', 'Hidden'))),
                 ],
                 onChanged: (v) => _update(u.uid, {'presenceStatus': v ?? 'online'}),
               ),
@@ -4058,12 +4061,12 @@ class _SettingsPrivacyPage extends StatelessWidget {
               SwitchListTile(
                 value: s.giftsVisible,
                 onChanged: (v) => _update(u.uid, {'giftsVisible': v}),
-                title: const Text('Achievementy viditelné'),
+                title: Text(t(context, 'Achievementy viditelné', 'Achievements visible')),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () => _reset(u.uid),
-                child: const Text('Reset'),
+                child: Text(t(context, 'Reset', 'Reset')),
               ),
             ],
           ),
@@ -4093,8 +4096,9 @@ class _SettingsNotificationsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
     final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    if (u == null) return Center(child: Text(t(context, 'Nepřihlášen.', 'Not signed in.')));
     final settingsRef = rtdb().ref('settings/${u.uid}');
 
     return StreamBuilder<DatabaseEvent>(
@@ -4102,30 +4106,30 @@ class _SettingsNotificationsPage extends StatelessWidget {
       builder: (context, snap) {
         final s = UserSettings.fromSnapshot(snap.data?.snapshot.value);
         return Scaffold(
-          appBar: AppBar(title: const Text('Upozornění')),
+          appBar: AppBar(title: Text(t(context, 'Upozornění', 'Notifications'))),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               SwitchListTile(
                 value: s.notificationsEnabled,
                 onChanged: (v) => _update(u.uid, {'notificationsEnabled': v}),
-                title: const Text('Notifikace'),
-                subtitle: const Text('Push upozornění a upozornění v aplikaci'),
+                title: Text(t(context, 'Notifikace', 'Notifications')),
+                subtitle: Text(t(context, 'Push upozornění a upozornění v aplikaci', 'Push notifications and in-app alerts')),
               ),
               SwitchListTile(
                 value: s.vibrationEnabled,
                 onChanged: (v) => _update(u.uid, {'vibrationEnabled': v}),
-                title: const Text('Vibrace'),
+                title: Text(t(context, 'Vibrace', 'Vibration')),
               ),
               SwitchListTile(
                 value: s.soundsEnabled,
                 onChanged: (v) => _update(u.uid, {'soundsEnabled': v}),
-                title: const Text('Zvuky'),
+                title: Text(t(context, 'Zvuky', 'Sounds')),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () => _reset(u.uid),
-                child: const Text('Reset'),
+                child: Text(t(context, 'Reset', 'Reset')),
               ),
             ],
           ),
@@ -4262,8 +4266,9 @@ class _SettingsDataPageState extends State<_SettingsDataPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
     final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+    if (u == null) return Scaffold(body: Center(child: Text(t(context, 'Nepřihlášen.', 'Not signed in.'))));
     final settingsRef = rtdb().ref('settings/${u.uid}');
 
     return StreamBuilder<DatabaseEvent>(
@@ -4272,7 +4277,7 @@ class _SettingsDataPageState extends State<_SettingsDataPage> {
         final settings = UserSettings.fromSnapshot(snap.data?.snapshot.value);
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Data a paměť')),
+          appBar: AppBar(title: Text(t(context, 'Data a paměť', 'Data and storage'))),
           body: StreamBuilder<DataUsageSnapshot>(
             stream: DataUsageTracker.stream,
             initialData: DataUsageTracker.snapshot,
@@ -4285,7 +4290,7 @@ class _SettingsDataPageState extends State<_SettingsDataPage> {
               return ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  const Text('Internet usage', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(t(context, 'Využití internetu', 'Internet usage'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   _UsageSummaryCard(
                     title: 'Celkem',
@@ -4315,63 +4320,63 @@ class _SettingsDataPageState extends State<_SettingsDataPage> {
                   const SizedBox(height: 8),
                   OutlinedButton(
                     onPressed: () => DataUsageTracker.reset(),
-                    child: const Text('Reset usage'),
+                    child: Text(t(context, 'Reset využití', 'Reset usage')),
                   ),
                   const SizedBox(height: 24),
 
-                  const Text('Stahování médií', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(t(context, 'Stahování médií', 'Media download'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   SwitchListTile(
                     value: settings.dataAllowMobile,
                     onChanged: (v) => _updateSetting(u.uid, {'dataAllowMobile': v}),
-                    title: const Text('Mobilní data'),
-                    subtitle: const Text('Stahovat media přes mobilní internet'),
+                    title: Text(t(context, 'Mobilní data', 'Mobile data')),
+                    subtitle: Text(t(context, 'Stahovat media přes mobilní internet', 'Download media over mobile data')),
                   ),
                   SwitchListTile(
                     value: settings.dataAllowWifi,
                     onChanged: (v) => _updateSetting(u.uid, {'dataAllowWifi': v}),
-                    title: const Text('Wi‑Fi'),
-                    subtitle: const Text('Stahovat media přes Wi‑Fi'),
+                    title: Text(t(context, 'Wi‑Fi', 'Wi‑Fi')),
+                    subtitle: Text(t(context, 'Stahovat media přes Wi‑Fi', 'Download media over Wi‑Fi')),
                   ),
                   SwitchListTile(
                     value: settings.dataAllowRoaming,
                     onChanged: (v) => _updateSetting(u.uid, {'dataAllowRoaming': v}),
-                    title: const Text('Roaming'),
-                    subtitle: const Text('Stahovat media v roamingu'),
+                    title: Text(t(context, 'Roaming', 'Roaming')),
+                    subtitle: Text(t(context, 'Stahovat media v roamingu', 'Download media while roaming')),
                   ),
                   SwitchListTile(
                     value: settings.dataSaverEnabled,
                     onChanged: (v) => _updateSetting(u.uid, {'dataSaverEnabled': v}),
-                    title: const Text('Ekonomie dat'),
-                    subtitle: const Text('Omezuje stahování médií na mobilních datech'),
+                    title: Text(t(context, 'Ekonomie dat', 'Data saver')),
+                    subtitle: Text(t(context, 'Omezuje stahování médií na mobilních datech', 'Limits media downloads on mobile data')),
                   ),
                   const SizedBox(height: 24),
 
-                  const Text('Ukládání do galerie', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(t(context, 'Ukládání do galerie', 'Save to gallery'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   SwitchListTile(
                     value: settings.savePrivatePhotos,
                     onChanged: (v) => _updateSetting(u.uid, {'savePrivatePhotos': v}),
-                    title: const Text('Privátní chaty – fotky'),
+                    title: Text(t(context, 'Privátní chaty – fotky', 'Private chats – photos')),
                   ),
                   SwitchListTile(
                     value: settings.savePrivateVideos,
                     onChanged: (v) => _updateSetting(u.uid, {'savePrivateVideos': v}),
-                    title: const Text('Privátní chaty – videa'),
+                    title: Text(t(context, 'Privátní chaty – videa', 'Private chats – videos')),
                   ),
                   SwitchListTile(
                     value: settings.saveGroupPhotos,
                     onChanged: (v) => _updateSetting(u.uid, {'saveGroupPhotos': v}),
-                    title: const Text('Skupiny – fotky'),
+                    title: Text(t(context, 'Skupiny – fotky', 'Groups – photos')),
                   ),
                   SwitchListTile(
                     value: settings.saveGroupVideos,
                     onChanged: (v) => _updateSetting(u.uid, {'saveGroupVideos': v}),
-                    title: const Text('Skupiny – videa'),
+                    title: Text(t(context, 'Skupiny – videa', 'Groups – videos')),
                   ),
                   const SizedBox(height: 24),
 
-                  const Text('Usage paměti', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(t(context, 'Využití paměti', 'Storage usage'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   FutureBuilder<_StorageUsage>(
                     future: _storageFuture,
@@ -4430,7 +4435,7 @@ class _SettingsDataPageState extends State<_SettingsDataPage> {
                             children: [
                               OutlinedButton(
                                 onPressed: () => setState(_refreshStorage),
-                                child: const Text('Přepočítat'),
+                                child: Text(t(context, 'Přepočítat', 'Recalculate')),
                               ),
                             ],
                           ),
