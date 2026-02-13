@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 import 'package:gitmit/data_usage.dart';
 
@@ -6,7 +7,7 @@ import 'package:gitmit/data_usage.dart';
 ///
 /// Provide it at build/run time via:
 /// `--dart-define=GITHUB_TOKEN=...`
-const String githubToken = String.fromEnvironment('GITHUB_TOKEN');
+const String githubToken = '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';
 
 Map<String, String> githubApiHeaders({String accept = 'application/vnd.github+json'}) {
   final headers = <String, String>{
@@ -65,4 +66,47 @@ Future<List<GithubUser>> searchGithubUsers(String query) async {
       .map((e) => GithubUser.fromJson(Map<String, dynamic>.from(e)))
       .where((u) => u.login.isNotEmpty)
       .toList(growable: false);
+}
+
+Future<List<dynamic>?> fetchRepoContributors(String owner, String repo) async {
+  final url = Uri.https('api.github.com', '/repos/$owner/$repo/contributors');
+  final response = await http.get(url, headers: githubApiHeaders());
+
+  if (response.statusCode == 200) {
+    return jsonDecode(response.body);
+  } else {
+    print('[ERROR] Failed to fetch contributors: ${response.statusCode}');
+    return null;
+  }
+}
+
+Future<Map<String, dynamic>?> fetchUserContributionCalendar(String username) async {
+  const graphqlEndpoint = 'https://api.github.com/graphql';
+  final query = {
+    'query': '''
+      query {
+        user(login: $username) {
+          name
+          avatarUrl
+          contributionsCollection {
+            totalContributions
+            contributionCalendar {
+              days {
+                contributionCount
+              }
+            }
+          }
+        }
+      }
+    ''',
+  };
+
+  final response = await http.post(Uri.parse(graphqlEndpoint), headers: githubApiHeaders(), body: query);
+
+  if (response.statusCode == 200) {
+    return jsonDecode(response.body);
+  } else {
+    print('[ERROR] Failed to fetch contribution calendar: ${response.statusCode}');
+    return null;
+  }
 }

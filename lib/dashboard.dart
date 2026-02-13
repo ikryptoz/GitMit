@@ -11,7 +11,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
 import 'package:gitmit/e2ee.dart';
 import 'package:gitmit/app_language.dart';
@@ -473,16 +472,29 @@ class DashboardPage extends StatefulWidget {
 }
     
 class _UserProfilePage extends StatefulWidget {
-  const _UserProfilePage({required this.login, required this.avatarUrl});
+  const _UserProfilePage({
+    required this.login,
+    required this.avatarUrl,
+    this.githubDataFuture,
+  });
 
   final String login;
   final String avatarUrl;
+  final Future<Map<String, dynamic>?>? githubDataFuture;
 
   @override
   State<_UserProfilePage> createState() => _UserProfilePageState();
 }
 
 class _UserProfilePageState extends State<_UserProfilePage> {
+  late final Future<Map<String, dynamic>?> _githubDataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _githubDataFuture = widget.githubDataFuture ?? _fetchGithubProfileData(widget.login);
+  }
+
   String _loginLower() => widget.login.trim().toLowerCase();
 
   List<String> _parseBadges(Object? raw) {
@@ -704,11 +716,10 @@ class _UserProfilePageState extends State<_UserProfilePage> {
 
               return FutureBuilder<Map<String, dynamic>?>
                   (
-                future: _fetchGithubProfileData(widget.login),
+                future: _githubDataFuture,
                 builder: (context, ghSnap) {
                   final gh = ghSnap.data;
                   final fetchedAvatar = gh?['avatarUrl'] as String?;
-                  final activitySvg = gh?['contributions'] as String?;
                   final topRepos = gh?['topRepos'] as List<Map<String, dynamic>>?;
 
                   final avatar = (widget.avatarUrl.trim().isNotEmpty)
@@ -730,13 +741,15 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                     );
                   }
 
+                    final otherUserStream = hasOtherUid ? otherUserRef.child(otherUid).onValue : null;
+
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Center(child: avatarWidget),
                       const SizedBox(height: 16),
                       StreamBuilder<DatabaseEvent>(
-                        stream: hasOtherUid ? otherUserRef.child(otherUid).onValue : null,
+                        stream: otherUserStream,
                         builder: (context, userSnap) {
                           final v = userSnap.data?.snapshot.value;
                           final m = (v is Map) ? v : null;
@@ -762,12 +775,16 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                         const SizedBox(height: 8),
                         FilledButton.icon(
                           onPressed: () => _confirmAndRun(
-                            title: 'Poslat žádost o sdílení klíče?',
-                            message: 'Protistraně se pošle upozornění do Chatů. Po přijetí se naváže E2EE komunikace (klíče/fingerprint).',
+                            title: AppLanguage.tr(context, 'Poslat žádost o sdílení klíče?', 'Request key sharing?'),
+                            message: AppLanguage.tr(
+                              context,
+                              'Protistraně se pošle upozornění do Chatů. Po přijetí se naváže E2EE komunikace (klíče/fingerprint).',
+                              'A notification is sent to the peer in Chats. After acceptance, E2EE communication is established (keys/fingerprint).',
+                            ),
                             action: () => _requestKeySharing(myUid: myUid, otherUid: otherUid),
                           ),
                           icon: const Icon(Icons.key_outlined),
-                          label: const Text('Poprosit sdílet klíč'),
+                          label: Text(AppLanguage.tr(context, 'Poprosit sdílet klíč', 'Ask to share key')),
                         ),
                       ],
                       const SizedBox(height: 10),
@@ -794,12 +811,12 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          const Text('E2EE Fingerprint (anti-MITM)', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          Text(AppLanguage.tr(context, 'E2EE Fingerprint (anti-MITM)', 'E2EE Fingerprint (anti-MITM)'), style: const TextStyle(fontWeight: FontWeight.bold)),
                                           const SizedBox(height: 8),
                                           if (peerFp != null && peerFp.isNotEmpty)
                                             ListTile(
                                               contentPadding: EdgeInsets.zero,
-                                              title: const Text('Fingerprint protějšku'),
+                                              title: Text(AppLanguage.tr(context, 'Fingerprint protějšku', 'Peer fingerprint')),
                                               subtitle: SelectableText(peerFp),
                                               trailing: IconButton(
                                                 icon: const Icon(Icons.copy),
@@ -810,13 +827,13 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                             Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                const Text('Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).'),
+                                                Text(AppLanguage.tr(context, 'Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).', 'Peer fingerprint is unavailable (the user has not published a key yet).')),
                                               ],
                                             ),
                                           if (myFp != null && myFp.isNotEmpty)
                                             ListTile(
                                               contentPadding: EdgeInsets.zero,
-                                              title: const Text('Můj fingerprint'),
+                                              title: Text(AppLanguage.tr(context, 'Můj fingerprint', 'My fingerprint')),
                                               subtitle: SelectableText(myFp),
                                               trailing: IconButton(
                                                 icon: const Icon(Icons.copy),
@@ -827,7 +844,11 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                             Padding(
                                               padding: const EdgeInsets.only(top: 4),
                                               child: Text(
-                                                'Pozor: fingerprinty jsou shodné. To je neobvyklé (může jít o sdílené zařízení nebo záměnu účtů).',
+                                                AppLanguage.tr(
+                                                  context,
+                                                  'Pozor: fingerprinty jsou shodné. To je neobvyklé (může jít o sdílené zařízení nebo záměnu účtů).',
+                                                  'Warning: fingerprints are identical. This is unusual (it may indicate a shared device or account mix-up).',
+                                                ),
                                                 style: TextStyle(color: Theme.of(context).colorScheme.error),
                                               ),
                                             ),
@@ -842,14 +863,7 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                         ),
 
                       const Divider(height: 32),
-                      _ProfileSectionCard(
-                        title: AppLanguage.tr(context, 'Aktivita na GitHubu', 'GitHub activity'),
-                        icon: Icons.grid_on_outlined,
-                        child: (activitySvg != null && activitySvg.trim().isNotEmpty)
-                            ? _SvgWidget(svg: activitySvg)
-                            : const Text('Načítání aktivity...'),
-                      ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 8),
                       Text(
                         AppLanguage.tr(context, 'Top repozitáře', 'Top repositories'),
                         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
@@ -878,74 +892,70 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                           }).toList(growable: false),
                         )
                       else
-                        const Text('Načítání repozitářů...'),
+                        Text(AppLanguage.tr(context, 'Načítání repozitářů...', 'Loading repositories...')),
                       const SizedBox(height: 24),
 
-                      if (hasOtherUid)
-                        StreamBuilder<DatabaseEvent>(
-                          stream: otherUserRef.child(otherUid).onValue,
-                          builder: (context, otherSnap) {
-                            final vv = otherSnap.data?.snapshot.value;
-                            final mm = (vv is Map) ? vv : null;
-                            final badges = _parseBadges(mm?['badges']);
-
-                            return Column(
-                              children: [
-                                _ProfileSectionCard(
-                                  title: AppLanguage.tr(context, 'Achievementy na GitMitu', 'GitMit achievements'),
-                                  icon: Icons.emoji_events_outlined,
-                                  child: badges.isEmpty
-                                      ? Text(AppLanguage.tr(context, 'Zatím žádné achievementy.', 'No achievements yet.'))
-                                      : Wrap(
-                                          spacing: 8,
-                                          runSpacing: 8,
-                                          children: badges
-                                              .map(
-                                                (b) => Chip(
-                                                  label: Text(b),
-                                                  avatar: const Icon(Icons.workspace_premium_outlined, size: 18),
-                                                ),
-                                              )
-                                              .toList(growable: false),
-                                        ),
-                                ),
-                                const SizedBox(height: 12),
-                                _ProfileSectionCard(
-                                  title: AppLanguage.tr(context, 'Aktivita v GitMitu', 'GitMit activity'),
-                                  icon: Icons.insights_outlined,
-                                  child: FutureBuilder<_GitmitStats?>(
-                                    future: _loadGitmitStats(otherUid),
-                                    builder: (context, statsSnap) {
-                                      final stats = statsSnap.data;
-                                      if (stats == null) {
-                                        return Text(AppLanguage.tr(context, 'Načítání aktivity...', 'Loading activity...'));
-                                      }
-                                      return Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
-                                        children: [
-                                          _ProfileMetricTile(
-                                            label: AppLanguage.tr(context, 'Priváty', 'DMs'),
-                                            value: '${stats.privateChats}',
-                                          ),
-                                          _ProfileMetricTile(
-                                            label: AppLanguage.tr(context, 'Skupiny', 'Groups'),
-                                            value: '${stats.groups}',
-                                          ),
-                                          _ProfileMetricTile(
-                                            label: AppLanguage.tr(context, 'Odeslané', 'Sent'),
-                                            value: '${stats.messagesSent}',
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                              ],
-                            );
-                          },
+                      if (hasOtherUid) ...[
+                        _ProfileSectionCard(
+                          title: AppLanguage.tr(context, 'Achievementy na GitMitu', 'GitMit achievements'),
+                          icon: Icons.emoji_events_outlined,
+                          child: FutureBuilder<DataSnapshot>(
+                            future: otherUserRef.child(otherUid).get(),
+                            builder: (context, otherSnap) {
+                              final vv = otherSnap.data?.value;
+                              final mm = (vv is Map) ? vv : null;
+                              final badges = _parseBadges(mm?['badges']);
+                              return badges.isEmpty
+                                  ? Text(AppLanguage.tr(context, 'Zatím žádné achievementy.', 'No achievements yet.'))
+                                  : Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: badges
+                                          .map(
+                                            (b) => Chip(
+                                              label: Text(b),
+                                              avatar: const Icon(Icons.workspace_premium_outlined, size: 18),
+                                            ),
+                                          )
+                                          .toList(growable: false),
+                                    );
+                            },
+                          ),
                         ),
+                        const SizedBox(height: 12),
+                        _ProfileSectionCard(
+                          title: AppLanguage.tr(context, 'Aktivita v GitMitu', 'GitMit activity'),
+                          icon: Icons.insights_outlined,
+                          child: FutureBuilder<_GitmitStats?>(
+                            future: _loadGitmitStats(otherUid),
+                            builder: (context, statsSnap) {
+                              final stats = statsSnap.data;
+                              if (stats == null) {
+                                return Text(AppLanguage.tr(context, 'Načítání aktivity...', 'Loading activity...'));
+                              }
+                              return Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  _ProfileMetricTile(
+                                    label: AppLanguage.tr(context, 'Priváty', 'DMs'),
+                                    value: '${stats.privateChats}',
+                                  ),
+                                  _ProfileMetricTile(
+                                    label: AppLanguage.tr(context, 'Skupiny', 'Groups'),
+                                    value: '${stats.groups}',
+                                  ),
+                                  _ProfileMetricTile(
+                                    label: AppLanguage.tr(context, 'Odeslané', 'Sent'),
+                                    value: '${stats.messagesSent}',
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
                     ],
                   );
                 },
@@ -959,13 +969,17 @@ class _UserProfilePageState extends State<_UserProfilePage> {
               final blocked = bSnap.data?.snapshot.value == true;
               return FilledButton.tonal(
                 onPressed: () => _confirmAndRun(
-                  title: blocked ? 'Odblokovat uživatele?' : 'Zablokovat uživatele?',
+                  title: blocked
+                      ? AppLanguage.tr(context, 'Odblokovat uživatele?', 'Unblock user?')
+                      : AppLanguage.tr(context, 'Zablokovat uživatele?', 'Block user?'),
                   message: blocked
-                      ? 'Znovu povolíš zprávy a zobrazování chatu.'
-                      : 'Zabráníš odesílání zpráv a chat se skryje v přehledu.',
+                      ? AppLanguage.tr(context, 'Znovu povolíš zprávy a zobrazování chatu.', 'You will allow messages and chat visibility again.')
+                      : AppLanguage.tr(context, 'Zabráníš odesílání zpráv a chat se skryje v přehledu.', 'You will block messaging and hide this chat from the list.'),
                   action: () => _toggleBlock(myUid: myUid, currentlyBlocked: blocked),
                 ),
-                child: Text(blocked ? 'Odblokovat' : 'Zablokovat'),
+                child: Text(blocked
+                    ? AppLanguage.tr(context, 'Odblokovat', 'Unblock')
+                    : AppLanguage.tr(context, 'Zablokovat', 'Block')),
               );
             },
           ),
@@ -973,23 +987,27 @@ class _UserProfilePageState extends State<_UserProfilePage> {
 
           FilledButton.tonal(
             onPressed: () => _confirmAndRunThenPop(
-              title: 'Smazat chat u mě?',
-              message: 'Smaže zprávy a přehled konverzace jen u tebe.',
+              title: AppLanguage.tr(context, 'Smazat chat u mě?', 'Delete chat for me?'),
+              message: AppLanguage.tr(context, 'Smaže zprávy a přehled konverzace jen u tebe.', 'This removes chat messages and conversation entry only for you.'),
               action: () => _deleteChatForMe(myUid: myUid),
               popResult: 'deleted_chat_for_me',
             ),
-            child: const Text('Smazat chat u mě'),
+            child: Text(AppLanguage.tr(context, 'Smazat chat u mě', 'Delete chat for me')),
           ),
           const SizedBox(height: 12),
 
           FilledButton.tonal(
             onPressed: () => _confirmAndRunThenPop(
-              title: 'Smazat chat u obou?',
-              message: 'Pokusí se smazat konverzaci u obou uživatelů. Funguje jen pokud je druhá strana propojená v databázi.',
+              title: AppLanguage.tr(context, 'Smazat chat u obou?', 'Delete chat for both?'),
+              message: AppLanguage.tr(
+                context,
+                'Pokusí se smazat konverzaci u obou uživatelů. Funguje jen pokud je druhá strana propojená v databázi.',
+                'Tries to delete conversation for both users. Works only if the other side is linked in database.',
+              ),
               action: () => _deleteChatForBoth(myUid: myUid),
               popResult: 'deleted_chat_for_both',
             ),
-            child: const Text('Smazat chat u obou'),
+            child: Text(AppLanguage.tr(context, 'Smazat chat u obou', 'Delete chat for both')),
           ),
         ],
       ),
@@ -1277,25 +1295,27 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Vytvořit skupinu')),
+      appBar: AppBar(title: Text(t(context, 'Vytvořit skupinu', 'Create group'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           TextField(
             controller: _title,
-            decoration: const InputDecoration(labelText: 'Název'),
+            decoration: InputDecoration(labelText: t(context, 'Název', 'Title')),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _description,
-            decoration: const InputDecoration(labelText: 'Popis'),
+            decoration: InputDecoration(labelText: t(context, 'Popis', 'Description')),
             maxLines: 3,
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _logoUrl,
-            decoration: const InputDecoration(labelText: 'Logo URL (volitelné)'),
+            decoration: InputDecoration(labelText: t(context, 'Logo URL (volitelné)', 'Logo URL (optional)')),
           ),
           const SizedBox(height: 10),
           Row(
@@ -1304,14 +1324,16 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
                 child: FilledButton.tonalIcon(
                   onPressed: (_saving || _pickingLogo) ? null : _pickLogo,
                   icon: const Icon(Icons.photo_library_outlined),
-                  label: Text(_pickedLogoBytes == null ? 'Vybrat logo z galerie' : 'Změnit logo'),
+                  label: Text(_pickedLogoBytes == null
+                      ? t(context, 'Vybrat logo z galerie', 'Pick logo from gallery')
+                      : t(context, 'Změnit logo', 'Change logo')),
                 ),
               ),
               const SizedBox(width: 12),
               if (_pickedLogoBytes != null)
                 OutlinedButton(
                   onPressed: _saving ? null : () => setState(() => _pickedLogoBytes = null),
-                  child: const Text('Odebrat'),
+                  child: Text(t(context, 'Odebrat', 'Remove')),
                 ),
             ],
           ),
@@ -1330,28 +1352,28 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
             ),
           ],
           const SizedBox(height: 16),
-          const Text('Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text(t(context, 'Oprávnění', 'Permissions'), style: const TextStyle(fontWeight: FontWeight.bold)),
           SwitchListTile(
             value: _sendMessages,
             onChanged: (v) => setState(() => _sendMessages = v),
-            title: const Text('Send new messages'),
+            title: Text(t(context, 'Posílat nové zprávy', 'Send new messages')),
           ),
           SwitchListTile(
             value: _allowMembersToAdd,
             onChanged: (v) => setState(() => _allowMembersToAdd = v),
-            title: const Text('Přidávat uživatele'),
+            title: Text(t(context, 'Přidávat uživatele', 'Allow adding users')),
           ),
           SwitchListTile(
             value: _inviteLinkEnabled,
             onChanged: (v) => setState(() => _inviteLinkEnabled = v),
-            title: const Text('Invite via link / QR'),
+            title: Text(t(context, 'Pozvánka přes link / QR', 'Invite via link / QR')),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _members,
-            decoration: const InputDecoration(
-              labelText: 'Přidat lidi podle username',
-              hintText: '@user1, @user2',
+            decoration: InputDecoration(
+              labelText: t(context, 'Přidat lidi podle username', 'Add users by username'),
+              hintText: t(context, '@user1, @user2', '@user1, @user2'),
             ),
             maxLines: 3,
           ),
@@ -1391,7 +1413,9 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: _saving ? null : _create,
-            child: _saving ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator()) : const Text('Vytvořit'),
+            child: _saving
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator())
+                : Text(t(context, 'Vytvořit', 'Create')),
           ),
         ],
       ),
@@ -1564,8 +1588,12 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
+
     final current = FirebaseAuth.instance.currentUser;
-    if (current == null) return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+    if (current == null) {
+      return Scaffold(body: Center(child: Text(t(context, 'Nepřihlášen.', 'Not signed in.'))));
+    }
 
     final groupRef = rtdb().ref('groups/${widget.groupId}');
     final memberRef = rtdb().ref('groupMembers/${widget.groupId}/${current.uid}');
@@ -1623,7 +1651,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                 final myGithub = (um?['githubUsername'] ?? '').toString();
 
                 return Scaffold(
-                  appBar: AppBar(title: const Text('Skupina')),
+                  appBar: AppBar(title: Text(t(context, 'Skupina', 'Group'))),
                   body: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
@@ -1640,7 +1668,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(title, style: Theme.of(context).textTheme.titleMedium),
-                                Text(isAdmin ? 'Admin' : 'Member', style: Theme.of(context).textTheme.bodySmall),
+                                Text(isAdmin ? t(context, 'Admin', 'Admin') : t(context, 'Člen', 'Member'), style: Theme.of(context).textTheme.bodySmall),
                               ],
                             ),
                           ),
@@ -1649,16 +1677,16 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                       const SizedBox(height: 16),
 
                       if (isAdmin) ...[
-                        TextField(controller: _title, decoration: const InputDecoration(labelText: 'Název')),
+                        TextField(controller: _title, decoration: InputDecoration(labelText: t(context, 'Název', 'Title'))),
                         const SizedBox(height: 12),
-                        TextField(controller: _description, decoration: const InputDecoration(labelText: 'Popis'), maxLines: 3),
+                        TextField(controller: _description, decoration: InputDecoration(labelText: t(context, 'Popis', 'Description')), maxLines: 3),
                         const SizedBox(height: 12),
-                        TextField(controller: _logoUrl, decoration: const InputDecoration(labelText: 'Logo URL')),
+                        TextField(controller: _logoUrl, decoration: InputDecoration(labelText: t(context, 'Logo URL', 'Logo URL'))),
                         const SizedBox(height: 10),
                         FilledButton.tonalIcon(
                           onPressed: () => _pickAndUploadLogo(groupId: widget.groupId),
                           icon: const Icon(Icons.photo_library_outlined),
-                          label: const Text('Vybrat logo z galerie'),
+                          label: Text(t(context, 'Vybrat logo z galerie', 'Pick logo from gallery')),
                         ),
                         const SizedBox(height: 12),
                         FilledButton(
@@ -1667,23 +1695,23 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                             'description': _description.text.trim(),
                             'logoUrl': _logoUrl.text.trim(),
                           }),
-                          child: const Text('Uložit'),
+                          child: Text(t(context, 'Uložit', 'Save')),
                         ),
                         const Divider(height: 32),
-                        const Text('Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(t(context, 'Oprávnění', 'Permissions'), style: const TextStyle(fontWeight: FontWeight.bold)),
                         SwitchListTile(
                           value: sendMessages,
                           onChanged: (v) => _update(widget.groupId, {
                             'permissions/sendMessages': v,
                           }),
-                          title: const Text('Send new messages'),
+                          title: Text(t(context, 'Posílat nové zprávy', 'Send new messages')),
                         ),
                         SwitchListTile(
                           value: allowMembersToAdd,
                           onChanged: (v) => _update(widget.groupId, {
                             'permissions/allowMembersToAdd': v,
                           }),
-                          title: const Text('Přidávat uživatele'),
+                          title: Text(t(context, 'Přidávat uživatele', 'Allow adding users')),
                         ),
                         SwitchListTile(
                           value: inviteLinkEnabled,
@@ -1707,7 +1735,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                               });
                             }
                           },
-                          title: const Text('Invite via link / QR'),
+                          title: Text(t(context, 'Pozvánka přes link / QR', 'Invite via link / QR')),
                         ),
                       ] else ...[
                         ListTile(title: Text(title), subtitle: desc.isNotEmpty ? Text(desc) : null),
@@ -1715,17 +1743,17 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                       ],
 
                       if (inviteLinkEnabled) ...[
-                        const Text('Invite link / QR', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(t(context, 'Pozvánka: link / QR', 'Invite link / QR'), style: const TextStyle(fontWeight: FontWeight.bold)),
                         const SizedBox(height: 8),
                         FutureBuilder<String?>(
                           future: _inviteCodeFuture,
                           builder: (context, codeSnap) {
                             final code = (codeSnap.data ?? '').trim();
                             if (code.isEmpty) {
-                              return const ListTile(
+                              return ListTile(
                                 leading: Icon(Icons.link),
-                                title: Text('Link není dostupný'),
-                                subtitle: Text('Zkus to za chvilku znovu.'),
+                                title: Text(t(context, 'Link není dostupný', 'Link is unavailable')),
+                                subtitle: Text(t(context, 'Zkus to za chvilku znovu.', 'Try again in a moment.')),
                               );
                             }
                             final link = buildGroupInviteLink(groupId: widget.groupId, code: code);
@@ -1735,7 +1763,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                               children: [
                                 ListTile(
                                   leading: const Icon(Icons.link),
-                                  title: const Text('Pozvánka'),
+                                  title: Text(t(context, 'Pozvánka', 'Invite')),
                                   subtitle: Text(link, maxLines: 2, overflow: TextOverflow.ellipsis),
                                   trailing: IconButton(
                                     icon: const Icon(Icons.copy),
@@ -1743,7 +1771,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                       await Clipboard.setData(ClipboardData(text: link));
                                       if (context.mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Link zkopírován.')),
+                                          SnackBar(content: Text(t(context, 'Link zkopírován.', 'Link copied.'))),
                                         );
                                       }
                                     },
@@ -1767,7 +1795,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                   OutlinedButton.icon(
                                     onPressed: () => _regenerateInviteCode(groupId: widget.groupId),
                                     icon: const Icon(Icons.refresh),
-                                    label: const Text('Regenerovat pozvánku'),
+                                    label: Text(t(context, 'Regenerovat pozvánku', 'Regenerate invite')),
                                   ),
                                 ],
                               ],
@@ -1779,9 +1807,11 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
 
                       ListTile(
                         leading: const Icon(Icons.person_add_alt_1),
-                        title: const Text('Přidat uživatele'),
+                        title: Text(t(context, 'Přidat uživatele', 'Add user')),
                         subtitle: Text(
-                          allowMembersToAdd ? 'Pošle se žádost adminům (pokud nejsi admin).' : 'Může jen admin.',
+                          allowMembersToAdd
+                              ? t(context, 'Pošle se žádost adminům (pokud nejsi admin).', 'A request will be sent to admins (if you are not admin).')
+                              : t(context, 'Může jen admin.', 'Only admin can do this.'),
                         ),
                         onTap: (!allowMembersToAdd && !isAdmin)
                             ? null
@@ -1789,7 +1819,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 final picked = await showModalBottomSheet<GithubUser>(
                                   context: context,
                                   isScrollControlled: true,
-                                  builder: (context) => const _GithubUserSearchSheet(title: 'Přidat uživatele'),
+                                  builder: (context) => _GithubUserSearchSheet(title: t(context, 'Přidat uživatele', 'Add user')),
                                 );
                                 final normalized = (picked?.login ?? '').trim();
                                 if (normalized.isEmpty) return;
@@ -1809,7 +1839,9 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                       'createdAt': ServerValue.timestamp,
                                     });
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pozvánka odeslána.')));
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(t(context, 'Pozvánka odeslána.', 'Invite sent.'))),
+                                      );
                                     }
                                   } else {
                                     await _requestAddMember(
@@ -1818,12 +1850,16 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                       requestedByGithub: myGithub,
                                     );
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Žádost odeslána adminům.')));
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(t(context, 'Žádost odeslána adminům.', 'Request sent to admins.'))),
+                                      );
                                     }
                                   }
                                 } catch (e) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')),
+                                    );
                                   }
                                 }
                               },
@@ -1836,11 +1872,11 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                             final ok = await showDialog<bool>(
                               context: context,
                               builder: (context) => AlertDialog(
-                                title: const Text('Odejít ze skupiny?'),
-                                content: const Text('Skupinu opustíš a zmizí ti ze seznamu.'),
+                                title: Text(t(context, 'Odejít ze skupiny?', 'Leave group?')),
+                                content: Text(t(context, 'Skupinu opustíš a zmizí ti ze seznamu.', 'You will leave the group and it will disappear from your list.')),
                                 actions: [
-                                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
-                                  FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Odejít')),
+                                  TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t(context, 'Zrušit', 'Cancel'))),
+                                  FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(t(context, 'Odejít', 'Leave'))),
                                 ],
                               ),
                             );
@@ -1850,7 +1886,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                             Navigator.of(context).pop('left');
                           },
                           icon: const Icon(Icons.logout),
-                          label: const Text('Odejít ze skupiny'),
+                          label: Text(t(context, 'Odejít ze skupiny', 'Leave group')),
                         )
                       else
                         Column(
@@ -1862,12 +1898,12 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 final action = await showDialog<String>(
                                   context: context,
                                   builder: (context) => AlertDialog(
-                                    title: const Text('Jsi admin'),
-                                    content: const Text('Před odchodem musíš předat admina, nebo smazat celou skupinu.'),
+                                    title: Text(t(context, 'Jsi admin', 'You are admin')),
+                                    content: Text(t(context, 'Před odchodem musíš předat admina, nebo smazat celou skupinu.', 'Before leaving, transfer admin role or delete the entire group.')),
                                     actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Zrušit')),
-                                      TextButton(onPressed: () => Navigator.pop(context, 'transfer'), child: const Text('Předat admina')),
-                                      FilledButton(onPressed: () => Navigator.pop(context, 'delete'), child: const Text('Smazat skupinu')),
+                                      TextButton(onPressed: () => Navigator.pop(context), child: Text(t(context, 'Zrušit', 'Cancel'))),
+                                      TextButton(onPressed: () => Navigator.pop(context, 'transfer'), child: Text(t(context, 'Předat admina', 'Transfer admin'))),
+                                      FilledButton(onPressed: () => Navigator.pop(context, 'delete'), child: Text(t(context, 'Smazat skupinu', 'Delete group'))),
                                     ],
                                   ),
                                 );
@@ -1876,11 +1912,11 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                   final ok = await showDialog<bool>(
                                     context: context,
                                     builder: (context) => AlertDialog(
-                                      title: const Text('Smazat skupinu?'),
-                                      content: const Text('Tohle smaže skupinu pro všechny.'),
+                                      title: Text(t(context, 'Smazat skupinu?', 'Delete group?')),
+                                      content: Text(t(context, 'Tohle smaže skupinu pro všechny.', 'This will delete the group for everyone.')),
                                       actions: [
-                                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
-                                        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Smazat')),
+                                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t(context, 'Zrušit', 'Cancel'))),
+                                        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(t(context, 'Smazat', 'Delete'))),
                                       ],
                                     ),
                                   );
@@ -1905,7 +1941,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 if (candidates.isEmpty) {
                                   if (!mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Ve skupině není nikdo další. Můžeš ji jen smazat.')),
+                                    SnackBar(content: Text(t(context, 'Ve skupině není nikdo další. Můžeš ji jen smazat.', 'There is no one else in the group. You can only delete it.'))),
                                   );
                                   return;
                                 }
@@ -1917,8 +1953,8 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                       child: ListView(
                                         shrinkWrap: true,
                                         children: [
-                                          const ListTile(
-                                            title: Text('Vyber nového admina', style: TextStyle(fontWeight: FontWeight.w700)),
+                                          ListTile(
+                                            title: Text(t(context, 'Vyber nového admina', 'Pick new admin'), style: const TextStyle(fontWeight: FontWeight.w700)),
                                           ),
                                           const Divider(height: 1),
                                           ...candidates.map((uid) {
@@ -3644,6 +3680,7 @@ class _JobsTabState extends State<_JobsTab> {
                               builder: (_) => _UserProfilePage(
                                 login: post.author,
                                 avatarUrl: post.authorAvatarUrl,
+                                githubDataFuture: _fetchGithubProfileData(post.author),
                               ),
                             ),
                           );
@@ -3892,50 +3929,56 @@ class _SettingsHome extends StatelessWidget {
 
             _SettingsSectionTile(
               icon: Icons.person_outline,
-              title: 'Účet',
-              subtitle: 'Telefon, narozeniny, bio, účty',
+              title: AppLanguage.tr(context, 'Účet', 'Account'),
+              subtitle: AppLanguage.tr(context, 'Telefon, narozeniny, bio, účty', 'Phone, birthday, bio, linked accounts'),
               onTap: () => _open(context, _SettingsAccountPage(onLogout: onLogout)),
             ),
             _SettingsSectionTile(
               icon: Icons.chat_bubble_outline,
-              title: 'Nastavení chatů',
-              subtitle: 'Obrázek na pozadí, barvy, velikost textu',
+              title: AppLanguage.tr(context, 'Nastavení chatů', 'Chat settings'),
+              subtitle: AppLanguage.tr(context, 'Obrázek na pozadí, barvy, velikost textu', 'Background, colors, and text size'),
               onTap: () => _open(context, const _SettingsChatPage()),
             ),
             _SettingsSectionTile(
               icon: Icons.lock_outline,
-              title: 'Soukromí',
-              subtitle: 'Auto-delete, status, presence, dárky',
+              title: AppLanguage.tr(context, 'Soukromí', 'Privacy'),
+              subtitle: AppLanguage.tr(context, 'Auto-delete, status, presence, dárky', 'Auto-delete, status, presence, achievements'),
               onTap: () => _open(context, const _SettingsPrivacyPage()),
             ),
             _SettingsSectionTile(
               icon: Icons.notifications_none,
-              title: 'Upozornění',
-              subtitle: 'Zvuky a vibrace',
+              title: AppLanguage.tr(context, 'Upozornění', 'Notifications'),
+              subtitle: AppLanguage.tr(context, 'Zvuky a vibrace', 'Sounds and vibration'),
               onTap: () => _open(context, const _SettingsNotificationsPage()),
             ),
             _SettingsSectionTile(
               icon: Icons.security_outlined,
-              title: 'Šifrování a E2EE',
-              subtitle: 'Jak fungují klíče, fingerprinty a vyhledávání',
+              title: AppLanguage.tr(context, 'Šifrování a E2EE', 'Encryption and E2EE'),
+              subtitle: AppLanguage.tr(context, 'Jak fungují klíče, fingerprinty a vyhledávání', 'How keys, fingerprints, and search work'),
               onTap: () => _open(context, const _SettingsEncryptionPage()),
             ),
             _SettingsSectionTile(
+              icon: Icons.menu_book_outlined,
+              title: AppLanguage.tr(context, 'Nápověda a dokumentace', 'Help and documentation'),
+              subtitle: AppLanguage.tr(context, 'Podrobný popis funkcí aplikace', 'Detailed app feature guide'),
+              onTap: () => _open(context, const _SettingsDocumentationPage()),
+            ),
+            _SettingsSectionTile(
               icon: Icons.storage_outlined,
-              title: 'Data a paměť',
-              subtitle: 'Zatím základní',
+              title: AppLanguage.tr(context, 'Data a paměť', 'Data and storage'),
+              subtitle: AppLanguage.tr(context, 'Zatím základní', 'Basic controls'),
               onTap: () => _open(context, const _SettingsDataPage()),
             ),
             _SettingsSectionTile(
               icon: Icons.devices_outlined,
-              title: 'Zařízení',
-              subtitle: 'Aktivní sezení (brzy)',
+              title: AppLanguage.tr(context, 'Zařízení', 'Devices'),
+              subtitle: AppLanguage.tr(context, 'Aktivní sezení (brzy)', 'Active sessions'),
               onTap: () => _open(context, _SettingsDevicesPage(onLogout: onLogout)),
             ),
             _SettingsSectionTile(
               icon: Icons.language,
-              title: 'Jazyk',
-              subtitle: 'Čeština / English',
+              title: AppLanguage.tr(context, 'Jazyk', 'Language'),
+              subtitle: AppLanguage.tr(context, 'Čeština / English', 'Czech / English'),
               onTap: () => _open(context, const _SettingsLanguagePage()),
             ),
           ],
@@ -3978,53 +4021,201 @@ class _SettingsEncryptionPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Šifrování a E2EE')),
+      appBar: AppBar(title: Text(t(context, 'Šifrování a E2EE', 'Encryption and E2EE'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
-        children: const [
+        children: [
           Card(
             child: Padding(
-              padding: EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Jak funguje šifrování', style: TextStyle(fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
-                  Text('GitMit používá end-to-end šifrování (E2EE). Obsah zpráv se šifruje na tvém zařízení a na server se ukládá pouze ciphertext.'),
-                  SizedBox(height: 8),
-                  Text('Pro privátní chaty se používá X25519/Ed25519 a ChaCha20-Poly1305. Pro skupiny je k dispozici sdílený group key (v1) nebo Sender Keys (v2), pokud všichni podporují.'),
+                  Text(t(context, 'Jak funguje šifrování', 'How encryption works'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text(
+                    t(
+                      context,
+                      'GitMit používá end-to-end šifrování (E2EE). Obsah zpráv se šifruje na tvém zařízení a na server se ukládá pouze ciphertext.',
+                      'GitMit uses end-to-end encryption (E2EE). Message content is encrypted on your device and only ciphertext is stored on the server.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    t(
+                      context,
+                      'Pro privátní chaty se používá X25519/Ed25519 a ChaCha20-Poly1305. Pro skupiny je k dispozici sdílený group key (v1) nebo Sender Keys (v2), pokud všichni podporují.',
+                      'Private chats use X25519/Ed25519 and ChaCha20-Poly1305. For groups, shared group key (v1) or Sender Keys (v2) are used when supported by all participants.',
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
           Card(
             child: Padding(
-              padding: EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Fingerprinty a ověření', style: TextStyle(fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
-                  Text('Fingerprint je otisk veřejného podpisového klíče (Ed25519). Ověř si ho s protějškem přes jiný kanál (osobně, Signal).'),
-                  SizedBox(height: 8),
-                  Text('Pokud se fingerprint protějšku změní, může to znamenat reinstall nebo riziko MITM.'),
+                  Text(t(context, 'Fingerprinty a ověření', 'Fingerprints and verification'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text(
+                    t(
+                      context,
+                      'Fingerprint je otisk veřejného podpisového klíče (Ed25519). Ověř si ho s protějškem přes jiný kanál (osobně, Signal).',
+                      'A fingerprint is a hash of the public signing key (Ed25519). Verify it with your peer via another channel (in person, Signal).',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    t(
+                      context,
+                      'Pokud se fingerprint protějšku změní, může to znamenat reinstall nebo riziko MITM.',
+                      'If your peer fingerprint changes, it may indicate a reinstall or a possible MITM risk.',
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
           Card(
             child: Padding(
-              padding: EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Vyhledávání', style: TextStyle(fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
-                  Text('Vyhledávání funguje pouze nad lokálně dešifrovaným obsahem. Plaintext se neodesílá na server, ukládá se jen na zařízení.'),
+                  Text(t(context, 'Vyhledávání', 'Search'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text(
+                    t(
+                      context,
+                      'Vyhledávání funguje pouze nad lokálně dešifrovaným obsahem. Plaintext se neodesílá na server, ukládá se jen na zařízení.',
+                      'Search works only over locally decrypted content. Plaintext is not sent to the server and remains only on the device.',
+                    ),
+                  ),
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsDocumentationPage extends StatelessWidget {
+  const _SettingsDocumentationPage();
+
+  Widget _docCard({required String title, required List<String> lines}) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            ...lines.map(
+              (line) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text('• $line'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
+
+    return Scaffold(
+      appBar: AppBar(title: Text(t(context, 'Nápověda a dokumentace', 'Help and documentation'))),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _docCard(
+            title: t(context, 'Rychlá orientace', 'Quick overview'),
+            lines: [
+              t(context, 'Účet: profilové údaje, telefon, bio, odhlášení účtu.', 'Account: profile info, phone, bio, sign-out.'),
+              t(context, 'Nastavení chatů: vzhled zpráv, velikost textu, pozadí a reakce.', 'Chat settings: message style, text size, background, and reactions.'),
+              t(context, 'Soukromí: auto-delete, online status a viditelnost achievementů.', 'Privacy: auto-delete, online status, and achievement visibility.'),
+              t(context, 'Upozornění: notifikace, vibrace a zvuky.', 'Notifications: alerts, vibration, and sounds.'),
+              t(context, 'Data a paměť: přenos dat, stahování médií a přehled úložiště.', 'Data and storage: network usage, media downloads, and storage overview.'),
+              t(context, 'Zařízení: aktivní relace a vzdálené odhlášení dalších zařízení.', 'Devices: active sessions and remote sign-out for other devices.'),
+            ],
+          ),
+          _docCard(
+            title: t(context, 'Šifrování a bezpečnost', 'Encryption and security'),
+            lines: [
+              t(context, 'Privátní zprávy jsou chráněné E2EE – server nevidí plaintext.', 'Private messages are protected with E2EE — the server cannot read plaintext.'),
+              t(context, 'Klíče se navazují mezi účastníky chatu; bez dostupného klíče se zpráva nešifruje.', 'Keys are established between chat participants; without a key, messages cannot be encrypted.'),
+              t(context, 'Fingerprint ověřuje identitu klíče a pomáhá odhalit MITM útok.', 'The fingerprint verifies key identity and helps detect MITM attacks.'),
+              t(context, 'Fingerprint je potřeba porovnat mimo aplikaci (osobně nebo přes jiný důvěryhodný kanál).', 'Fingerprint should be verified out-of-band (in person or via another trusted channel).'),
+              t(context, 'Při změně zařízení může dojít ke změně klíče a tím i fingerprintu.', 'Changing device may rotate keys and therefore change the fingerprint.'),
+            ],
+          ),
+          _docCard(
+            title: t(context, 'Chaty (DM) – jak to funguje', 'Chats (DM) — how it works'),
+            lines: [
+              t(context, 'Chat lze otevřít s uživatelem, který je dohledatelný přes GitHub login.', 'A chat can be opened with a user discoverable by GitHub login.'),
+              t(context, 'Pokud druhá strana není v databázi GitMitu, DM nemusí být možné navázat standardně.', 'If the other side is not in the GitMit database, DM may not be established in the standard way.'),
+              t(context, 'V DM můžeš odpovídat na konkrétní zprávy, reagovat emoji a posílat obrázky/kód.', 'In DM, you can reply to messages, react with emoji, and send images/code.'),
+              t(context, 'TTL (ničení zpráv) určuje, jak dlouho se zpráva drží po doručení.', 'TTL (message expiry) determines how long a message is retained after delivery.'),
+              t(context, 'Po smazání chatu „u mě“ se smažou pouze lokální/uživatelské záznamy tvého účtu.', 'Deleting chat “for me” removes only your local/account-side records.'),
+              t(context, 'Smazání „u obou“ vyžaduje dostupnost a správné mapování druhého účtu.', 'Deleting “for both” requires the peer account to be available and correctly mapped.'),
+            ],
+          ),
+          _docCard(
+            title: t(context, 'Skupiny a pozvánky', 'Groups and invites'),
+            lines: [
+              t(context, 'Pozvánky do skupin najdeš v přehledu chatů, můžeš je přijmout nebo odmítnout.', 'Group invites appear in chat overview; you can accept or decline them.'),
+              t(context, 'Admin skupiny může schvalovat žádosti a spravovat členy.', 'Group admins can approve requests and manage members.'),
+              t(context, 'Některé skupiny používají skupinové klíče (podle podpory klientů).', 'Some groups use group keys (depending on client support).'),
+              t(context, 'U skupin vždy kontroluj, kdo tě pozval a do jaké skupiny vstupuješ.', 'For groups, always verify who invited you and which group you are joining.'),
+            ],
+          ),
+          _docCard(
+            title: t(context, 'Soukromí, online stav a notifikace', 'Privacy, presence, and notifications'),
+            lines: [
+              t(context, 'Presence (online/offline) lze úplně vypnout nebo přepnout na DND/skrytý.', 'Presence (online/offline) can be disabled entirely or set to DND/hidden.'),
+              t(context, 'Auto-delete v soukromí je globální politika, TTL v DM je jemnější nastavení pro konverzaci.', 'Privacy auto-delete is a global policy; DM TTL is finer per-conversation control.'),
+              t(context, 'Vypnutí notifikací zastaví push/in-app upozornění, ale zprávy se stále doručují.', 'Disabling notifications stops push/in-app alerts, but messages are still delivered.'),
+              t(context, 'Vibrace a zvuky lze vypnout samostatně podle preferencí.', 'Vibration and sounds can be toggled independently.'),
+            ],
+          ),
+          _docCard(
+            title: t(context, 'Data, média a úložiště', 'Data, media, and storage'),
+            lines: [
+              t(context, 'Můžeš zvlášť povolit stahování médií pro mobilní data, Wi‑Fi a roaming.', 'You can separately allow media downloads for mobile data, Wi‑Fi, and roaming.'),
+              t(context, 'Režim Ekonomie dat omezuje přenosy hlavně na mobilních sítích.', 'Data saver mode limits transfers mainly on mobile networks.'),
+              t(context, 'Sekce Využití internetu ukazuje příjem/odeslání dat po typech sítě.', 'The Internet usage section shows received/sent data by network type.'),
+              t(context, 'Sekce Využití paměti rozlišuje média, ostatní data a cache.', 'The Storage usage section separates media, other data, and cache.'),
+              t(context, 'Po změnách je vhodné použít „Přepočítat“, aby se statistiky obnovily.', 'After changes, use “Recalculate” to refresh statistics.'),
+            ],
+          ),
+          _docCard(
+            title: t(context, 'Zařízení a relace', 'Devices and sessions'),
+            lines: [
+              t(context, 'V seznamu zařízení vidíš aktuální i historické relace účtu.', 'In the devices list, you can see current and historical account sessions.'),
+              t(context, 'Neznámé zařízení můžeš vzdáleně odhlásit přímo ze sekce Zařízení.', 'Unknown devices can be remotely signed out from the Devices section.'),
+              t(context, 'Po odhlášení cizího zařízení je vhodné změnit heslo/ověření účtu mimo aplikaci.', 'After removing an unknown device, it is recommended to change account credentials outside the app.'),
+            ],
+          ),
+          _docCard(
+            title: t(context, 'Nejčastější problémy', 'Common issues'),
+            lines: [
+              t(context, '„Bad state: Stream has already been listened to“ obvykle vyřeší restart aplikace po update.', '“Bad state: Stream has already been listened to” is usually fixed by a full app restart after update.'),
+              t(context, '404 z backendu znamená neplatný endpoint nebo chybějící server route.', 'A backend 404 usually means an invalid endpoint or a missing server route.'),
+              t(context, 'Pokud se nenačítá profil/DM, ověř GitHub login a existenci mapování v databázi.', 'If profile/DM does not load, verify GitHub login and account mapping in the database.'),
+              t(context, 'Při problému se šifrováním zkus znovu publikovat klíč otevřením zabezpečeného chatu.', 'If encryption fails, try republishing keys by opening a secure chat again.'),
+            ],
           ),
         ],
       ),
@@ -5578,24 +5769,8 @@ bool _isModeratorFromUserMap(Map? userMap) {
 }
 
 Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
+  print('[DEBUG] _fetchGithubProfileData() called with username: $username');
   if (username == null || username.isEmpty) return null;
-
-  final allowMedia = await DataUsageTracker.canDownloadMedia();
-
-  String? extractFirstSvg(String html) {
-    final re = RegExp(r'(<svg[^>]*>[\s\S]*?<\/svg>)', caseSensitive: false);
-    final m = re.firstMatch(html);
-    return m?.group(1);
-  }
-
-  String sanitizeContributionsSvg(String svg) {
-    // GitHub's SVG often includes dark text labels that are unreadable on dark background.
-    // Keep only the grid; remove <text> and <title> elements.
-    var s = svg;
-    s = s.replaceAll(RegExp(r'<text[^>]*>[\s\S]*?<\/text>', caseSensitive: false), '');
-    s = s.replaceAll(RegExp(r'<title[^>]*>[\s\S]*?<\/title>', caseSensitive: false), '');
-    return s;
-  }
 
   try {
     // Avatar
@@ -5610,42 +5785,6 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
       if (decoded is Map) {
         avatarUrl = (decoded['avatar_url'] ?? '').toString();
         if (avatarUrl.isEmpty) avatarUrl = null;
-      }
-    }
-
-    // Aktivita SVG (contributions calendar)
-    // Prefer GitHub official public endpoint to avoid relying on third-party services.
-    String? svg;
-    if (allowMedia) {
-      final ghSvgRes = await DataUsageTracker.trackedGet(
-        Uri.parse('https://github.com/users/$username/contributions'),
-        headers: const {
-          'Accept': 'image/svg+xml,text/html;q=0.9,*/*;q=0.8',
-          'User-Agent': 'gitmit',
-        },
-        category: 'media',
-      );
-      if (ghSvgRes.statusCode == 200) {
-        final body = ghSvgRes.body.trim();
-        if (body.startsWith('<svg')) {
-          svg = sanitizeContributionsSvg(body);
-        } else {
-          final extracted = extractFirstSvg(body);
-          if (extracted != null && extracted.isNotEmpty) {
-            svg = sanitizeContributionsSvg(extracted);
-          }
-        }
-      }
-    }
-
-    // Fallback: legacy third-party API if GitHub endpoint changes or is blocked.
-    if (allowMedia && (svg == null || svg.isEmpty)) {
-      final svgRes = await DataUsageTracker.trackedGet(
-        Uri.parse('https://github-contributions-api.jogruber.de/v4/$username?format=svg'),
-        category: 'media',
-      );
-      if (svgRes.statusCode == 200 && svgRes.body.trim().startsWith('<svg')) {
-        svg = sanitizeContributionsSvg(svgRes.body);
       }
     }
 
@@ -5670,9 +5809,9 @@ Future<Map<String, dynamic>?> _fetchGithubProfileData(String? username) async {
             .toList(growable: false);
       }
     }
+
     return {
       'avatarUrl': avatarUrl,
-      'contributions': svg,
       'topRepos': topRepos,
     };
   } catch (_) {
@@ -5685,24 +5824,6 @@ void _openRepoUrl(BuildContext context, String? url) {
   final uri = Uri.tryParse(url);
   if (uri == null) return;
   launchUrl(uri, mode: LaunchMode.externalApplication);
-}
-
-class _SvgWidget extends StatelessWidget {
-  final String svg;
-  const _SvgWidget({required this.svg});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 140,
-      child: SvgPicture.string(
-        svg,
-        fit: BoxFit.contain,
-        alignment: Alignment.centerLeft,
-      ),
-    );
-  }
 }
 
 class _ProfileSectionCard extends StatelessWidget {
@@ -5864,9 +5985,11 @@ class _ProfileTabState extends State<_ProfileTab> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      return const Center(child: Text('Nepřihlášen.'));
+      return Center(child: Text(t(context, 'Nepřihlášen.', 'Not signed in.')));
     }
 
     if (_statsUid != user.uid) {
@@ -5900,7 +6023,6 @@ class _ProfileTabState extends State<_ProfileTab> {
           builder: (context, snap) {
             final gh = snap.data;
             final fetchedAvatar = gh?['avatarUrl'] as String?;
-            final activitySvg = gh?['contributions'] as String?;
             final topRepos = gh?['topRepos'] as List<Map<String, dynamic>>?;
 
             final avatarFromDb = (githubAvatar != null && githubAvatar.isNotEmpty) ? githubAvatar : null;
@@ -5939,19 +6061,12 @@ class _ProfileTabState extends State<_ProfileTab> {
                     FilledButton.tonalIcon(
                       onPressed: () => _openRepoUrl(context, 'https://github.com/$githubUsername'),
                       icon: const Icon(Icons.open_in_new),
-                      label: const Text('Zobrazit můj GitHub'),
+                      label: Text(t(context, 'Zobrazit můj GitHub', 'View my GitHub')),
                     ),
                   const SizedBox(height: 8),
                   const Divider(height: 32),
-                  _ProfileSectionCard(
-                    title: 'Aktivita na GitHubu',
-                    icon: Icons.grid_on_outlined,
-                    child: (activitySvg != null && activitySvg.trim().isNotEmpty)
-                        ? _SvgWidget(svg: activitySvg)
-                        : const Text('Aktivitu se nepodařilo načíst.', style: TextStyle(color: Colors.white60)),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text('Top repozitáře', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Text(t(context, 'Top repozitáře', 'Top repositories'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   if (topRepos != null && topRepos.isNotEmpty)
                     Column(
@@ -5980,7 +6095,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                   const SizedBox(height: 24),
 
                   // Žádost o ověření
-                  const Text('Ověření', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                  Text(t(context, 'Ověření', 'Verification'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   StreamBuilder<DatabaseEvent>(
                     stream: reqRef.onValue,
@@ -5994,21 +6109,21 @@ class _ProfileTabState extends State<_ProfileTab> {
                       final declined = status == 'declined';
 
                       if (approved) {
-                        return Text('Stav: $statusText');
+                        return Text('${t(context, 'Stav', 'Status')}: $statusText');
                       }
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Text('Stav: $statusText'),
+                          Text('${t(context, 'Stav', 'Status')}: $statusText'),
                           const SizedBox(height: 8),
                           if (!pending && !declined) ...[
                             TextField(
                               controller: _verifiedReason,
                               minLines: 2,
                               maxLines: 5,
-                              decoration: const InputDecoration(
-                                labelText: 'Proč chceš ověření?'
+                              decoration: InputDecoration(
+                                labelText: t(context, 'Proč chceš ověření?', 'Why do you want verification?')
                               ),
                             ),
                             const SizedBox(height: 8),
@@ -6029,19 +6144,19 @@ class _ProfileTabState extends State<_ProfileTab> {
                                         if (mounted) {
                                           _verifiedReason.clear();
                                           ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('Žádost odeslána, čeká se na moderátora.')),
+                                            SnackBar(content: Text(t(context, 'Žádost odeslána, čeká se na moderátora.', 'Request sent, waiting for moderator.'))),
                                           );
                                         }
                                       } finally {
                                         if (mounted) setState(() => _sending = false);
                                       }
                                     },
-                              child: const Text('Získat ověření'),
+                              child: Text(t(context, 'Získat ověření', 'Get verification')),
                             ),
                           ] else if (pending) ...[
-                            const Text('Žádost byla odeslána. Odpověď najdeš v Chatech v položce „Ověření účtu“.'),
+                            Text(t(context, 'Žádost byla odeslána. Odpověď najdeš v Chatech v položce „Ověření účtu“.', 'Request was sent. You can find response in Chats under “Account verification”.')),
                           ] else if (declined) ...[
-                            const Text('Žádost byla zamítnuta. Můžeš poslat novou žádost.'),
+                            Text(t(context, 'Žádost byla zamítnuta. Můžeš poslat novou žádost.', 'Request was declined. You can send a new request.')),
                             const SizedBox(height: 8),
                             ElevatedButton(
                               onPressed: (_sending || githubUsername == null || githubUsername.isEmpty)
@@ -6060,14 +6175,14 @@ class _ProfileTabState extends State<_ProfileTab> {
                                         if (mounted) {
                                           _verifiedReason.clear();
                                           ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('Žádost odeslána, čeká se na moderátora.')),
+                                            SnackBar(content: Text(t(context, 'Žádost odeslána, čeká se na moderátora.', 'Request sent, waiting for moderator.'))),
                                           );
                                         }
                                       } finally {
                                         if (mounted) setState(() => _sending = false);
                                       }
                                     },
-                              child: const Text('Poslat novou žádost'),
+                              child: Text(t(context, 'Poslat novou žádost', 'Send new request')),
                             ),
                           ],
                         ],
@@ -6077,10 +6192,10 @@ class _ProfileTabState extends State<_ProfileTab> {
 
                   const SizedBox(height: 24),
                   _ProfileSectionCard(
-                    title: 'Achievementy na GitMitu',
+                    title: t(context, 'Achievementy na GitMitu', 'GitMit achievements'),
                     icon: Icons.emoji_events_outlined,
                     child: badges.isEmpty
-                        ? const Text('Zatím žádné achievementy.')
+                        ? Text(t(context, 'Zatím žádné achievementy.', 'No achievements yet.'))
                         : Wrap(
                             spacing: 8,
                             runSpacing: 8,
@@ -6096,14 +6211,14 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
                   const SizedBox(height: 12),
                   _ProfileSectionCard(
-                    title: 'Aktivita v GitMitu',
+                    title: t(context, 'Aktivita v GitMitu', 'GitMit activity'),
                     icon: Icons.insights_outlined,
                     child: FutureBuilder<_GitmitStats?>(
                       future: _gitmitStatsFuture,
                       builder: (context, statsSnap) {
                         final stats = statsSnap.data;
                         if (stats == null) {
-                          return const Text('Načítání aktivity...');
+                          return Text(t(context, 'Načítání aktivity...', 'Loading activity...'));
                         }
                         return Wrap(
                           spacing: 8,
@@ -6278,28 +6393,38 @@ class _ContactsTabState extends State<_ContactsTab> {
                       const SizedBox(width: 10),
                       Expanded(child: Text('@$otherLogin', style: const TextStyle(fontWeight: FontWeight.w700))),
                       IconButton(
-                        tooltip: 'Profil',
+                        tooltip: AppLanguage.tr(context, 'Profil', 'Profile'),
                         icon: const Icon(Icons.open_in_new),
                         onPressed: () async {
                           Navigator.of(context).pop();
                           await Navigator.of(this.context).push(
-                            MaterialPageRoute(builder: (_) => _UserProfilePage(login: otherLogin, avatarUrl: avatarUrl)),
+                            MaterialPageRoute(
+                              builder: (_) => _UserProfilePage(
+                                login: otherLogin,
+                                avatarUrl: avatarUrl,
+                                githubDataFuture: _fetchGithubProfileData(otherLogin),
+                              ),
+                            ),
                           );
                         },
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Tenhle uživatel zatím nemá účet v GitMitu (není v databázi), takže nejde poslat DM invajt.',
-                    style: TextStyle(color: Colors.white70),
+                  Text(
+                    AppLanguage.tr(
+                      context,
+                      'Tenhle uživatel zatím nemá účet v GitMitu (není v databázi), takže nejde poslat DM invajt.',
+                      'This user does not have a GitMit account yet (not in database), so DM invite cannot be sent.',
+                    ),
+                    style: const TextStyle(color: Colors.white70),
                   ),
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('OK'),
+                      child: Text(AppLanguage.tr(context, 'OK', 'OK')),
                     ),
                   ),
                 ],
@@ -8457,7 +8582,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   Future<void> _openUserProfile({required String login, required String avatarUrl}) async {
     final res = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) => _UserProfilePage(login: login, avatarUrl: avatarUrl),
+        builder: (_) => _UserProfilePage(
+          login: login,
+          avatarUrl: avatarUrl,
+          githubDataFuture: _fetchGithubProfileData(login),
+        ),
       ),
     );
 
@@ -10499,7 +10628,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 IconButton(
                                   icon: const Icon(Icons.close, size: 18),
                                   onPressed: _clearReplyTarget,
-                                  tooltip: 'Zrušit odpověď',
+                                  tooltip: AppLanguage.tr(context, 'Zrušit odpověď', 'Cancel reply'),
                                 ),
                               ],
                             ),
@@ -10512,7 +10641,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             Expanded(
                               child: TextField(
                                 controller: _messageController,
-                                decoration: const InputDecoration(labelText: 'Zpráva / Markdown'),
+                                decoration: InputDecoration(labelText: AppLanguage.tr(context, 'Zpráva / Markdown', 'Message / Markdown')),
                                 enabled: canSend,
                                 minLines: 1,
                                 maxLines: 6,
@@ -10533,7 +10662,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             ),
                             const SizedBox(width: 8),
                             PopupMenuButton<String>(
-                              tooltip: 'Více',
+                              tooltip: AppLanguage.tr(context, 'Více', 'More'),
                               enabled: canSend,
                               onSelected: (value) async {
                                 if (value == 'image') {
@@ -10557,21 +10686,21 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 }
                               },
                               itemBuilder: (context) => [
-                                const PopupMenuItem<String>(
+                                PopupMenuItem<String>(
                                   value: 'image',
                                   child: ListTile(
                                     dense: true,
-                                    leading: Icon(Icons.image_outlined),
-                                    title: Text('Poslat obrázek'),
+                                    leading: const Icon(Icons.image_outlined),
+                                    title: Text(AppLanguage.tr(context, 'Poslat obrázek', 'Send image')),
                                     contentPadding: EdgeInsets.zero,
                                   ),
                                 ),
-                                const PopupMenuItem<String>(
+                                PopupMenuItem<String>(
                                   value: 'code',
                                   child: ListTile(
                                     dense: true,
-                                    leading: Icon(Icons.code),
-                                    title: Text('Vložit kód'),
+                                    leading: const Icon(Icons.code),
+                                    title: Text(AppLanguage.tr(context, 'Vložit kód', 'Insert code')),
                                     contentPadding: EdgeInsets.zero,
                                   ),
                                 ),
@@ -10584,7 +10713,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                       leading: Icon(
                                         _dmTtlMode == ttl ? Icons.radio_button_checked : Icons.radio_button_unchecked,
                                       ),
-                                      title: Text('Ničení: ${ttlLabel(ttl)}'),
+                                      title: Text('${AppLanguage.tr(context, 'Ničení', 'TTL')}: ${ttlLabel(ttl)}'),
                                       contentPadding: EdgeInsets.zero,
                                     ),
                                   ),
@@ -10695,7 +10824,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                   ),
                 ],
               ),
-              onTap: () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
+              onTap: (loginLower == myGithubLower)
+                  ? null
+                  : () => _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? ''),
             ),
             const Divider(height: 1),
             // DM žádosti – zobrazené i během chatu
