@@ -134,4 +134,36 @@ class PlaintextCache {
       // ignore
     }
   }
+
+  static Future<void> flushNow() async {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    await _flush();
+  }
+
+  static Future<Map<String, String>> exportAllEntries({int maxEntries = 1500}) async {
+    final box = _box;
+    if (box == null) return const <String, String>{};
+
+    final out = <String, String>{};
+    for (final key in box.keys) {
+      if (out.length >= maxEntries) break;
+      final k = key.toString();
+      if (k.isEmpty) continue;
+      final v = box.get(k);
+      if (v == null || v.isEmpty) continue;
+      out[k] = v;
+    }
+    return out;
+  }
+
+  static Future<void> importEntries(Map<String, String> entries) async {
+    final box = _box;
+    if (box == null || entries.isEmpty) return;
+    try {
+      await box.putAll(entries);
+    } catch (_) {
+      // ignore
+    }
+  }
 }

@@ -3,7 +3,6 @@ import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:gitmit/rtdb.dart';
 
@@ -83,6 +82,49 @@ class E2ee {
 
   static Future<void> _deleteKey(String baseKey) async {
     await _storage.delete(key: _scopedKey(baseKey));
+  }
+
+  static bool _isExportableBaseKey(String baseKey) {
+    final k = baseKey.trim();
+    return k.startsWith('e2ee_');
+  }
+
+  static Future<Map<String, String>> exportDeviceKeyMaterial() async {
+    final out = <String, String>{};
+    final scope = (_activeUid == null || _activeUid!.isEmpty) ? 'no_uid' : _activeUid!;
+    final suffix = '::$scope';
+
+    final all = await _storage.readAll();
+    for (final entry in all.entries) {
+      final rawKey = entry.key;
+      final value = entry.value;
+      if (value.isEmpty) continue;
+
+      if (rawKey.endsWith(suffix)) {
+        final base = rawKey.substring(0, rawKey.length - suffix.length);
+        if (_isExportableBaseKey(base)) {
+          out[base] = value;
+        }
+        continue;
+      }
+
+      // Legacy fallback: unscoped keys from older app versions.
+      if (!rawKey.contains('::') && _isExportableBaseKey(rawKey)) {
+        out[rawKey] = value;
+      }
+    }
+
+    return out;
+  }
+
+  static Future<void> importDeviceKeyMaterial(Map<String, String> data) async {
+    for (final entry in data.entries) {
+      final base = entry.key.trim();
+      final value = entry.value;
+      if (base.isEmpty || value.isEmpty) continue;
+      if (!_isExportableBaseKey(base)) continue;
+      await _writeKey(base, value);
+    }
   }
 
   static final _x25519 = X25519();
@@ -398,9 +440,6 @@ class E2ee {
   }
 
   static Future<void> publishMyPublicKey({required String uid}) async {
-    // Avoid crashing the app in tests/web.
-    if (kIsWeb) return;
-
     final idKp = await getOrCreateIdentityKeyPair();
     final signKp = await getOrCreateSigningKeyPair();
     final spk = await getOrCreateSignedPrekey();

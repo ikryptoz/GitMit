@@ -2323,6 +2323,42 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _leftSideNav(BuildContext context, {required bool vibrationEnabled}) {
+    final destinations = <({IconData icon, String label})>[
+      (icon: Icons.dashboard, label: 'Jobs'),
+      (icon: Icons.chat_bubble_outline, label: AppLanguage.tr(context, 'Chaty', 'Chats')),
+      (icon: Icons.people_outline, label: AppLanguage.tr(context, 'Kontakty', 'Contacts')),
+      (icon: Icons.settings_outlined, label: AppLanguage.tr(context, 'Nastavení', 'Settings')),
+      (icon: Icons.person_outline, label: AppLanguage.tr(context, 'Profil', 'Profile')),
+    ];
+
+    return NavigationRail(
+      selectedIndex: _index,
+      labelType: NavigationRailLabelType.all,
+      onDestinationSelected: (i) {
+        if (i != _index && vibrationEnabled) {
+          HapticFeedback.selectionClick();
+        }
+        setState(() {
+          if (i == 1 && _index != 1) {
+            _openChatLogin = null;
+            _openChatAvatarUrl = null;
+            _chatsOverviewToken++;
+          }
+          _index = i;
+        });
+      },
+      destinations: [
+        for (final d in destinations)
+          NavigationRailDestination(
+            icon: Icon(d.icon),
+            selectedIcon: Icon(d.icon),
+            label: Text(d.label),
+          ),
+      ],
+    );
+  }
+
   Future<void> _logout() async {
     // Reset E2EE scope immediately so any late async tasks won't read/write
     // keys/sessions under the wrong user after logout.
@@ -2888,13 +2924,34 @@ class _DashboardPageState extends State<DashboardPage> {
           _ProfileTab(vibrationEnabled: settings.vibrationEnabled),
         ];
 
+        final useLeftMenu = kIsWeb && MediaQuery.of(context).size.width >= 1000;
+
         return WillPopScope(
           onWillPop: _onWillPop,
-          child: Scaffold(
-            appBar: _pillAppBar(context),
-            body: pages[_index],
-            bottomNavigationBar: _pillBottomNav(context, vibrationEnabled: settings.vibrationEnabled),
-          ),
+          child: useLeftMenu
+              ? Scaffold(
+                  body: SafeArea(
+                    child: Row(
+                      children: [
+                        _leftSideNav(context, vibrationEnabled: settings.vibrationEnabled),
+                        const VerticalDivider(width: 1),
+                        Expanded(
+                          child: Column(
+                            children: [
+                              _pillAppBar(context),
+                              Expanded(child: pages[_index]),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : Scaffold(
+                  appBar: _pillAppBar(context),
+                  body: pages[_index],
+                  bottomNavigationBar: _pillBottomNav(context, vibrationEnabled: settings.vibrationEnabled),
+                ),
         );
       },
     );
@@ -5509,11 +5566,395 @@ class _SettingsDevicesPage extends StatefulWidget {
 class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
   late final Future<String> _localDeviceIdFuture;
   final Set<String> _revoking = <String>{};
+  StreamSubscription<DatabaseEvent>? _pairingSub;
+  String? _pairingToken;
+  String? _pairingError;
+  String? _pairingInfo;
+  bool _pairingBusy = false;
+
+  String _pairingStatusLabel(BuildContext context) {
+    if (_pairingBusy) {
+      return AppLanguage.tr(context, 'Párování: probíhá…', 'Pairing: in progress…');
+    }
+    if (_pairingError != null && _pairingError!.trim().isNotEmpty) {
+      return AppLanguage.tr(context, 'Párování: chyba', 'Pairing: error');
+    }
+    if (_pairingInfo != null && _pairingInfo!.trim().isNotEmpty) {
+      if ((_pairingToken ?? '').isNotEmpty && kIsWeb) {
+        return AppLanguage.tr(context, 'Párování: čeká na sken', 'Pairing: waiting for scan');
+      }
+      if ((_pairingToken ?? '').isNotEmpty && !kIsWeb) {
+        return AppLanguage.tr(context, 'Párování: čeká na odeslání', 'Pairing: waiting to send');
+      }
+      return AppLanguage.tr(context, 'Párování: spárováno', 'Pairing: paired');
+    }
+    return AppLanguage.tr(context, 'Párování: nepřipraveno', 'Pairing: idle');
+  }
 
   @override
   void initState() {
     super.initState();
     _localDeviceIdFuture = _getOrCreateLocalDeviceId();
+  }
+
+  @override
+  void dispose() {
+    _pairingSub?.cancel();
+    super.dispose();
+  }
+
+  String _pairingQrPayload({required String uid, required String token}) {
+    return Uri(
+      scheme: 'gitmit',
+      host: 'device-pair',
+      queryParameters: {
+        'uid': uid,
+        'token': token,
+      },
+    ).toString();
+  }
+
+  ({String uid, String token})? _parsePairingPayload(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    try {
+      final uri = Uri.parse(s);
+      final uid = (uri.queryParameters['uid'] ?? '').trim();
+      final token = (uri.queryParameters['token'] ?? '').trim();
+      if (uid.isEmpty || token.isEmpty) return null;
+
+      final host = uri.host.trim().toLowerCase();
+      final path = uri.path.trim().toLowerCase();
+      final isGitmitPair = uri.scheme == 'gitmit' && (host == 'device-pair' || path.contains('device-pair'));
+      if (!isGitmitPair) return null;
+      return (uid: uid, token: token);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _startWebPairing({required String uid}) async {
+    if (_pairingBusy) return;
+    setState(() {
+      _pairingBusy = true;
+      _pairingError = null;
+      _pairingInfo = null;
+      _pairingToken = null;
+    });
+
+    await _pairingSub?.cancel();
+    _pairingSub = null;
+
+    try {
+      final token = rtdb().ref().push().key ?? DateTime.now().millisecondsSinceEpoch.toString();
+      final expiresAt = DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch;
+      final ref = rtdb().ref('deviceKeyTransfers/$uid/$token');
+      await ref.set({
+        'status': 'waiting',
+        'createdAt': ServerValue.timestamp,
+        'expiresAt': expiresAt,
+      });
+
+      _pairingSub = ref.onValue.listen((event) async {
+        final v = event.snapshot.value;
+        if (v is! Map) return;
+        final m = Map<String, dynamic>.from(v);
+        final status = (m['status'] ?? '').toString();
+        if (status != 'ready') return;
+
+        final payloadRaw = m['payload'];
+        if (payloadRaw is! Map) {
+          if (mounted) {
+            setState(() {
+              _pairingError = AppLanguage.tr(context, 'Párovací data jsou neplatná.', 'Pairing payload is invalid.');
+            });
+          }
+          return;
+        }
+
+        final asMap = Map<dynamic, dynamic>.from(payloadRaw);
+        final material = <String, String>{};
+        final importedPt = <String, String>{};
+
+        final nestedE2ee = asMap['e2ee'];
+        if (nestedE2ee is Map) {
+          for (final e in nestedE2ee.entries) {
+            final k = e.key.toString();
+            final val = (e.value ?? '').toString();
+            if (k.trim().isEmpty || val.trim().isEmpty) continue;
+            material[k] = val;
+          }
+        } else {
+          // Backward compatibility: old flat payload format.
+          for (final e in asMap.entries) {
+            final k = e.key.toString();
+            final val = (e.value ?? '').toString();
+            if (k.trim().isEmpty || val.trim().isEmpty) continue;
+            material[k] = val;
+          }
+        }
+
+        final nestedPt = asMap['ptcache'];
+        if (nestedPt is Map) {
+          for (final e in nestedPt.entries) {
+            final k = e.key.toString();
+            final val = (e.value ?? '').toString();
+            if (k.trim().isEmpty || val.trim().isEmpty) continue;
+            importedPt[k] = val;
+          }
+        }
+
+        if (material.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _pairingError = AppLanguage.tr(context, 'Párovací data neobsahují žádné klíče.', 'Pairing payload contains no keys.');
+            });
+          }
+          return;
+        }
+
+        await E2ee.importDeviceKeyMaterial(material);
+        if (importedPt.isNotEmpty) {
+          await PlaintextCache.importEntries(importedPt);
+        }
+        await E2ee.publishMyPublicKey(uid: uid);
+        await _rebuildWebPlaintextCache(uid: uid);
+        await ref.update({
+          'status': 'completed',
+          'completedAt': ServerValue.timestamp,
+        });
+
+        if (mounted) {
+          setState(() {
+            _pairingInfo = AppLanguage.tr(
+              context,
+              'Klíče byly úspěšně přeneseny. Otevři chat znovu, aby se obnovilo dešifrování.',
+              'Keys were transferred successfully. Reopen chats to refresh decryption.',
+            );
+            _pairingBusy = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_pairingInfo!)),
+          );
+        }
+      });
+
+      if (mounted) {
+        setState(() {
+          _pairingToken = token;
+          _pairingBusy = false;
+          _pairingInfo = AppLanguage.tr(
+            context,
+            'Naskenuj QR kód v mobilní aplikaci v Nastavení > Zařízení.',
+            'Scan this QR code in the mobile app at Settings > Devices.',
+          );
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _pairingBusy = false;
+          _pairingError = '${AppLanguage.tr(context, 'Párování selhalo', 'Pairing failed')}: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _scanAndSendKeysToWeb({required String uid}) async {
+    if (_pairingBusy) return;
+
+    final raw = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const ScanQrPage()),
+    );
+    if (!mounted || raw == null || raw.trim().isEmpty) return;
+
+    final parsed = _parsePairingPayload(raw);
+    if (parsed == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLanguage.tr(context, 'Neplatný párovací QR kód.', 'Invalid pairing QR code.'))),
+      );
+      return;
+    }
+
+    if (parsed.uid != uid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLanguage.tr(context, 'QR kód patří jinému účtu.', 'QR code belongs to a different account.'))),
+      );
+      return;
+    }
+
+    setState(() {
+      _pairingBusy = true;
+      _pairingError = null;
+      _pairingInfo = null;
+    });
+
+    try {
+      final ref = rtdb().ref('deviceKeyTransfers/$uid/${parsed.token}');
+      final snap = await ref.get();
+      final v = snap.value;
+      if (v is! Map) {
+        throw Exception(AppLanguage.tr(context, 'Párovací relace neexistuje.', 'Pairing session not found.'));
+      }
+      final m = Map<String, dynamic>.from(v);
+      final expiresAt = (m['expiresAt'] is int) ? m['expiresAt'] as int : int.tryParse((m['expiresAt'] ?? '').toString()) ?? 0;
+      if (expiresAt > 0 && DateTime.now().millisecondsSinceEpoch > expiresAt) {
+        throw Exception(AppLanguage.tr(context, 'Párovací QR vypršel. Vygeneruj nový.', 'Pairing QR expired. Generate a new one.'));
+      }
+
+      await PlaintextCache.flushNow();
+      final material = await E2ee.exportDeviceKeyMaterial();
+      if (material.isEmpty) {
+        throw Exception(AppLanguage.tr(context, 'Na tomto zařízení nejsou dostupné žádné klíče k přenosu.', 'No keys available to transfer on this device.'));
+      }
+
+      final ptCache = await PlaintextCache.exportAllEntries(maxEntries: 1500);
+
+      final deviceId = await _getOrCreateLocalDeviceId();
+      await ref.update({
+        'status': 'ready',
+        'providedAt': ServerValue.timestamp,
+        'fromDeviceId': deviceId,
+        'payload': {
+          'e2ee': material,
+          'ptcache': ptCache,
+        },
+      });
+
+      if (mounted) {
+        setState(() {
+          _pairingBusy = false;
+          _pairingInfo = AppLanguage.tr(
+            context,
+            'Klíče byly odeslány do webu. Na webu počkej na potvrzení importu.',
+            'Keys were sent to web. Wait for import confirmation on web.',
+          );
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_pairingInfo!)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _pairingBusy = false;
+          _pairingError = '${AppLanguage.tr(context, 'Přenos klíčů selhal', 'Key transfer failed')}: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _rebuildWebPlaintextCache({required String uid}) async {
+    try {
+      final peerUidByLoginLower = <String, String?>{};
+
+      final dmRootSnap = await rtdb().ref('messages/$uid').get();
+      final dmRootVal = dmRootSnap.value;
+      final dmRoot = (dmRootVal is Map) ? dmRootVal : null;
+      if (dmRoot != null) {
+        for (final threadEntry in dmRoot.entries) {
+          final login = threadEntry.key.toString().trim();
+          final loginLower = login.toLowerCase();
+          if (loginLower.isEmpty) continue;
+
+          if (!peerUidByLoginLower.containsKey(loginLower)) {
+            final peerSnap = await rtdb().ref('usernames/$loginLower').get();
+            peerUidByLoginLower[loginLower] = peerSnap.value?.toString();
+          }
+
+          final peerUid = peerUidByLoginLower[loginLower] ?? '';
+          final threadRaw = threadEntry.value;
+          if (threadRaw is! Map) continue;
+
+          for (final msgEntry in threadRaw.entries) {
+            final key = msgEntry.key.toString();
+            final raw = msgEntry.value;
+            if (key.isEmpty || raw is! Map) continue;
+
+            final m = Map<String, dynamic>.from(raw);
+            final text = (m['text'] ?? '').toString();
+            if (text.isNotEmpty) {
+              PlaintextCache.putDm(otherLoginLower: loginLower, messageKey: key, plaintext: text);
+              continue;
+            }
+
+            final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
+            if (!hasCipher) continue;
+            final cached = PlaintextCache.tryGetDm(otherLoginLower: loginLower, messageKey: key);
+            if (cached != null && cached.isNotEmpty) continue;
+
+            final fromUid = (m['fromUid'] ?? '').toString();
+            final otherUid = (fromUid == uid) ? peerUid : (fromUid.isNotEmpty ? fromUid : peerUid);
+            if (otherUid.isEmpty) continue;
+
+            try {
+              final plain = await E2ee.decryptFromUser(otherUid: otherUid, message: m);
+              PlaintextCache.putDm(otherLoginLower: loginLower, messageKey: key, plaintext: plain);
+            } catch (_) {
+              // best-effort
+            }
+          }
+        }
+      }
+
+      final ugSnap = await rtdb().ref('userGroups/$uid').get();
+      final ugVal = ugSnap.value;
+      final ugMap = (ugVal is Map) ? ugVal : null;
+      if (ugMap != null) {
+        for (final entry in ugMap.entries) {
+          if (entry.value != true) continue;
+          final groupId = entry.key.toString();
+          if (groupId.isEmpty) continue;
+
+          SecretKey? groupKey;
+          try {
+            groupKey = await E2ee.fetchGroupKey(groupId: groupId, myUid: uid);
+          } catch (_) {
+            groupKey = null;
+          }
+
+          final gSnap = await rtdb().ref('groupMessages/$groupId').get();
+          final gVal = gSnap.value;
+          final gMap = (gVal is Map) ? gVal : null;
+          if (gMap == null) continue;
+
+          for (final msgEntry in gMap.entries) {
+            final key = msgEntry.key.toString();
+            final raw = msgEntry.value;
+            if (key.isEmpty || raw is! Map) continue;
+
+            final m = Map<String, dynamic>.from(raw);
+            final text = (m['text'] ?? '').toString();
+            if (text.isNotEmpty) {
+              PlaintextCache.putGroup(groupId: groupId, messageKey: key, plaintext: text);
+              continue;
+            }
+
+            final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
+            if (!hasCipher) continue;
+            final cached = PlaintextCache.tryGetGroup(groupId: groupId, messageKey: key);
+            if (cached != null && cached.isNotEmpty) continue;
+
+            try {
+              final plain = await E2ee.decryptGroupMessage(
+                groupId: groupId,
+                myUid: uid,
+                groupKey: groupKey,
+                message: m,
+              );
+              PlaintextCache.putGroup(groupId: groupId, messageKey: key, plaintext: plain);
+            } catch (_) {
+              // best-effort
+            }
+          }
+        }
+      }
+
+      await PlaintextCache.flushNow();
+      await rtdb().ref('users/$uid').update({'e2eeCacheRebuiltAt': ServerValue.timestamp});
+    } catch (_) {
+      // best-effort rebuild
+    }
   }
 
   String _lastSeenLabel(int ms) {
@@ -5696,6 +6137,73 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
                         uid: current.uid,
                       ),
                     ),
+
+                  const SizedBox(height: 16),
+                  Text(t(context, 'Přenos E2EE klíčů', 'E2EE key transfer'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            t(
+                              context,
+                              'Párování zařízení přes QR (fingerprint + klíče) pro dešifrování chatů na více zařízeních.',
+                              'Pair devices via QR (fingerprint + keys) to decrypt chats across devices.',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _pairingStatusLabel(context),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: _pairingError != null
+                                  ? Theme.of(context).colorScheme.error
+                                  : Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (kIsWeb) ...[
+                            OutlinedButton.icon(
+                              onPressed: _pairingBusy ? null : () => _startWebPairing(uid: current.uid),
+                              icon: _pairingBusy
+                                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Icon(Icons.qr_code_2),
+                              label: Text(t(context, 'Vytvořit párovací QR', 'Create pairing QR')),
+                            ),
+                            if (_pairingToken != null) ...[
+                              const SizedBox(height: 10),
+                              Center(
+                                child: QrImageView(
+                                  data: _pairingQrPayload(uid: current.uid, token: _pairingToken!),
+                                  size: 210,
+                                  backgroundColor: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ] else ...[
+                            OutlinedButton.icon(
+                              onPressed: _pairingBusy ? null : () => _scanAndSendKeysToWeb(uid: current.uid),
+                              icon: _pairingBusy
+                                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Icon(Icons.qr_code_scanner),
+                              label: Text(t(context, 'Naskenovat párovací QR z webu', 'Scan pairing QR from web')),
+                            ),
+                          ],
+                          if (_pairingInfo != null) ...[
+                            const SizedBox(height: 8),
+                            Text(_pairingInfo!),
+                          ],
+                          if (_pairingError != null) ...[
+                            const SizedBox(height: 8),
+                            Text(_pairingError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
 
                   const SizedBox(height: 16),
                   OutlinedButton(
@@ -7115,6 +7623,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   String? _groupTypingGroupId;
   late final AnimationController _typingAnim;
   bool _prewarmDecryptStarted = false;
+  bool _prewarmGroupDecryptStarted = false;
   final Set<String> _inlineKeyRequestSent = <String>{};
   bool _sendingInlineKeyRequest = false;
   final Map<String, bool> _peerHasPublishedKey = <String, bool>{};
@@ -8027,6 +8536,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     _activeAvatarUrl = widget.initialOpenAvatarUrl;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prewarmDmDecryptAfterJoin();
+      _prewarmGroupDecryptAfterJoin();
     });
   }
 
@@ -8158,7 +8668,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           return bt.compareTo(at);
         });
 
-        for (final m in items.take(60)) {
+        for (final m in items) {
           if (!mounted) return;
 
           final key = (m['__key'] ?? '').toString();
@@ -8185,6 +8695,85 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           }
         }
       }
+    } catch (_) {
+      // best-effort
+    }
+  }
+
+  Future<void> _prewarmGroupDecryptAfterJoin() async {
+    if (_prewarmGroupDecryptStarted) return;
+    _prewarmGroupDecryptStarted = true;
+
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final myUid = current.uid;
+
+    try {
+      final ugSnap = await rtdb().ref('userGroups/$myUid').get();
+      final ugv = ugSnap.value;
+      final ugm = (ugv is Map) ? ugv : null;
+      if (ugm == null || ugm.isEmpty) return;
+
+      final groupIds = <String>[];
+      for (final e in ugm.entries) {
+        if (e.value == true) {
+          groupIds.add(e.key.toString());
+        }
+      }
+
+      for (final groupId in groupIds) {
+        if (!mounted) return;
+        if (groupId.trim().isEmpty) continue;
+
+        SecretKey? gk;
+        try {
+          gk = await E2ee.fetchGroupKey(groupId: groupId, myUid: myUid);
+          if (gk != null) {
+            _groupKeyCache[groupId] = gk;
+          }
+        } catch (_) {
+          gk = null;
+        }
+
+        final snap = await rtdb().ref('groupMessages/$groupId').get();
+        final vv = snap.value;
+        final root = (vv is Map) ? vv : null;
+        if (root == null || root.isEmpty) continue;
+
+        for (final entry in root.entries) {
+          if (!mounted) return;
+          final key = entry.key.toString();
+          final raw = entry.value;
+          if (key.isEmpty || raw is! Map) continue;
+
+          final m = Map<String, dynamic>.from(raw);
+          final plaintext = (m['text'] ?? '').toString();
+          if (plaintext.isNotEmpty) {
+            PlaintextCache.putGroup(groupId: groupId, messageKey: key, plaintext: plaintext);
+            continue;
+          }
+
+          final hasCipher = ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])?.toString().isNotEmpty ?? false);
+          if (!hasCipher) continue;
+
+          final persisted = PlaintextCache.tryGetGroup(groupId: groupId, messageKey: key);
+          if (persisted != null && persisted.isNotEmpty) continue;
+
+          try {
+            final plain = await E2ee.decryptGroupMessage(
+              groupId: groupId,
+              myUid: myUid,
+              groupKey: gk,
+              message: m,
+            );
+            PlaintextCache.putGroup(groupId: groupId, messageKey: key, plaintext: plain);
+          } catch (_) {
+            // best-effort
+          }
+        }
+      }
+
+      await PlaintextCache.flushNow();
     } catch (_) {
       // best-effort
     }
