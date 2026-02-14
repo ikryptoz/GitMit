@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -252,6 +253,7 @@ class DataUsageTracker {
   }
 
   static Future<bool?> _isRoaming() async {
+    if (kIsWeb) return null;
     if (!Platform.isAndroid) return null;
     try {
       return await _networkChannel.invokeMethod<bool>('isRoaming');

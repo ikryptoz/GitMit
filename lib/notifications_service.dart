@@ -20,6 +20,7 @@ class AppNotifications {
     defaultValue: 'https://us-central1-githubmessenger-7d2c6.cloudfunctions.net/notifyOnlinePresence',
   );
   static const String _onlineNotifyBackendToken = String.fromEnvironment('GITMIT_NOTIFY_BACKEND_TOKEN', defaultValue: '');
+  static const String _webPushVapidKey = String.fromEnvironment('GITMIT_WEB_PUSH_VAPID_KEY', defaultValue: '');
 
   static const _storage = FlutterSecureStorage();
   static const _fcmLastTokenPrefix = 'fcm_last_token_v1_';
@@ -67,7 +68,7 @@ class AppNotifications {
     final key = _tokenKey(token);
     await rtdb().ref('fcmTokens/$uid/$key').set({
       'token': token,
-      'platform': Platform.operatingSystem,
+      'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       'updatedAt': ServerValue.timestamp,
     });
     await _writeLastToken(uid, token);
@@ -76,15 +77,17 @@ class AppNotifications {
   static Future<void> initialize() async {
     if (_initialized) return;
 
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
-    const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
+    if (!kIsWeb) {
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const iosInit = DarwinInitializationSettings();
+      const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
 
-    await _local.initialize(initSettings);
+      await _local.initialize(initSettings);
 
-    if (Platform.isAndroid) {
-      final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      await android?.createNotificationChannel(_channel);
+      if (Platform.isAndroid) {
+        final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+        await android?.createNotificationChannel(_channel);
+      }
     }
 
     // Ask permissions (iOS + Android 13+).
@@ -96,6 +99,13 @@ class AppNotifications {
       final title = message.notification?.title ?? 'GitMit';
       final body = message.notification?.body ?? '';
       if (body.trim().isEmpty) return;
+
+      if (kIsWeb) {
+        if (!kReleaseMode) {
+          debugPrint('[NotifyOnline][Web] $title: $body');
+        }
+        return;
+      }
 
       final androidDetails = AndroidNotificationDetails(
         _channel.id,
@@ -138,9 +148,15 @@ class AppNotifications {
 
     // Store token(s) for server-side sending (Cloud Functions, etc.).
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = kIsWeb
+          ? await FirebaseMessaging.instance.getToken(
+              vapidKey: _webPushVapidKey.trim().isEmpty ? null : _webPushVapidKey.trim(),
+            )
+          : await FirebaseMessaging.instance.getToken();
       if (token != null && token.isNotEmpty) {
         await _storeTokenForUser(user.uid, token);
+      } else if (kIsWeb && !kReleaseMode) {
+        debugPrint('[NotifyOnline][Web] FCM token is empty. Set --dart-define=GITMIT_WEB_PUSH_VAPID_KEY=...');
       }
 
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {

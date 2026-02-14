@@ -1,198 +1,23 @@
 <!DOCTYPE html>
-<html lang="cs">
-
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitMit Web</title>
-    <link rel="icon" type="image/png" href="logo.png">
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap"
-        rel="stylesheet">
-    <!-- CSS -->
-    <link rel="stylesheet" href="style.css">
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="GitMit Flutter web app">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>GitMit</title>
 </head>
-
 <body>
-    <div id="app" class="app-container">
-        <!-- Vertical Nav Bar (Far Left) -->
-        <nav class="nav-bar">
-            <div class="nav-top">
-                <div class="nav-item active" title="Chaty" id="nav-chats">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                </div>
-                <div class="nav-item" title="Skupiny" id="nav-groups">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                        <circle cx="9" cy="7" r="4"></circle>
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-                    </svg>
-                </div>
-                <div class="nav-item" title="Hledat" id="nav-search">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                </div>
-            </div>
-            <div class="nav-bottom">
-                <div class="nav-item" title="Nastavení" id="nav-settings">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon">
-                        <circle cx="12" cy="12" r="3"></circle>
-                        <path
-                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
-                        </path>
-                    </svg>
-                </div>
-                <div class="user-profile">
-                    <img src="https://github.com/identicons/gitmit.png" alt="Profile" id="user-avatar"
-                        class="avatar-sm">
-                </div>
-            </div>
-        </nav>
-
-        <!-- Side Bar (Middle Left) -->
-        <aside class="side-bar">
-            <header class="side-bar-header">
-                <h1>GitMit</h1>
-                <button class="btn-icon" id="new-chat-btn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon-sm">
-                        <path d="M12 5v14M5 12h14"></path>
-                    </svg>
-                </button>
-            </header>
-            <div class="search-container">
-                <div class="search-input-wrapper">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon-xs search-icon">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <input type="text" placeholder="Hledat uživatele na GitHubu..." id="sidebar-search">
-                </div>
-                <div id="search-results" class="search-results hidden"></div>
-            </div>
-            <div class="chat-list" id="chat-list">
-                <!-- Chat items will be loaded here -->
-                <div class="chat-item-placeholder">Načítám chaty...</div>
-            </div>
-        </aside>
-
-        <!-- Main Content (Center) -->
-        <main class="main-content">
-            <header class="main-header" id="main-header">
-                <div class="chat-info">
-                    <img src="https://github.com/identicons/gitmit.png" alt="Chat Avatar" class="avatar-sm"
-                        id="active-chat-avatar">
-                    <div class="chat-meta">
-                        <h2 id="active-chat-name">Vyberte chat</h2>
-                        <span id="active-chat-status" class="status-text">...</span>
-                    </div>
-                </div>
-                <div class="header-actions">
-                    <button class="btn-icon" id="info-toggle">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                            stroke-linecap="round" stroke-linejoin="round" class="icon-sm">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <line x1="12" y1="16" x2="12" y2="12"></line>
-                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                        </svg>
-                    </button>
-                </div>
-            </header>
-            <div class="messages-container" id="messages-container">
-                <!-- Messages will be loaded here -->
-                <div class="empty-state">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon-xl">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                    <p>Začněte novou konverzaci</p>
-                </div>
-            </div>
-            <footer class="message-input-container">
-                <div class="input-wrapper">
-                    <button class="btn-icon" id="attach-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                            stroke-linecap="round" stroke-linejoin="round" class="icon-sm">
-                            <path
-                                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48">
-                            </path>
-                        </svg>
-                    </button>
-                    <textarea placeholder="Napište zprávu..." id="message-input" rows="1"></textarea>
-                    <button class="btn-icon btn-send" id="send-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                            stroke-linecap="round" stroke-linejoin="round" class="icon-sm">
-                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                        </svg>
-                    </button>
-                </div>
-            </footer>
-        </main>
-
-        <!-- Info Panel (Right) -->
-        <aside class="info-panel" id="info-panel">
-            <header class="info-panel-header">
-                <h3>Informace</h3>
-                <button class="btn-icon" id="info-close">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" class="icon-sm">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-            </header>
-            <div class="info-content">
-                <div class="user-detail">
-                    <img src="https://github.com/identicons/gitmit.png" alt="Avatar" class="avatar-lg" id="info-avatar">
-                    <h2 id="info-name">GitMit User</h2>
-                    <p id="info-login">@username</p>
-                </div>
-                <div class="info-stats">
-                    <!-- Stats will be loaded here -->
-                </div>
-                <div class="github-activity">
-                    <h4>Aktivita na GitHubu</h4>
-                    <div id="github-contributions-container">
-                        <!-- Contribution chart will be loaded here -->
-                    </div>
-                </div>
-            </div>
-        </aside>
-    </div>
-
-    <!-- Firebase Scripts (Compat Version for ease of migration from mobile logic) -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
-
-    <!-- App Script -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/libsodium-wrappers/0.7.13/sodium.min.js"></script>
-    <script>
-        // Emergency check for sodium
-        window.addEventListener('load', () => {
-            if (typeof sodium === 'undefined' && typeof window.sodium === 'undefined') {
-                console.error("CRITICAL: Libsodium failed to load from UNPKG.");
-            } else {
-                console.log("Libsodium library detected.");
-            }
-        });
-    </script>
-    <script type="module" src="js/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/firebase-messaging-sw.js');
+      });
+    }
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
 </body>
-
 </html>

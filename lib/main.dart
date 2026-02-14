@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,13 +14,14 @@ import 'package:gitmit/github_api.dart';
 import 'package:gitmit/e2ee.dart';
 import 'package:gitmit/plaintext_cache.dart';
 import 'package:gitmit/data_usage.dart';
+import 'package:gitmit/firebase_options.dart';
 import 'dart:async';
 import 'dart:convert';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await PlaintextCache.init();
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await AppNotifications.initialize();
   await DeepLinks.initialize();
   runApp(const MyApp());
@@ -313,7 +315,25 @@ class _LoginPageState extends State<LoginPage> {
     }
     try {
       final provider = GithubAuthProvider()..addScope('read:user');
-      final credential = await FirebaseAuth.instance.signInWithProvider(provider);
+      UserCredential credential;
+
+      if (kIsWeb) {
+        try {
+          credential = await FirebaseAuth.instance.signInWithPopup(provider);
+        } on FirebaseAuthException catch (_) {
+          await FirebaseAuth.instance.signInWithRedirect(provider);
+          if (mounted) {
+            setState(() => _errorMessage = AppLanguage.tr(
+                  context,
+                  'Probíhá přesměrování na GitHub přihlášení…',
+                  'Redirecting to GitHub sign-in…',
+                ));
+          }
+          return;
+        }
+      } else {
+        credential = await FirebaseAuth.instance.signInWithProvider(provider);
+      }
 
       final user = credential.user;
       String? githubUsername = credential.additionalUserInfo?.username;
@@ -395,7 +415,15 @@ class _LoginPageState extends State<LoginPage> {
       // Navigation is handled by AuthGate reacting to authStateChanges.
       // Avoid pushing a second Dashboard route (can lead to odd initial state).
     } on FirebaseAuthException catch (e) {
-      if (mounted) setState(() => _errorMessage = e.message);
+      if (mounted) {
+        setState(
+          () => _errorMessage = e.message ?? AppLanguage.tr(
+            context,
+            'Přihlášení přes GitHub selhalo. Zkontroluj, že je GitHub provider povolený ve Firebase Authentication.',
+            'GitHub sign-in failed. Check that the GitHub provider is enabled in Firebase Authentication.',
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) setState(() => _errorMessage = e.toString());
     } finally {

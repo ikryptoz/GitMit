@@ -2851,7 +2851,7 @@ class _DashboardPageState extends State<DashboardPage> {
         await sessionRef.set({
           'online': online,
           'status': _presenceStatus,
-          'platform': Platform.operatingSystem,
+          'platform': _devicePlatformLabel(),
           'lastSeenAt': ServerValue.timestamp,
         });
       }

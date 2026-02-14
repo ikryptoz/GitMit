@@ -8,8 +8,7 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      // Web not configured in this project
-      throw UnsupportedError('DefaultFirebaseOptions are not supported for web.');
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
@@ -41,5 +40,15 @@ class DefaultFirebaseOptions {
     projectId: '',
     databaseURL: '',
     storageBucket: '',
+  );
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyCWyRZxUiKd94ZPLSiqZoVOf88d8qeRGMo',
+    appId: '1:232503661603:web:26bab1ef5fec7310270d96',
+    messagingSenderId: '232503661603',
+    projectId: 'githubmessenger-7d2c6',
+    authDomain: 'githubmessenger-7d2c6.firebaseapp.com',
+    databaseURL: 'https://githubmessenger-7d2c6-default-rtdb.firebaseio.com',
+    storageBucket: 'githubmessenger-7d2c6.appspot.com',
   );
 }
