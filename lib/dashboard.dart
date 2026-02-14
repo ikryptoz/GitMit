@@ -31,8 +31,143 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:highlight/highlight.dart' as highlight;
 import 'package:http/http.dart' as http;
 
-const String _githubDmFallbackUrl = String.fromEnvironment('GITMIT_GITHUB_NOTIFY_URL', defaultValue: '');
-const String _githubDmFallbackToken = String.fromEnvironment('GITMIT_GITHUB_NOTIFY_TOKEN', defaultValue: '');
+const String _githubDmFallbackUrl = String.fromEnvironment(
+  'GITMIT_GITHUB_NOTIFY_URL',
+  defaultValue: 'https://us-central1-githubmessenger-7d2c6.cloudfunctions.net/notifyOnlinePresence',
+);
+const String _githubDmFallbackTokenPrimary = String.fromEnvironment('GITMIT_GITHUB_NOTIFY_TOKEN', defaultValue: '');
+const String _githubDmFallbackTokenCompat = String.fromEnvironment('GITMIT_NOTIFY_BACKEND_TOKEN', defaultValue: '');
+String get _githubDmFallbackToken =>
+    _githubDmFallbackTokenPrimary.trim().isNotEmpty ? _githubDmFallbackTokenPrimary : _githubDmFallbackTokenCompat;
+
+class _InviteSendResult {
+  const _InviteSendResult({required this.ok, this.error, this.manualFallbackUsed = false});
+
+  final bool ok;
+  final String? error;
+  final bool manualFallbackUsed;
+}
+
+Uri _manualGithubInviteUri({
+  required String targetLogin,
+  required String fromLogin,
+  required String preview,
+}) {
+  final repoFull = const String.fromEnvironment(
+    'GITMIT_GITHUB_NOTIFY_REPO',
+    defaultValue: 'ikryptoz/GitMit',
+  ).trim();
+  final appUrl = const String.fromEnvironment(
+    'GITMIT_APP_URL',
+    defaultValue: 'https://github.com/ikryptoz/GitMit',
+  ).trim();
+
+  final safeRepo = repoFull.contains('/') ? repoFull : 'ikryptoz/GitMit';
+  final body = [
+    '@$targetLogin',
+    'You have a new GitMit invite from @$fromLogin.',
+    preview.trim().isNotEmpty ? preview.trim() : 'Please install GitMit to continue the conversation.',
+    if (appUrl.isNotEmpty) 'Download GitMit: $appUrl',
+  ].join('\n\n');
+
+  return Uri.https(
+    'github.com',
+    '/$safeRepo/issues/new',
+    {
+      'title': 'GitMit invite for @$targetLogin',
+      'body': body,
+    },
+  );
+}
+
+Future<bool> _openManualGithubInvite({
+  required String targetLogin,
+  required String fromLogin,
+  required String preview,
+}) async {
+  final uri = _manualGithubInviteUri(
+    targetLogin: targetLogin,
+    fromLogin: fromLogin,
+    preview: preview,
+  );
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    return true;
+  }
+  return false;
+}
+
+String _inviteErrorFromHttp({required int statusCode, required Uri uri, required String body}) {
+  final compactBody = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+  final shortBody = compactBody.length > 220 ? '${compactBody.substring(0, 220)}…' : compactBody;
+
+  if (statusCode == 401) {
+    return '401 Unauthorized – zkontroluj BACKEND_API_KEY / GITMIT_NOTIFY_BACKEND_TOKEN.';
+  }
+  if (statusCode == 404) {
+    return '404 Not Found – endpoint/funkce není dostupná: $uri (zkus `firebase deploy --only functions` ve správném projektu).';
+  }
+  if (statusCode >= 500) {
+    return 'Server error $statusCode – $shortBody';
+  }
+  return 'HTTP $statusCode – $shortBody';
+}
+
+List<Uri> _inviteBackendUris(String endpoint) {
+  final raw = endpoint.trim();
+  if (raw.isEmpty) return const <Uri>[];
+
+  Uri? parsed;
+  try {
+    parsed = Uri.parse(raw);
+  } catch (_) {
+    return const <Uri>[];
+  }
+
+  final candidates = <String>{raw};
+  final path = parsed.path;
+  final looksLikeFunctionsHost = parsed.host.contains('cloudfunctions.net');
+
+  final origin = '${parsed.scheme}://${parsed.host}';
+  final normalizedPath = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
+
+  String basePath = normalizedPath;
+  const knownSuffixes = <String>[
+    '/notifyOnlinePresence',
+    '/notify-online',
+    '/api/notifyOnlinePresence',
+    '/api/notify-online',
+  ];
+  for (final suffix in knownSuffixes) {
+    if (basePath.endsWith(suffix)) {
+      basePath = basePath.substring(0, basePath.length - suffix.length);
+      break;
+    }
+  }
+
+  final base = '$origin$basePath';
+  final baseWithSlash = base.endsWith('/') ? base : '$base/';
+
+  candidates.add('${baseWithSlash}notifyOnlinePresence');
+  candidates.add('${baseWithSlash}notify-online');
+  candidates.add('${baseWithSlash}api/notifyOnlinePresence');
+  candidates.add('${baseWithSlash}api/notify-online');
+
+  if (looksLikeFunctionsHost) {
+    candidates.add('$origin/notifyOnlinePresence');
+    candidates.add('$origin/notify-online');
+  }
+
+  final uris = <Uri>[];
+  for (final candidate in candidates) {
+    try {
+      uris.add(Uri.parse(candidate));
+    } catch (_) {
+      // ignore invalid candidate
+    }
+  }
+  return uris;
+}
 
 Future<String> _uploadGroupLogo({required String groupId, required Uint8List bytes}) async {
   String normalizeBucket(String b) {
@@ -634,14 +769,15 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     required String message,
     required Future<void> Function() action,
   }) async {
+    final t = AppLanguage.tr;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
         content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Pokračovat')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t(context, 'Zrušit', 'Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(t(context, 'Pokračovat', 'Continue'))),
         ],
       ),
     );
@@ -650,11 +786,11 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     try {
       await action();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hotovo.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t(context, 'Hotovo.', 'Done.'))));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
       }
     }
   }
@@ -665,14 +801,15 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     required Future<void> Function() action,
     required String popResult,
   }) async {
+    final t = AppLanguage.tr;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
         content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Pokračovat')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t(context, 'Zrušit', 'Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(t(context, 'Pokračovat', 'Continue'))),
         ],
       ),
     );
@@ -685,7 +822,7 @@ class _UserProfilePageState extends State<_UserProfilePage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
       }
     }
   }
@@ -1196,13 +1333,14 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
   }
 
   Future<void> _create() async {
+    final t = AppLanguage.tr;
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) return;
 
     final title = _title.text.trim();
     final desc = _description.text.trim();
     if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vyplň název skupiny.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t(context, 'Vyplň název skupiny.', 'Fill in group title.'))));
       return;
     }
 
@@ -1224,7 +1362,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
           logoUrl = null;
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Logo se nepodařilo nahrát (skupina se vytvoří i tak): $e')),
+              SnackBar(content: Text('${t(context, 'Logo se nepodařilo nahrát (skupina se vytvoří i tak)', 'Logo upload failed (group will still be created)')}: $e')),
             );
           }
         }
@@ -1279,14 +1417,14 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       if (!mounted) return;
       if (missing.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Nenalezeno v aplikaci: ${missing.map((e) => '@$e').join(', ')}')),
+          SnackBar(content: Text('${t(context, 'Nenalezeno v aplikaci', 'Not found in app')}: ${missing.map((e) => '@$e').join(', ')}')),
         );
       }
 
       Navigator.of(context).pop(groupId);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1582,7 +1720,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logo se nepodařilo nahrát: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${AppLanguage.tr(context, 'Logo se nepodařilo nahrát', 'Failed to upload logo')}: $e')));
     }
   }
 
@@ -1982,7 +2120,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 Navigator.of(context).pop('left');
                               },
                               icon: const Icon(Icons.logout),
-                              label: const Text('Odejít / smazat'),
+                              label: Text(t(context, 'Odejít / smazat', 'Leave / delete')),
                             ),
                           ],
                         ),
@@ -2311,6 +2449,65 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Future<_InviteSendResult> _notifyGithubInviteForNonGitmit({
+    required String targetLogin,
+    required String fromLogin,
+  }) async {
+    final endpoint = _githubDmFallbackUrl.trim();
+    if (endpoint.isEmpty) {
+      debugPrint('[GitMitInvite] Missing GITMIT_GITHUB_NOTIFY_URL');
+      return const _InviteSendResult(ok: false, error: 'Missing GITMIT_GITHUB_NOTIFY_URL');
+    }
+
+    final uris = _inviteBackendUris(endpoint);
+    if (uris.isEmpty) {
+      debugPrint('[GitMitInvite] Invalid invite URL: $endpoint');
+      return _InviteSendResult(ok: false, error: 'Invalid invite URL: $endpoint');
+    }
+
+    final preview = 'Message from GitMit app: @$fromLogin wants to chat. You do not have GitMit yet—download it and continue the conversation.';
+    final payload = jsonEncode({
+      'targetLogin': targetLogin,
+      'fromLogin': fromLogin,
+      'preview': preview,
+      'source': 'gitmit-contact-invite',
+    });
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (_githubDmFallbackToken.trim().isNotEmpty) 'Authorization': 'Bearer ${_githubDmFallbackToken.trim()}',
+    };
+
+    String? lastError;
+    for (final uri in uris) {
+      try {
+        final response = await http.post(uri, headers: headers, body: payload);
+        final ok = response.statusCode >= 200 && response.statusCode < 300;
+        if (ok) return const _InviteSendResult(ok: true);
+        lastError = _inviteErrorFromHttp(statusCode: response.statusCode, uri: uri, body: response.body);
+        debugPrint('[GitMitInvite] Backend ${response.statusCode} at $uri: ${response.body}');
+      } catch (e) {
+        lastError = 'Request failed at $uri: $e';
+        debugPrint('[GitMitInvite] Request failed at $uri: $e');
+      }
+    }
+
+    final manualOpened = await _openManualGithubInvite(
+      targetLogin: targetLogin,
+      fromLogin: fromLogin,
+      preview: '@$fromLogin sent you a message in GitMit.',
+    );
+    if (manualOpened) {
+      return _InviteSendResult(
+        ok: true,
+        error: lastError,
+        manualFallbackUsed: true,
+      );
+    }
+
+    return _InviteSendResult(ok: false, error: lastError ?? 'Unknown invite error');
+  }
+
   void _openChat({required String login, required String avatarUrl}) {
     final key = login.trim().toLowerCase();
     if (key.isEmpty) return;
@@ -2325,8 +2522,33 @@ class _DashboardPageState extends State<DashboardPage> {
       if (!mounted) return;
 
       if (uid.isEmpty) {
+        final myLogin = await _myGithubUsernameFromRtdb(current.uid);
+        _InviteSendResult inviteResult = const _InviteSendResult(ok: false);
+        if (myLogin != null && myLogin.trim().isNotEmpty) {
+          try {
+            inviteResult = await _notifyGithubInviteForNonGitmit(
+              targetLogin: login,
+              fromLogin: myLogin.trim(),
+            );
+          } catch (_) {
+            inviteResult = const _InviteSendResult(ok: false, error: 'Request threw exception');
+          }
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Uživatel @$login nepoužívá GitMit (nelze zjistit UID).')),
+          SnackBar(
+            content: Text(
+              inviteResult.ok
+                  ? (inviteResult.manualFallbackUsed
+                        ? AppLanguage.tr(
+                            context,
+                            'Backend invite není dostupný. Otevřel se GitHub formulář s předvyplněnou pozvánkou pro @$login.',
+                            'Backend invite is unavailable. A prefilled GitHub invite form for @$login was opened.',
+                          )
+                        : AppLanguage.tr(context, 'Uživatel @$login není v GitMitu. Poslal se mu GitHub invite od @$myLogin.', 'User @$login is not on GitMit. A GitHub invite from @$myLogin was sent.'))
+                  : '${AppLanguage.tr(context, 'Pozvánku se nepodařilo odeslat', 'Failed to send invite')}: ${inviteResult.error ?? AppLanguage.tr(context, 'neznámá chyba', 'unknown error')}',
+            ),
+          ),
         );
         return;
       }
@@ -2767,8 +2989,8 @@ class _GithubUserSearchSheetState extends State<_GithubUserSearchSheet> {
                 child: TextField(
                   controller: _controller,
                   onChanged: _onChanged,
-                  decoration: const InputDecoration(
-                    labelText: 'Hledat na GitHubu',
+                  decoration: InputDecoration(
+                    labelText: AppLanguage.tr(context, 'Hledat na GitHubu', 'Search on GitHub'),
                     prefixText: '@',
                   ),
                 ),
@@ -3158,48 +3380,56 @@ extension on _JobsAudience {
     }
   }
 
-  String get tabTitle {
+  String tabTitle(BuildContext context) {
     switch (this) {
       case _JobsAudience.seekers:
-        return 'Hledám práci';
+        return AppLanguage.tr(context, 'Hledám práci', 'Looking for work');
       case _JobsAudience.companies:
-        return 'Hledám lidi';
+        return AppLanguage.tr(context, 'Hledám lidi', 'Looking for people');
     }
   }
 
-  String get addLabel {
+  String addLabel(BuildContext context) {
     switch (this) {
       case _JobsAudience.seekers:
-        return 'Přidat profil';
+        return AppLanguage.tr(context, 'Přidat profil', 'Add profile');
       case _JobsAudience.companies:
-        return 'Přidat nabídku';
+        return AppLanguage.tr(context, 'Přidat nabídku', 'Add listing');
     }
   }
 
-  String get composerTitle {
+  String composerTitle(BuildContext context) {
     switch (this) {
       case _JobsAudience.seekers:
-        return 'Nový profil kandidáta';
+        return AppLanguage.tr(context, 'Nový profil kandidáta', 'New candidate profile');
       case _JobsAudience.companies:
-        return 'Nová pracovní nabídka';
+        return AppLanguage.tr(context, 'Nová pracovní nabídka', 'New job listing');
     }
   }
 
-  String get titleHint {
+  String titleHint(BuildContext context) {
     switch (this) {
       case _JobsAudience.seekers:
-        return 'Např. Flutter vývojář / Remote / Senior';
+        return AppLanguage.tr(context, 'Např. Flutter vývojář / Remote / Senior', 'e.g. Flutter developer / Remote / Senior');
       case _JobsAudience.companies:
-        return 'Např. ACME hledá Senior Flutter vývojáře';
+        return AppLanguage.tr(context, 'Např. ACME hledá Senior Flutter vývojáře', 'e.g. ACME is looking for a Senior Flutter developer');
     }
   }
 
-  String get bodyHint {
+  String bodyHint(BuildContext context) {
     switch (this) {
       case _JobsAudience.seekers:
-        return 'Napiš krátké info o sobě, stack, zkušenosti, dostupnost.\n\nPodporujeme emoji, odrážky, odkazy a kód:\n- Dart\n- Flutter\n\n```dart\nprint("hello");\n```';
+        return AppLanguage.tr(
+          context,
+          'Napiš krátké info o sobě, stack, zkušenosti, dostupnost.\n\nPodporujeme emoji, odrážky, odkazy a kód:\n- Dart\n- Flutter\n\n```dart\nprint("hello");\n```',
+          'Write a short intro about yourself, stack, experience, and availability.\n\nWe support emoji, bullet points, links, and code:\n- Dart\n- Flutter\n\n```dart\nprint("hello");\n```',
+        );
       case _JobsAudience.companies:
-        return 'Popiš roli, požadavky, benefity a kontakt.\n\nPodporujeme emoji, odrážky, odkazy a kód:\n- TypeScript\n- CI/CD\n\n```yaml\nname: build\n```';
+        return AppLanguage.tr(
+          context,
+          'Popiš roli, požadavky, benefity a kontakt.\n\nPodporujeme emoji, odrážky, odkazy a kód:\n- TypeScript\n- CI/CD\n\n```yaml\nname: build\n```',
+          'Describe the role, requirements, benefits, and contact details.\n\nWe support emoji, bullet points, links, and code:\n- TypeScript\n- CI/CD\n\n```yaml\nname: build\n```',
+        );
     }
   }
 }
@@ -3425,7 +3655,7 @@ class _JobsTabState extends State<_JobsTab> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                     Text(
-                      editingPost == null ? audience.composerTitle : 'Upravit příspěvek',
+                      editingPost == null ? audience.composerTitle(context) : AppLanguage.tr(context, 'Upravit příspěvek', 'Edit post'),
                       style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 12),
@@ -3434,17 +3664,17 @@ class _JobsTabState extends State<_JobsTab> {
                       textInputAction: TextInputAction.next,
                       maxLength: 140,
                       decoration: InputDecoration(
-                        labelText: 'Title',
-                        hintText: audience.titleHint,
+                        labelText: AppLanguage.tr(context, 'Nadpis', 'Title'),
+                        hintText: audience.titleHint(context),
                       ),
                     ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: stackCtrl,
                       textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'Stack / tagy',
-                        hintText: 'Flutter, Firebase, React, DevOps...',
+                      decoration: InputDecoration(
+                        labelText: AppLanguage.tr(context, 'Stack / tagy', 'Stack / tags'),
+                        hintText: AppLanguage.tr(context, 'Flutter, Firebase, React, DevOps...', 'Flutter, Firebase, React, DevOps...'),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -3453,8 +3683,8 @@ class _JobsTabState extends State<_JobsTab> {
                       minLines: 7,
                       maxLines: 14,
                       decoration: InputDecoration(
-                        labelText: 'Text (Markdown)',
-                        hintText: audience.bodyHint,
+                        labelText: AppLanguage.tr(context, 'Text (Markdown)', 'Text (Markdown)'),
+                        hintText: audience.bodyHint(context),
                         alignLabelWithHint: true,
                       ),
                     ),
@@ -3468,7 +3698,7 @@ class _JobsTabState extends State<_JobsTab> {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: _posting ? null : () => Navigator.of(ctx).pop(),
-                            child: const Text('Zrušit'),
+                            child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -3482,7 +3712,7 @@ class _JobsTabState extends State<_JobsTab> {
                                     final stackTags = _normalizeStackTags(stackCtrl.text);
                                     if (title.isEmpty || body.isEmpty) {
                                       setLocalState(() {
-                                        localError = 'Vyplň title i text.';
+                                        localError = AppLanguage.tr(context, 'Vyplň nadpis i text.', 'Fill in title and text.');
                                       });
                                       return;
                                     }
@@ -3519,7 +3749,7 @@ class _JobsTabState extends State<_JobsTab> {
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
                                 : Icon(editingPost == null ? Icons.add : Icons.save_outlined),
-                            label: Text(_posting ? 'Ukládám...' : (editingPost == null ? 'Přidat' : 'Uložit')),
+                            label: Text(_posting ? AppLanguage.tr(context, 'Ukládám...', 'Saving...') : (editingPost == null ? AppLanguage.tr(context, 'Přidat', 'Add') : AppLanguage.tr(context, 'Uložit', 'Save'))),
                           ),
                         ),
                       ],
@@ -3548,14 +3778,14 @@ class _JobsTabState extends State<_JobsTab> {
         children: [
           Expanded(
             child: _JobsTabButton(
-              label: _JobsAudience.seekers.tabTitle,
+              label: _JobsAudience.seekers.tabTitle(context),
               selected: _audience == _JobsAudience.seekers,
               onTap: () => setState(() => _audience = _JobsAudience.seekers),
             ),
           ),
           Expanded(
             child: _JobsTabButton(
-              label: _JobsAudience.companies.tabTitle,
+              label: _JobsAudience.companies.tabTitle(context),
               selected: _audience == _JobsAudience.companies,
               onTap: () => setState(() => _audience = _JobsAudience.companies),
             ),
@@ -3600,12 +3830,14 @@ class _JobsTabState extends State<_JobsTab> {
           child: Row(
             children: [
               Text(
-                _audience == _JobsAudience.seekers ? 'Lidé, kteří hledají práci' : 'Firmy, které hledají lidi',
+                _audience == _JobsAudience.seekers
+                  ? AppLanguage.tr(context, 'Lidé, kteří hledají práci', 'People looking for work')
+                  : AppLanguage.tr(context, 'Firmy, které hledají lidi', 'Companies looking for people'),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
               const Spacer(),
               IconButton(
-                tooltip: _audience.addLabel,
+                tooltip: _audience.addLabel(context),
                 onPressed: _posting ? null : () => _openComposer(_audience),
                 icon: const Icon(Icons.add_circle_outline),
               ),
@@ -3634,7 +3866,7 @@ class _JobsTabState extends State<_JobsTab> {
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Text(
-                          'Nepodařilo se načíst Jobs feed. ${postsSnap.error}',
+                          '${AppLanguage.tr(context, 'Nepodařilo se načíst Jobs feed.', 'Failed to load Jobs feed.')} ${postsSnap.error}',
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -3653,8 +3885,8 @@ class _JobsTabState extends State<_JobsTab> {
                         padding: const EdgeInsets.all(20),
                         child: Text(
                           _audience == _JobsAudience.seekers
-                              ? 'Zatím tu nejsou žádné profily. Přidej první přes +.'
-                              : 'Zatím tu nejsou žádné nabídky. Přidej první přes +.',
+                              ? AppLanguage.tr(context, 'Zatím tu nejsou žádné profily. Přidej první přes +.', 'No profiles here yet. Add the first one with +.')
+                              : AppLanguage.tr(context, 'Zatím tu nejsou žádné nabídky. Přidej první přes +.', 'No listings here yet. Add the first one with +.'),
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodyLarge,
                         ),
@@ -3691,16 +3923,16 @@ class _JobsTabState extends State<_JobsTab> {
                                 final ok = await showDialog<bool>(
                                       context: context,
                                       builder: (ctx) => AlertDialog(
-                                        title: const Text('Smazat příspěvek?'),
-                                        content: const Text('Tato akce nejde vrátit zpět.'),
+                                        title: Text(AppLanguage.tr(context, 'Smazat příspěvek?', 'Delete post?')),
+                                        content: Text(AppLanguage.tr(context, 'Tato akce nejde vrátit zpět.', 'This action cannot be undone.')),
                                         actions: [
                                           TextButton(
                                             onPressed: () => Navigator.of(ctx).pop(false),
-                                            child: const Text('Zrušit'),
+                                            child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
                                           ),
                                           TextButton(
                                             onPressed: () => Navigator.of(ctx).pop(true),
-                                            child: const Text('Smazat'),
+                                            child: Text(AppLanguage.tr(context, 'Smazat', 'Delete')),
                                           ),
                                         ],
                                       ),
@@ -3899,7 +4131,7 @@ class _SettingsHome extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return const Center(child: Text('Nepřihlášen.'));
+    if (u == null) return Center(child: Text(AppLanguage.tr(context, 'Nepřihlášen.', 'Not signed in.')));
     final userRef = rtdb().ref('users/${u.uid}');
 
     return StreamBuilder<DatabaseEvent>(
@@ -4264,7 +4496,7 @@ class _SettingsAccountPageState extends State<_SettingsAccountPage> {
 
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nepodařilo se otevřít GitHub logout.')),
+        SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se otevřít GitHub logout.', 'Failed to open GitHub logout.'))),
       );
     }
   }
@@ -4882,26 +5114,26 @@ class _SettingsDataPageState extends State<_SettingsDataPage> {
                   Text(t(context, 'Využití internetu', 'Internet usage'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   _UsageSummaryCard(
-                    title: 'Celkem',
+                    title: t(context, 'Celkem', 'Total'),
                     total: _formatBytes(total),
                     rx: _formatBytes(totalRx),
                     tx: _formatBytes(totalTx),
                   ),
                   const SizedBox(height: 12),
                   _NetworkUsageCard(
-                    title: 'Mobilní data',
+                    title: t(context, 'Mobilní data', 'Mobile data'),
                     netKey: 'mobile',
                     usage: usage,
                     formatBytes: _formatBytes,
                   ),
                   _NetworkUsageCard(
-                    title: 'Wi‑Fi',
+                    title: t(context, 'Wi‑Fi', 'Wi‑Fi'),
                     netKey: 'wifi',
                     usage: usage,
                     formatBytes: _formatBytes,
                   ),
                   _NetworkUsageCard(
-                    title: 'Roaming',
+                    title: t(context, 'Roaming', 'Roaming'),
                     netKey: 'roaming',
                     usage: usage,
                     formatBytes: _formatBytes,
@@ -5012,7 +5244,7 @@ class _SettingsDataPageState extends State<_SettingsDataPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text('Fotky/video/GIF: ${_formatBytes(media)}'),
-                                    Text('Ostatní data: ${_formatBytes(other)}'),
+                                    Text('${t(context, 'Ostatní data', 'Other data')}: ${_formatBytes(other)}'),
                                     Text('Cache: ${_formatBytes(cache)}'),
                                   ],
                                 ),
@@ -5110,8 +5342,8 @@ class _NetworkUsageCard extends StatelessWidget {
             Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
             Text('Celkem: ${formatBytes(total)}'),
-            Text('Přijato: ${formatBytes(totalRx)}'),
-            Text('Odesláno: ${formatBytes(totalTx)}'),
+            Text('${AppLanguage.tr(context, 'Přijato', 'Received')}: ${formatBytes(totalRx)}'),
+            Text('${AppLanguage.tr(context, 'Odesláno', 'Sent')}: ${formatBytes(totalTx)}'),
             const SizedBox(height: 8),
             if (total > 0)
               Row(
@@ -5137,14 +5369,14 @@ class _NetworkUsageCard extends StatelessWidget {
                           if ((totals[c] ?? 0) > 0)
                             Text('${_SettingsDataPageState._categoryLabels[c] ?? c}: ${formatBytes(totals[c] ?? 0)}'),
                         if (totals.values.every((v) => v == 0))
-                          const Text('Zatím žádná data.'),
+                          Text(AppLanguage.tr(context, 'Zatím žádná data.', 'No data yet.')),
                       ],
                     ),
                   ),
                 ],
               )
             else
-              const Text('Zatím žádná data.'),
+              Text(AppLanguage.tr(context, 'Zatím žádná data.', 'No data yet.')),
           ],
         ),
       ),
@@ -5304,7 +5536,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
       });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Zařízení bylo odhlášeno.')),
+        SnackBar(content: Text(AppLanguage.tr(context, 'Zařízení bylo odhlášeno.', 'Device has been signed out.'))),
       );
     } finally {
       if (mounted) setState(() => _revoking.remove(deviceId));
@@ -5346,7 +5578,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                     ),
-                    child: const Text('Toto zařízení', style: TextStyle(fontSize: 12)),
+                    child: Text(AppLanguage.tr(context, 'Toto zařízení', 'This device'), style: const TextStyle(fontSize: 12)),
                   ),
               ],
             ),
@@ -5367,7 +5599,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.logout),
-                label: const Text('Odhlásit toto zařízení'),
+                label: Text(AppLanguage.tr(context, 'Odhlásit toto zařízení', 'Sign out this device')),
               ),
             ],
           ],
@@ -5378,9 +5610,10 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) {
-      return const Scaffold(body: Center(child: Text('Nepřihlášen.')));
+      return Scaffold(body: Center(child: Text(t(context, 'Nepřihlášen.', 'Not signed in.'))));
     }
 
     final sessionsRef = rtdb().ref('deviceSessions/${current.uid}');
@@ -5390,7 +5623,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
       builder: (context, idSnap) {
         if (!idSnap.hasData) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Zařízení')),
+            appBar: AppBar(title: Text(t(context, 'Zařízení', 'Devices'))),
             body: const Center(child: CircularProgressIndicator()),
           );
         }
@@ -5398,7 +5631,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
         final localDeviceId = idSnap.data!;
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Zařízení')),
+          appBar: AppBar(title: Text(t(context, 'Zařízení', 'Devices'))),
           body: StreamBuilder<DatabaseEvent>(
             stream: sessionsRef.onValue,
             builder: (context, snap) {
@@ -5427,7 +5660,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
               return ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  const Text('Toto zařízení', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  Text(t(context, 'Toto zařízení', 'This device'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   if (currentEntry.isNotEmpty)
                     _deviceCard(
@@ -5437,21 +5670,21 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
                       uid: current.uid,
                     )
                   else
-                    const Card(
+                    Card(
                       child: Padding(
                         padding: EdgeInsets.all(12),
-                        child: Text('Aktuální zařízení zatím není synchronizované.'),
+                        child: Text(t(context, 'Aktuální zařízení zatím není synchronizované.', 'Current device is not synchronized yet.')),
                       ),
                     ),
 
                   const SizedBox(height: 16),
-                  const Text('Ostatní zařízení', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  Text(t(context, 'Ostatní zařízení', 'Other devices'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   if (otherEntries.isEmpty)
-                    const Card(
+                    Card(
                       child: Padding(
-                        padding: EdgeInsets.all(12),
-                        child: Text('Žádná další zařízení.'),
+                        padding: const EdgeInsets.all(12),
+                        child: Text(t(context, 'Žádná další zařízení.', 'No other devices.')),
                       ),
                     )
                   else
@@ -5467,7 +5700,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
                   const SizedBox(height: 16),
                   OutlinedButton(
                     onPressed: widget.onLogout,
-                    child: const Text('Odhlásit se na tomto zařízení'),
+                    child: Text(t(context, 'Odhlásit se na tomto zařízení', 'Sign out on this device')),
                   ),
                 ],
               );
@@ -5634,7 +5867,7 @@ Future<void> sendInviteWithMessage({
   if (groupId.isEmpty || targetLogin.isEmpty || invitedByUid.isEmpty || invitedByGithub.isEmpty) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chyba: Povinná pole pozvánky chybí.')),
+        SnackBar(content: Text(AppLanguage.tr(context, 'Chyba: Povinná pole pozvánky chybí.', 'Error: Required invite fields are missing.'))),
       );
     }
     return;
@@ -5646,7 +5879,7 @@ Future<void> sendInviteWithMessage({
     if (uid == null || uid.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Uživatel není registrovaný v GitMitu.')),
+          SnackBar(content: Text(AppLanguage.tr(context, 'Uživatel není registrovaný v GitMitu.', 'User is not registered in GitMit.'))),
         );
       }
       return;
@@ -5663,13 +5896,13 @@ Future<void> sendInviteWithMessage({
     await rtdb().ref('groupInvites/$uid/$groupId').set(payload);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pozvánka odeslána.')),
+        SnackBar(content: Text(AppLanguage.tr(context, 'Pozvánka odeslána.', 'Invite sent.'))),
       );
     }
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Chyba při odesílání pozvánky: $e')),
+        SnackBar(content: Text('${AppLanguage.tr(context, 'Chyba při odesílání pozvánky', 'Error sending invite')}: $e')),
       );
     }
   }
@@ -5751,16 +5984,16 @@ Future<void> _setVerifiedStatus({
   }
 }
 
-String _statusText(String? status) {
+String _statusText(BuildContext context, String? status) {
   switch (status) {
     case 'pending':
-      return 'Čeká se na moderátora';
+      return AppLanguage.tr(context, 'Čeká se na moderátora', 'Waiting for moderator');
     case 'approved':
-      return 'Schváleno';
+      return AppLanguage.tr(context, 'Schváleno', 'Approved');
     case 'declined':
-      return 'Zamítnuto';
+      return AppLanguage.tr(context, 'Zamítnuto', 'Declined');
     default:
-      return 'Bez žádosti';
+      return AppLanguage.tr(context, 'Bez žádosti', 'No request');
   }
 }
 
@@ -6103,7 +6336,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                       final v = reqSnap.data?.snapshot.value;
                       final req = (v is Map) ? v : null;
                       final status = req?['status']?.toString();
-                      final statusText = _statusText(status);
+                      final statusText = _statusText(context, status);
                       final pending = status == 'pending';
                       final approved = status == 'approved';
                       final declined = status == 'declined';
@@ -6224,9 +6457,9 @@ class _ProfileTabState extends State<_ProfileTab> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            _ProfileMetricTile(label: 'Priváty', value: '${stats.privateChats}'),
-                            _ProfileMetricTile(label: 'Skupiny', value: '${stats.groups}'),
-                            _ProfileMetricTile(label: 'Odeslané', value: '${stats.messagesSent}'),
+                            _ProfileMetricTile(label: t(context, 'Priváty', 'Private'), value: '${stats.privateChats}'),
+                            _ProfileMetricTile(label: t(context, 'Skupiny', 'Groups'), value: '${stats.groups}'),
+                            _ProfileMetricTile(label: t(context, 'Odeslané', 'Sent'), value: '${stats.messagesSent}'),
                           ],
                         );
                       },
@@ -6361,6 +6594,67 @@ class _ContactsTabState extends State<_ContactsTab> {
     await _onContactTap(login: user.login, avatarUrl: user.avatarUrl);
   }
 
+  Future<_InviteSendResult> _notifyGithubInviteFromContacts({
+    required String targetLogin,
+    required String fromLogin,
+  }) async {
+    final endpoint = _githubDmFallbackUrl.trim();
+    if (endpoint.isEmpty) {
+      debugPrint('[GitMitInvite] Missing GITMIT_GITHUB_NOTIFY_URL');
+      return const _InviteSendResult(ok: false, error: 'Missing GITMIT_GITHUB_NOTIFY_URL');
+    }
+
+    final uris = _inviteBackendUris(endpoint);
+    if (uris.isEmpty) {
+      debugPrint('[GitMitInvite] Invalid invite URL: $endpoint');
+      return _InviteSendResult(ok: false, error: 'Invalid invite URL: $endpoint');
+    }
+
+    final preview =
+        'Message from GitMit app: @$fromLogin wants to chat. You do not have GitMit yet—download it and continue the conversation.';
+
+    final payload = jsonEncode({
+      'targetLogin': targetLogin,
+      'fromLogin': fromLogin,
+      'preview': preview,
+      'source': 'gitmit-contact-invite',
+    });
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (_githubDmFallbackToken.trim().isNotEmpty) 'Authorization': 'Bearer ${_githubDmFallbackToken.trim()}',
+    };
+
+    String? lastError;
+    for (final uri in uris) {
+      try {
+        final response = await http.post(uri, headers: headers, body: payload);
+        final ok = response.statusCode >= 200 && response.statusCode < 300;
+        if (ok) return const _InviteSendResult(ok: true);
+        lastError = _inviteErrorFromHttp(statusCode: response.statusCode, uri: uri, body: response.body);
+        debugPrint('[GitMitInvite] Backend ${response.statusCode} at $uri: ${response.body}');
+      } catch (e) {
+        lastError = 'Request failed at $uri: $e';
+        debugPrint('[GitMitInvite] Request failed at $uri: $e');
+      }
+    }
+
+    final manualOpened = await _openManualGithubInvite(
+      targetLogin: targetLogin,
+      fromLogin: fromLogin,
+      preview: '@$fromLogin sent you a message in GitMit.',
+    );
+    if (manualOpened) {
+      return _InviteSendResult(
+        ok: true,
+        error: lastError,
+        manualFallbackUsed: true,
+      );
+    }
+
+    return _InviteSendResult(ok: false, error: lastError ?? 'Unknown invite error');
+  }
+
   Future<void> _onContactTap({required String login, required String avatarUrl}) async {
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) return;
@@ -6422,9 +6716,60 @@ class _ContactsTabState extends State<_ContactsTab> {
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerRight,
-                    child: FilledButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(AppLanguage.tr(context, 'OK', 'OK')),
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.person_add_alt_1),
+                      onPressed: () async {
+                        Navigator.of(context).pop();
+
+                        final myLogin = await _myGithubUsernameFromRtdb(current.uid);
+                        if (myLogin == null || myLogin.trim().isEmpty) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(this.context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                AppLanguage.tr(
+                                  this.context,
+                                  'Nepodařilo se zjistit tvůj GitHub username pro pozvánku.',
+                                  'Could not determine your GitHub username for invite.',
+                                ),
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        _InviteSendResult inviteResult = const _InviteSendResult(ok: false);
+                        try {
+                          inviteResult = await _notifyGithubInviteFromContacts(
+                            targetLogin: otherLogin,
+                            fromLogin: myLogin.trim(),
+                          );
+                        } catch (_) {
+                          inviteResult = const _InviteSendResult(ok: false, error: 'Request threw exception');
+                        }
+
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              inviteResult.ok
+                                  ? (inviteResult.manualFallbackUsed
+                                        ? AppLanguage.tr(
+                                            this.context,
+                                            'Backend invite není dostupný. Otevřel se GitHub formulář s předvyplněnou pozvánkou pro @$otherLogin.',
+                                            'Backend invite is unavailable. A prefilled GitHub invite form for @$otherLogin was opened.',
+                                          )
+                                        : AppLanguage.tr(
+                                            this.context,
+                                            'GitHub pozvánka byla odeslána uživateli @$otherLogin od @$myLogin.',
+                                            'GitHub invite was sent to @$otherLogin from @$myLogin.',
+                                          ))
+                                  : '${AppLanguage.tr(this.context, 'Pozvánku se nepodařilo odeslat', 'Failed to send invite')}: ${inviteResult.error ?? AppLanguage.tr(this.context, 'neznámá chyba', 'unknown error')}',
+                            ),
+                          ),
+                        );
+                      },
+                      label: Text(AppLanguage.tr(context, 'Pozvat ho v GitMitu', 'Invite to GitMit')),
                     ),
                   ),
                 ],
@@ -6561,10 +6906,10 @@ class _ContactsTabState extends State<_ContactsTab> {
             controller: _controller,
             onChanged: _onChanged,
             onSubmitted: (v) => _performSearch(v),
-            decoration: const InputDecoration(
-              labelText: 'Hledat na GitHubu',
+            decoration: InputDecoration(
+              labelText: AppLanguage.tr(context, 'Hledat na GitHubu', 'Search on GitHub'),
               prefixText: '@',
-              helperText: 'Stiskni Enter pro hledání (šetří to GitHub API).',
+              helperText: AppLanguage.tr(context, 'Stiskni Enter pro hledání (šetří to GitHub API).', 'Press Enter to search (saves GitHub API quota).'),
             ),
           ),
           const SizedBox(height: 8),
@@ -6576,7 +6921,9 @@ class _ContactsTabState extends State<_ContactsTab> {
                       ? null
                       : () => _performSearch(_controller.text),
                   icon: const Icon(Icons.search),
-                  label: Text(_loading ? 'Hledám…' : 'Hledat'),
+                  label: Text(_loading
+                      ? AppLanguage.tr(context, 'Hledám…', 'Searching…')
+                      : AppLanguage.tr(context, 'Hledat', 'Search')),
                 ),
               ),
             ],
@@ -6600,7 +6947,7 @@ class _ContactsTabState extends State<_ContactsTab> {
                 ? ListView(
                     children: [
                       if (_friends.isNotEmpty) ...[
-                        const Text('Kamarádi', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        Text(AppLanguage.tr(context, 'Kamarádi', 'Friends'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 8),
                         ..._friends.map(
                           (u) => _recommendedTile(
@@ -6616,17 +6963,17 @@ class _ContactsTabState extends State<_ContactsTab> {
                         const Divider(height: 24),
                       ],
                       if (_recommended.isNotEmpty) ...[
-                        const Text('Doporučené', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        Text(AppLanguage.tr(context, 'Doporučené', 'Recommended'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 4),
-                        const Text(
-                          'Lidi z tvých skupin (podle počtu společných skupin).',
-                          style: TextStyle(color: Colors.white60),
+                        Text(
+                          AppLanguage.tr(context, 'Lidi z tvých skupin (podle počtu společných skupin).', 'People from your groups (by number of mutual groups).'),
+                          style: const TextStyle(color: Colors.white60),
                         ),
                         const SizedBox(height: 8),
                         ..._recommended.map(
                           (u) => _recommendedTile(
                             u,
-                            subtitle: 'Společné skupiny: ${u.score}',
+                                subtitle: '${AppLanguage.tr(context, 'Společné skupiny', 'Mutual groups')}: ${u.score}',
                             onTap: () {
                               if (widget.vibrationEnabled) {
                                 HapticFeedback.selectionClick();
@@ -6643,7 +6990,7 @@ class _ContactsTabState extends State<_ContactsTab> {
                 : ListView(
                     children: [
                       if (localMatches.isNotEmpty) ...[
-                        const Text('Lokálně', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        Text(AppLanguage.tr(context, 'Lokálně', 'Local'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 8),
                         ...localMatches.take(25).map(
                               (u) => _recommendedTile(
@@ -6658,10 +7005,10 @@ class _ContactsTabState extends State<_ContactsTab> {
                             ),
                         const Divider(height: 24),
                       ],
-                      const Text('GitHub', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                      Text(AppLanguage.tr(context, 'GitHub', 'GitHub'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 8),
                       if (_lastSearchedQuery.toLowerCase() != qLower || _results.isEmpty)
-                        const Text('Stiskni Enter nebo tlačítko "Hledat" pro dotaz na GitHub.'),
+                        Text(AppLanguage.tr(context, 'Stiskni Enter nebo tlačítko "Hledat" pro dotaz na GitHub.', 'Press Enter or the "Search" button to query GitHub.')),
                       if (_lastSearchedQuery.toLowerCase() == qLower && _results.isNotEmpty) ...[
                         ..._results.map((u) {
                           return Column(
@@ -7102,7 +7449,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     if (payload == null) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Nepodařilo se nahrát obrázek.')));
+          .showSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se nahrát obrázek.', 'Failed to upload image.'))));
       }
       return;
     }
@@ -7114,7 +7461,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Nepodařilo se zašifrovat obrázek.')));
+          .showSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se zašifrovat obrázek.', 'Failed to encrypt image.'))));
       }
       return;
     }
@@ -7145,7 +7492,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Nepodařilo se odeslat obrázek.')));
+          .showSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se odeslat obrázek.', 'Failed to send image.'))));
       }
       return;
     }
@@ -7184,7 +7531,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     if (payload == null) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Nepodařilo se nahrát obrázek.')));
+          .showSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se nahrát obrázek.', 'Failed to upload image.'))));
       }
       return;
     }
@@ -7202,8 +7549,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
       gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: current.uid);
       if (gk == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('Nepodařilo se zašifrovat obrázek.')));
+            ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se zašifrovat obrázek.', 'Failed to encrypt image.'))));
         }
         return;
       }
@@ -7221,7 +7568,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Nepodařilo se odeslat obrázek.')));
+          .showSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se odeslat obrázek.', 'Failed to send image.'))));
       }
       return;
     }
@@ -7434,17 +7781,17 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Otisky klíčů (anti‑MITM)'),
+        title: Text(AppLanguage.tr(context, 'Otisky klíčů (anti‑MITM)', 'Key fingerprints (anti‑MITM)')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Porovnejte fingerprint přes jiný kanál (např. osobně / Signal).'),
+            Text(AppLanguage.tr(context, 'Porovnejte fingerprint přes jiný kanál (např. osobně / Signal).', 'Compare fingerprint via another channel (e.g. in person / Signal).')),
             if (changed == true)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'Pozor: fingerprint protějšku se změnil od minula. Může jít o reinstalaci, nebo MITM.',
+                  AppLanguage.tr(context, 'Pozor: fingerprint protějšku se změnil od minula. Může jít o reinstalaci, nebo MITM.', 'Warning: peer fingerprint changed since last time. It could be reinstall or MITM.'),
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
@@ -7457,7 +7804,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                 ),
               ),
             const SizedBox(height: 12),
-            Text('Protějšek (@$peerLogin):', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('${AppLanguage.tr(context, 'Protějšek', 'Peer')} (@$peerLogin):', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             if (peerFp != null && peerFp.isNotEmpty)
               Row(
@@ -7470,9 +7817,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                 ],
               )
             else
-              const Text('Není dostupné (uživatel ještě nezveřejnil klíč).'),
+              Text(AppLanguage.tr(context, 'Není dostupné (uživatel ještě nezveřejnil klíč).', 'Unavailable (user has not published a key yet).')),
             const SizedBox(height: 12),
-            const Text('Můj klíč:', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text('${AppLanguage.tr(context, 'Můj klíč', 'My key')}:', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Row(
               children: [
@@ -7487,7 +7834,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Zavřít')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(AppLanguage.tr(context, 'Zavřít', 'Close'))),
         ],
       ),
     );
@@ -7962,17 +8309,19 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                         onPressed: () async {
                           await Clipboard.setData(ClipboardData(text: payload.code));
                           if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kód zkopírován.')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(AppLanguage.tr(context, 'Kód zkopírován.', 'Code copied.'))),
+                          );
                         },
                         icon: const Icon(Icons.copy),
-                        label: const Text('Kopírovat kód'),
+                        label: Text(AppLanguage.tr(context, 'Kopírovat kód', 'Copy code')),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () => Navigator.of(ctx).pop(),
-                        child: const Text('Zavřít'),
+                        child: Text(AppLanguage.tr(context, 'Zavřít', 'Close')),
                       ),
                     ),
                   ],
@@ -7999,7 +8348,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     final otherUid = await _lookupUidForLoginLower(cleaned.toLowerCase());
     if (otherUid == null || otherUid.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cílový uživatel není v GitMit.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLanguage.tr(context, 'Cílový uživatel není v GitMit.', 'Target user is not in GitMit.'))),
+      );
       return;
     }
 
@@ -8088,41 +8439,41 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.reply),
-                title: const Text('Odpovědět'),
+                title: Text(AppLanguage.tr(context, 'Odpovědět', 'Reply')),
                 onTap: () => Navigator.of(ctx).pop('reply'),
               ),
               ListTile(
                 leading: const Icon(Icons.copy),
-                title: const Text('Kopírovat'),
+                title: Text(AppLanguage.tr(context, 'Kopírovat', 'Copy')),
                 onTap: () => Navigator.of(ctx).pop('copy'),
               ),
               if (link != null)
                 ListTile(
                   leading: const Icon(Icons.link),
-                  title: const Text('Kopírovat odkaz'),
+                  title: Text(AppLanguage.tr(context, 'Kopírovat odkaz', 'Copy link')),
                   onTap: () => Navigator.of(ctx).pop('copy_link'),
                 ),
               ListTile(
                 leading: const Icon(Icons.forward_to_inbox_outlined),
-                title: const Text('Přeposlat'),
+                title: Text(AppLanguage.tr(context, 'Přeposlat', 'Forward')),
                 onTap: () => Navigator.of(ctx).pop('forward'),
               ),
               if (codePayload != null)
                 ListTile(
                   leading: const Icon(Icons.code),
-                  title: const Text('Otevřít kód'),
+                  title: Text(AppLanguage.tr(context, 'Otevřít kód', 'Open code')),
                   onTap: () => Navigator.of(ctx).pop('open_code'),
                 ),
               if (canDeleteForMe && onDeleteForMe != null)
                 ListTile(
                   leading: const Icon(Icons.delete_sweep_outlined),
-                  title: const Text('Smazat u mě'),
+                  title: Text(AppLanguage.tr(context, 'Smazat u mě', 'Delete for me')),
                   onTap: () => Navigator.of(ctx).pop('delete_me'),
                 ),
               if (canDeleteForAll && onDeleteForAll != null)
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
-                  title: const Text('Smazat u všech'),
+                  title: Text(AppLanguage.tr(context, 'Smazat u všech', 'Delete for everyone')),
                   onTap: () => Navigator.of(ctx).pop('delete_all'),
                 ),
             ],
@@ -8156,13 +8507,17 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         final copied = codePayload?.code ?? text;
         await Clipboard.setData(ClipboardData(text: copied));
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Zkopírováno.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLanguage.tr(context, 'Zkopírováno.', 'Copied.'))),
+        );
         return;
       case 'copy_link':
         if (link != null) {
           await Clipboard.setData(ClipboardData(text: link));
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Odkaz zkopírován.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppLanguage.tr(context, 'Odkaz zkopírován.', 'Link copied.'))),
+          );
         }
         return;
       case 'forward':
@@ -8170,17 +8525,17 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         final ok = await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
-                title: const Text('Přeposlat zprávu'),
+                title: Text(AppLanguage.tr(context, 'Přeposlat zprávu', 'Forward message')),
                 content: TextField(
                   controller: targetCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'GitHub username',
+                  decoration: InputDecoration(
+                    labelText: AppLanguage.tr(context, 'GitHub username', 'GitHub username'),
                     prefixText: '@',
                   ),
                 ),
                 actions: [
-                  TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Zrušit')),
-                  TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Přeposlat')),
+                  TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel'))),
+                  TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text(AppLanguage.tr(context, 'Přeposlat', 'Forward'))),
                 ],
               ),
             ) ??
@@ -8190,7 +8545,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         if (target.isEmpty) return;
         await _forwardToUsername(targetLogin: target, messageText: codePayload?.code ?? text);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Přeposláno.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLanguage.tr(context, 'Přeposláno.', 'Forwarded.'))),
+        );
         return;
       case 'open_code':
         if (codePayload != null) {
@@ -8234,23 +8591,23 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Vložit code block',
+                      AppLanguage.tr(context, 'Vložit code block', 'Insert code block'),
                       style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: langCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Jazyk (volitelné)',
-                        hintText: 'dart, js, ts, python, ...',
+                      decoration: InputDecoration(
+                        labelText: AppLanguage.tr(context, 'Jazyk (volitelné)', 'Language (optional)'),
+                        hintText: AppLanguage.tr(context, 'dart, js, ts, python, ...', 'dart, js, ts, python, ...'),
                       ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: titleCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Název snippetu (volitelné)',
-                        hintText: 'Např. Login handler',
+                      decoration: InputDecoration(
+                        labelText: AppLanguage.tr(context, 'Název snippetu (volitelné)', 'Snippet title (optional)'),
+                        hintText: AppLanguage.tr(context, 'Např. Login handler', 'e.g. Login handler'),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -8260,8 +8617,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                         minLines: null,
                         maxLines: null,
                         expands: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Kód',
+                        decoration: InputDecoration(
+                          labelText: AppLanguage.tr(context, 'Kód', 'Code'),
                           alignLabelWithHint: true,
                         ),
                       ),
@@ -8272,7 +8629,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () => Navigator.of(ctx).pop(),
-                            child: const Text('Zrušit'),
+                            child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -8301,7 +8658,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                               Navigator.of(ctx).pop();
                             },
                             icon: const Icon(Icons.code),
-                            label: const Text('Vložit'),
+                            label: Text(AppLanguage.tr(context, 'Vložit', 'Insert')),
                           ),
                         ),
                       ],
@@ -8366,19 +8723,19 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           child: ListView(
             shrinkWrap: true,
             children: [
-              const ListTile(
-                title: Text('Přesunout do složky', style: TextStyle(fontWeight: FontWeight.w700)),
+              ListTile(
+                title: Text(AppLanguage.tr(context, 'Přesunout do složky', 'Move to folder'), style: const TextStyle(fontWeight: FontWeight.w700)),
               ),
               ListTile(
                 leading: const Icon(Icons.inbox_outlined),
-                title: const Text('Priváty'),
+                title: Text(AppLanguage.tr(context, 'Priváty', 'Private')),
                 onTap: () => Navigator.of(context).pop(null),
               ),
               const Divider(height: 1),
               ...folders.map((f) {
                 return ListTile(
                   leading: const Icon(Icons.folder_outlined),
-                  title: Text(f['name'] ?? 'Složka'),
+                  title: Text(f['name'] ?? AppLanguage.tr(context, 'Složka', 'Folder')),
                   onTap: () => Navigator.of(context).pop(f['id']),
                 );
               }),
@@ -8432,7 +8789,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     if (myLogin == null || myLogin.trim().isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Nelze zjistit tvůj GitHub username.')),
+          SnackBar(content: Text(AppLanguage.tr(context, 'Nelze zjistit tvůj GitHub username.', 'Unable to determine your GitHub username.'))),
         );
       }
       return;
@@ -8456,8 +8813,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           SnackBar(
             content: Text(
               sentFallback
-                  ? 'Uživatel není v GitMit. Poslán GitHub ping přes backend.'
-                  : 'Uživatel není v GitMit (nenalezené UID).',
+                  ? AppLanguage.tr(context, 'Uživatel není v GitMit. Poslán GitHub ping přes backend.', 'User is not in GitMit. GitHub ping sent via backend.')
+                  : AppLanguage.tr(context, 'Uživatel není v GitMit (nenalezené UID).', 'User is not in GitMit (UID not found).'),
             ),
           ),
         );
@@ -8479,7 +8836,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('E2EE: šifrování selhalo: $e')),
+          SnackBar(content: Text('${AppLanguage.tr(context, 'E2EE: šifrování selhalo', 'E2EE: encryption failed')}: $e')),
         );
       }
       return;
@@ -8597,7 +8954,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         _activeAvatarUrl = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chat byl smazán.')),
+        SnackBar(content: Text(AppLanguage.tr(context, 'Chat byl smazán.', 'Chat was deleted.'))),
       );
     }
   }
@@ -8635,7 +8992,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   Widget build(BuildContext context) {
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) {
-      return const Center(child: Text('Nepřihlášen.'));
+      return Center(child: Text(AppLanguage.tr(context, 'Nepřihlášen.', 'Not signed in.')));
     }
 
     final currentUserRef = rtdb().ref('users/${current.uid}');
@@ -8788,8 +9145,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           if (myStatus != null) ...[
                             ListTile(
                               leading: const Icon(Icons.verified_user),
-                              title: const Text('Ověření účtu'),
-                              subtitle: Text(_statusText(myStatus)),
+                              title: Text(AppLanguage.tr(context, 'Ověření účtu', 'Account verification')),
+                              subtitle: Text(_statusText(context, myStatus)),
                               trailing: hasNew ? const Icon(Icons.circle, size: 10, color: Colors.redAccent) : null,
                               onTap: () async {
                                 setState(() {
@@ -8861,8 +9218,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 children: [
                                   ListTile(
                                     leading: const Icon(Icons.group_add),
-                                    title: const Text('Pozvánky do skupin'),
-                                    subtitle: Text('Čeká: ${invites.length}'),
+                                    title: Text(AppLanguage.tr(context, 'Pozvánky do skupin', 'Group invites')),
+                                    subtitle: Text('${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${invites.length}'),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -8871,14 +9228,14 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                         Expanded(
                                           child: OutlinedButton(
                                             onPressed: acceptAll,
-                                            child: const Text('Přijmout všechny'),
+                                            child: Text(AppLanguage.tr(context, 'Přijmout všechny', 'Accept all')),
                                           ),
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
                                           child: OutlinedButton(
                                             onPressed: declineAll,
-                                            child: const Text('Odmítnout všechny'),
+                                            child: Text(AppLanguage.tr(context, 'Odmítnout všechny', 'Decline all')),
                                           ),
                                         ),
                                       ],
@@ -8886,7 +9243,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   ),
                                   ...invites.map((inv) {
                                     final key = (inv['__key'] ?? '').toString();
-                                    final groupTitle = (inv['groupTitle'] ?? 'Skupina').toString();
+                                    final groupTitle = (inv['groupTitle'] ?? AppLanguage.tr(context, 'Skupina', 'Group')).toString();
                                     final groupId = (inv['groupId'] ?? '').toString();
                                     final invitedBy = (inv['invitedByGithub'] ?? '').toString();
                                     final groupLogo = (inv['groupLogoUrl'] ?? '').toString();
@@ -8897,7 +9254,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                         child: groupLogo.isEmpty ? const Icon(Icons.group) : null,
                                       ),
                                       title: Text(groupTitle),
-                                      subtitle: invitedBy.isNotEmpty ? Text('Pozval: @$invitedBy') : (groupId.isNotEmpty ? Text(groupId) : null),
+                                      subtitle: invitedBy.isNotEmpty ? Text('${AppLanguage.tr(context, 'Pozval', 'Invited by')}: @$invitedBy') : (groupId.isNotEmpty ? Text(groupId) : null),
                                       trailing: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -9009,8 +9366,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 children: [
                                   ListTile(
                                     leading: const Icon(Icons.admin_panel_settings_outlined),
-                                    title: const Text('Žádosti do skupin'),
-                                    subtitle: Text('Čeká: ${items.length}'),
+                                    title: Text(AppLanguage.tr(context, 'Žádosti do skupin', 'Group requests')),
+                                    subtitle: Text('${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}'),
                                   ),
                                   ...items.map((item) {
                                     final groupId = (item['groupId'] ?? '').toString();
@@ -9027,7 +9384,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                           leading: const Icon(Icons.group),
                                           title: Text(title),
                                           subtitle: Text(
-                                            'Přidat: @${targetLogin.isEmpty ? 'uživatel' : targetLogin}${requestedBy.isNotEmpty ? ' • od @$requestedBy' : ''}',
+                                            '${AppLanguage.tr(context, 'Přidat', 'Add')}: @${targetLogin.isEmpty ? AppLanguage.tr(context, 'uživatel', 'user') : targetLogin}${requestedBy.isNotEmpty ? ' • ${AppLanguage.tr(context, 'od', 'by')} @$requestedBy' : ''}',
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -9085,7 +9442,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   await _acceptDmRequest(myUid: current.uid, otherLogin: fromLogin);
                                 } catch (e) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('${AppLanguage.tr(context, 'Chyba', 'Error')}: $e')),
+                                            );
                                   }
                                 }
                               }
@@ -9097,7 +9456,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   await _rejectDmRequest(myUid: current.uid, otherLogin: fromLogin);
                                 } catch (e) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('${AppLanguage.tr(context, 'Chyba', 'Error')}: $e')),
+                                    );
                                   }
                                 }
                               }
@@ -9106,8 +9467,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 children: [
                                   ListTile(
                                     leading: const Icon(Icons.mail_lock_outlined),
-                                    title: const Text('Žádosti o chat'),
-                                    subtitle: Text('Čeká: ${items.length}'),
+                                    title: Text(AppLanguage.tr(context, 'Žádosti o chat', 'Chat requests')),
+                                    subtitle: Text('${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}'),
                                   ),
                                   ...items.map((req) {
                                     final fromLogin = (req['fromLogin'] ?? '').toString();
@@ -9123,7 +9484,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                               child: fromAvatar.isEmpty ? const Icon(Icons.person, size: 18) : null,
                                             ),
                                       title: Text('@$fromLogin'),
-                                      subtitle: hasEncryptedText ? const Text('Zpráva: 🔒 (šifrovaně)') : const Text('Invajt do privátu'),
+                                        subtitle: hasEncryptedText
+                                          ? Text(AppLanguage.tr(context, 'Zpráva: 🔒 (šifrovaně)', 'Message: 🔒 (encrypted)'))
+                                          : Text(AppLanguage.tr(context, 'Invajt do privátu', 'Private chat invite')),
                                       trailing: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -9153,7 +9516,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                               runSpacing: 8,
                               children: [
                                 ChoiceChip(
-                                  label: const Text('Priváty'),
+                                  label: Text(AppLanguage.tr(context, 'Priváty', 'Private')),
                                   selected: _overviewMode == 0,
                                   onSelected: (_) => setState(() {
                                     _overviewMode = 0;
@@ -9161,7 +9524,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   }),
                                 ),
                                 ChoiceChip(
-                                  label: const Text('Skupiny'),
+                                  label: Text(AppLanguage.tr(context, 'Skupiny', 'Groups')),
                                   selected: _overviewMode == 1,
                                   onSelected: (_) => setState(() {
                                     _overviewMode = 1;
@@ -9169,7 +9532,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   }),
                                 ),
                                 ChoiceChip(
-                                  label: const Text('Složky'),
+                                  label: Text(AppLanguage.tr(context, 'Složky', 'Folders')),
                                   selected: _overviewMode == 2,
                                   onSelected: (_) => setState(() {
                                     _overviewMode = 2;
@@ -9181,14 +9544,14 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           ),
 
                           if (isModerator) ...[
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
-                              child: Text('Žádosti o ověření', style: TextStyle(fontWeight: FontWeight.bold)),
+                                child: Text(AppLanguage.tr(context, 'Žádosti o ověření', 'Verification requests'), style: const TextStyle(fontWeight: FontWeight.bold)),
                             ),
                             if (pendingReqs.isEmpty)
-                              const Padding(
+                              Padding(
                                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                child: Text('Žádné čekající žádosti.'),
+                                child: Text(AppLanguage.tr(context, 'Žádné čekající žádosti.', 'No pending requests.')),
                               )
                             else
                               ...pendingReqs.map((r) {
@@ -9215,9 +9578,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
                           if (_overviewMode == 0) ...[
                             if (rows.isEmpty)
-                              const Padding(
+                              Padding(
                                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                child: Text('Zatím žádné chaty. Napiš někomu zprávu.'),
+                                child: Text(AppLanguage.tr(context, 'Zatím žádné chaty. Napiš někomu zprávu.', 'No chats yet. Send someone a message.')),
                               )
                             else
                               ...rows.map((r) {
@@ -9252,7 +9615,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           ] else if (_overviewMode == 1) ...[
                             ListTile(
                               leading: const Icon(Icons.group_add),
-                              title: const Text('Vytvořit skupinu'),
+                              title: Text(AppLanguage.tr(context, 'Vytvořit skupinu', 'Create group')),
                               onTap: () async {
                                 _hapticSelect();
                                 final created = await Navigator.of(context).push<String>(
@@ -9263,14 +9626,14 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 if (!mounted) return;
                                 if (created != null && created.isNotEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Skupina vytvořena.')),
+                                    SnackBar(content: Text(AppLanguage.tr(context, 'Skupina vytvořena.', 'Group created.'))),
                                   );
                                 }
                               },
                             ),
                             ListTile(
                               leading: const Icon(Icons.qr_code_scanner),
-                              title: const Text('Připojit se přes link / QR'),
+                              title: Text(AppLanguage.tr(context, 'Připojit se přes link / QR', 'Join via link / QR')),
                               onTap: () async {
                                 _hapticSelect();
                                 final joined = await Navigator.of(context).push<String>(
@@ -9299,9 +9662,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   }
                                 }
                                 if (groupIds.isEmpty) {
-                                  return const Padding(
+                                  return Padding(
                                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                    child: Text('Zatím nejsi v žádné skupině.'),
+                                    child: Text(AppLanguage.tr(context, 'Zatím nejsi v žádné skupině.', 'You are not in any group yet.')),
                                   );
                                 }
 
@@ -9414,16 +9777,16 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                 context: context,
                                                 builder: (context) {
                                                   return AlertDialog(
-                                                    title: const Text('Nová složka'),
+                                                    title: Text(AppLanguage.tr(context, 'Nová složka', 'New folder')),
                                                     content: TextField(
                                                       controller: ctrl,
-                                                      decoration: const InputDecoration(labelText: 'Název'),
+                                                      decoration: InputDecoration(labelText: AppLanguage.tr(context, 'Název', 'Name')),
                                                     ),
                                                     actions: [
-                                                      TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
+                                                      TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel'))),
                                                       FilledButton(
                                                         onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
-                                                        child: const Text('Vytvořit'),
+                                                        child: Text(AppLanguage.tr(context, 'Vytvořit', 'Create')),
                                                       ),
                                                     ],
                                                   );
@@ -9439,11 +9802,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                               final ok = await showDialog<bool>(
                                                 context: context,
                                                 builder: (context) => AlertDialog(
-                                                  title: const Text('Smazat složku?'),
-                                                  content: Text('Složka "$folderName" se smaže a všechny položky se vrátí zpět do privátů/skupin.'),
+                                                  title: Text(AppLanguage.tr(context, 'Smazat složku?', 'Delete folder?')),
+                                                  content: Text(AppLanguage.tr(context, 'Složka "$folderName" se smaže a všechny položky se vrátí zpět do privátů/skupin.', 'Folder "$folderName" will be deleted and all items will be moved back to private chats/groups.')),
                                                   actions: [
-                                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
-                                                    FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Smazat')),
+                                                    TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel'))),
+                                                    FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppLanguage.tr(context, 'Smazat', 'Delete'))),
                                                   ],
                                                 ),
                                               );
@@ -9487,12 +9850,12 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                       children: [
                                                         ListTile(
                                                           leading: const Icon(Icons.person_add_alt_1),
-                                                          title: const Text('Přidat privát'),
+                                                          title: Text(AppLanguage.tr(context, 'Přidat privát', 'Add private chat')),
                                                           onTap: () => Navigator.of(context).pop('chat'),
                                                         ),
                                                         ListTile(
                                                           leading: const Icon(Icons.group_add),
-                                                          title: const Text('Přidat skupinu'),
+                                                          title: Text(AppLanguage.tr(context, 'Přidat skupinu', 'Add group')),
                                                           onTap: () => Navigator.of(context).pop('group'),
                                                         ),
                                                       ],
@@ -9518,8 +9881,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                       child: ListView(
                                                         shrinkWrap: true,
                                                         children: [
-                                                          const ListTile(
-                                                            title: Text('Vyber privát', style: TextStyle(fontWeight: FontWeight.w700)),
+                                                          ListTile(
+                                                            title: Text(AppLanguage.tr(context, 'Vyber privát', 'Select private chat'), style: const TextStyle(fontWeight: FontWeight.w700)),
                                                           ),
                                                           const Divider(height: 1),
                                                           ...candidates.map((r) {
@@ -9553,8 +9916,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                       child: ListView(
                                                         shrinkWrap: true,
                                                         children: [
-                                                          const ListTile(
-                                                            title: Text('Vyber skupinu', style: TextStyle(fontWeight: FontWeight.w700)),
+                                                          ListTile(
+                                                            title: Text(AppLanguage.tr(context, 'Vyber skupinu', 'Select group'), style: const TextStyle(fontWeight: FontWeight.w700)),
                                                           ),
                                                           const Divider(height: 1),
                                                           ...candidates.map((gid) {
@@ -9591,10 +9954,10 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
                                             Widget buildFolderView(String fid) {
                                               final folderName = (fid == '__privates__')
-                                                  ? 'Priváty'
+                                                    ? AppLanguage.tr(context, 'Priváty', 'Private')
                                                   : (folders.firstWhere(
                                                           (e) => e['id'] == fid,
-                                                          orElse: () => {'name': 'Složka'},
+                                                      orElse: () => {'name': AppLanguage.tr(context, 'Složka', 'Folder')},
                                                         )['name'] as String);
 
                                               final filteredChats = rows.where((r) {
@@ -9625,8 +9988,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                     title: Text(folderName),
                                                     subtitle: Text(
                                                       fid == '__privates__'
-                                                          ? 'Chaty: ${filteredChats.length}'
-                                                          : 'Chaty: ${filteredChats.length} • Skupiny: ${filteredGroups.length}',
+                                                              ? '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${filteredChats.length}'
+                                                              : '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${filteredChats.length} • ${AppLanguage.tr(context, 'Skupiny', 'Groups')}: ${filteredGroups.length}',
                                                     ),
                                                     trailing: (fid == '__privates__')
                                                         ? null
@@ -9634,7 +9997,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                             mainAxisSize: MainAxisSize.min,
                                                             children: [
                                                               IconButton(
-                                                                tooltip: 'Přidat',
+                                                                tooltip: AppLanguage.tr(context, 'Přidat', 'Add'),
                                                                 icon: const Icon(Icons.add),
                                                                 onPressed: () {
                                                                   _hapticSelect();
@@ -9642,7 +10005,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                                 },
                                                               ),
                                                               IconButton(
-                                                                tooltip: 'Smazat složku',
+                                                                tooltip: AppLanguage.tr(context, 'Smazat složku', 'Delete folder'),
                                                                 icon: const Icon(Icons.delete_outline),
                                                                 onPressed: () {
                                                                   _hapticMedium();
@@ -9655,9 +10018,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                   const Divider(height: 1),
 
                                                   if (filteredChats.isEmpty && filteredGroups.isEmpty)
-                                                    const Padding(
+                                                    Padding(
                                                       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                                      child: Text('Ve složce zatím nic není.'),
+                                                      child: Text(AppLanguage.tr(context, 'Ve složce zatím nic není.', 'Folder is empty.')),
                                                     ),
 
                                                   ...filteredChats.map((r) {
@@ -9686,11 +10049,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
 
                                                   if (filteredGroups.isNotEmpty) ...[
                                                     const Divider(height: 1),
-                                                    const Padding(
+                                                    Padding(
                                                       padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
                                                       child: Align(
                                                         alignment: Alignment.centerLeft,
-                                                        child: Text('Skupiny', style: TextStyle(fontWeight: FontWeight.w700)),
+                                                        child: Text(AppLanguage.tr(context, 'Skupiny', 'Groups'), style: const TextStyle(fontWeight: FontWeight.w700)),
                                                       ),
                                                     ),
                                                     ...filteredGroups.map((gid) {
@@ -9736,7 +10099,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                 children: [
                                                   ListTile(
                                                     leading: const Icon(Icons.create_new_folder_outlined),
-                                                    title: const Text('Vytvořit složku'),
+                                                    title: Text(AppLanguage.tr(context, 'Vytvořit složku', 'Create folder')),
                                                     onTap: () {
                                                       _hapticSelect();
                                                       createFolder();
@@ -9744,8 +10107,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                   ),
                                                   ListTile(
                                                     leading: const Icon(Icons.inbox_outlined),
-                                                    title: const Text('Priváty'),
-                                                    subtitle: Text('Chaty: ${countChatsForFolder(null)}'),
+                                                    title: Text(AppLanguage.tr(context, 'Priváty', 'Private')),
+                                                    subtitle: Text('${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${countChatsForFolder(null)}'),
                                                     onTap: () {
                                                       _hapticSelect();
                                                       setState(() => _activeFolderId = '__privates__');
@@ -9753,18 +10116,18 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                   ),
                                                   const Divider(height: 1),
                                                   if (folders.isEmpty)
-                                                    const Padding(
+                                                    Padding(
                                                       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                                      child: Text('Zatím nemáš žádné složky.'),
+                                                      child: Text(AppLanguage.tr(context, 'Zatím nemáš žádné složky.', 'You have no folders yet.')),
                                                     )
                                                   else
                                                     ...folders.map((f) {
                                                       final fid = (f['id'] ?? '').toString();
-                                                      final name = (f['name'] ?? 'Složka').toString();
+                                                      final name = (f['name'] ?? AppLanguage.tr(context, 'Složka', 'Folder')).toString();
                                                       return ListTile(
                                                         leading: const Icon(Icons.folder_outlined),
                                                         title: Text(name),
-                                                        subtitle: Text('Chaty: ${countChatsForFolder(fid)} • Skupiny: ${countGroupsForFolder(fid)}'),
+                                                        subtitle: Text('${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${countChatsForFolder(fid)} • ${AppLanguage.tr(context, 'Skupiny', 'Groups')}: ${countGroupsForFolder(fid)}'),
                                                         trailing: IconButton(
                                                           icon: const Icon(Icons.delete_outline),
                                                           onPressed: () {
@@ -9857,7 +10220,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                       }),
                     ),
                     title: Text(isModerator ? 'Žádost: @$requesterGh' : 'Ověření účtu'),
-                    subtitle: Text(_statusText(status)),
+                    subtitle: Text(_statusText(context, status)),
                   ),
                   const Divider(height: 1),
 
@@ -9892,7 +10255,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                         markNewForRequester: true,
                                       );
                                     },
-                              child: const Text('Accept'),
+                              child: Text(AppLanguage.tr(context, 'Schválit', 'Accept')),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -9922,7 +10285,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                         markNewForRequester: true,
                                       );
                                     },
-                              child: const Text('Decline'),
+                              child: Text(AppLanguage.tr(context, 'Odmítnout', 'Decline')),
                             ),
                           ),
                         ],
@@ -9931,11 +10294,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                     SwitchListTile(
                       value: _moderatorAnonymous,
                       onChanged: (v) => setState(() => _moderatorAnonymous = v),
-                      title: const Text('Odpovídat anonymně'),
+                      title: Text(AppLanguage.tr(context, 'Odpovídat anonymně', 'Reply anonymously')),
                       subtitle: Text(
                         _moderatorAnonymous
-                            ? 'U druhé strany bude „Moderátor“'
-                            : 'U druhé strany bude @$myGithub',
+                            ? AppLanguage.tr(context, 'U druhé strany bude „Moderátor"', 'The other side will see “Moderator”')
+                            : '${AppLanguage.tr(context, 'U druhé strany bude', 'The other side will see')} @$myGithub',
                       ),
                     ),
                     const Divider(height: 1),
@@ -9947,7 +10310,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                       builder: (context, msgSnap) {
                         final value = msgSnap.data?.snapshot.value;
                         if (value is! Map) {
-                          return const Center(child: Text('Zatím žádné zprávy.'));
+                          return Center(child: Text(AppLanguage.tr(context, 'Zatím žádné zprávy.', 'No messages yet.')));
                         }
 
                         final items = value.entries
@@ -9975,9 +10338,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             final isMine = (!isModerator && from == 'user') || (isModerator && from == 'moderator');
                             final bubbleColor = important ? Colors.orange.withOpacity(0.25) : Theme.of(context).colorScheme.surface;
                             final label = from == 'system'
-                                ? 'Systém'
+                                ? AppLanguage.tr(context, 'Systém', 'System')
                                 : (from == 'moderator'
-                                    ? (anonymous ? 'Moderátor' : '@$moderatorGithub')
+                                  ? (anonymous ? AppLanguage.tr(context, 'Moderátor', 'Moderator') : '@$moderatorGithub')
                                     : '@$requesterGh');
 
                             return Padding(
@@ -10014,7 +10377,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                         Expanded(
                           child: TextField(
                             controller: _messageController,
-                            decoration: const InputDecoration(labelText: 'Zpráva'),
+                            decoration: InputDecoration(labelText: AppLanguage.tr(context, 'Zpráva', 'Message')),
                             onSubmitted: (_) => _sendVerified(asModerator: isModerator, moderatorGithub: myGithub),
                           ),
                         ),
@@ -10142,7 +10505,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                         if (!isAdmin) {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('E2EE: skupina není připravená (chybí klíč).')),
+                              SnackBar(content: Text(AppLanguage.tr(context, 'E2EE: skupina není připravená (chybí klíč).', 'E2EE: group is not ready (missing key).'))),
                             );
                           }
                           return;
@@ -10153,7 +10516,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                         } catch (e) {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('E2EE: nelze nastavit skupinový klíč: $e')),
+                              SnackBar(content: Text('${AppLanguage.tr(context, 'E2EE: nelze nastavit skupinový klíč', 'E2EE: failed to set group key')}: $e')),
                             );
                           }
                           return;
@@ -10168,7 +10531,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                       } catch (e) {
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('E2EE: šifrování selhalo: $e')),
+                            SnackBar(content: Text('${AppLanguage.tr(context, 'E2EE: šifrování selhalo', 'E2EE: encryption failed')}: $e')),
                           );
                         }
                         return;
@@ -10214,7 +10577,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           onPressed: () => setState(() => _activeGroupId = null),
                         ),
                         title: Text(title),
-                        subtitle: Text(isAdmin ? 'Admin' : 'Member'),
+                        subtitle: Text(isAdmin ? AppLanguage.tr(context, 'Admin', 'Admin') : AppLanguage.tr(context, 'Člen', 'Member')),
                         trailing: const Icon(Icons.info_outline),
                         onTap: () async {
                           final res = await Navigator.of(context).push<String>(
@@ -10233,7 +10596,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           builder: (context, msgSnap) {
                             final v = msgSnap.data?.snapshot.value;
                             if (v is! Map) {
-                              return const Center(child: Text('Zatím žádné zprávy.'));
+                              return Center(child: Text(AppLanguage.tr(context, 'Zatím žádné zprávy.', 'No messages yet.')));
                             }
                             final now = DateTime.now().millisecondsSinceEpoch;
                             final items = <Map<String, dynamic>>[];
@@ -10581,8 +10944,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           }
                           if (names.isEmpty) return const SizedBox.shrink();
                           final label = names.length == 1
-                              ? 'Píše ${names.first}'
-                              : 'Píší ${names.take(3).join(', ')}${names.length > 3 ? '…' : ''}';
+                              ? '${AppLanguage.tr(context, 'Píše', 'Typing')} ${names.first}'
+                            : '${AppLanguage.tr(context, 'Píší', 'Typing')} ${names.take(3).join(', ')}${names.length > 3 ? '…' : ''}';
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                             child: Align(
@@ -10809,7 +11172,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    tooltip: 'Fingerprint klíčů',
+                    tooltip: AppLanguage.tr(context, 'Fingerprint klíčů', 'Key fingerprint'),
                     icon: const Icon(Icons.fingerprint),
                     onPressed: () async {
                       final peerUid = await _ensureActiveOtherUid();
@@ -10860,7 +11223,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                     await _acceptDmRequest(myUid: current.uid, otherLogin: fromLogin);
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${AppLanguage.tr(context, 'Chyba', 'Error')}: $e')));
                     }
                   }
                 }
@@ -10872,7 +11235,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                     await _rejectDmRequest(myUid: current.uid, otherLogin: fromLogin);
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('${AppLanguage.tr(context, 'Chyba', 'Error')}: $e')),
+                      );
                     }
                   }
                 }
@@ -10881,8 +11246,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                   children: [
                     ListTile(
                       leading: const Icon(Icons.mail_lock_outlined),
-                      title: const Text('Žádosti o chat'),
-                      subtitle: Text('Čeká: ${items.length}'),
+                      title: Text(AppLanguage.tr(context, 'Žádosti o chat', 'Chat requests')),
+                      subtitle: Text('${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}'),
                     ),
                     ...items.map((req) {
                       final fromLogin = (req['fromLogin'] ?? '').toString();
@@ -10898,7 +11263,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 child: fromAvatar.isEmpty ? const Icon(Icons.person, size: 18) : null,
                               ),
                         title: Text('@$fromLogin'),
-                        subtitle: hasEncryptedText ? const Text('Zpráva: 🔒 (šifrovaně)') : const Text('Invajt do privátu'),
+                        subtitle: hasEncryptedText
+                          ? Text(AppLanguage.tr(context, 'Zpráva: 🔒 (šifrovaně)', 'Message: 🔒 (encrypted)'))
+                          : Text(AppLanguage.tr(context, 'Invajt do privátu', 'Private chat invite')),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -10934,7 +11301,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           width: double.infinity,
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           color: Theme.of(context).colorScheme.surface,
-                          child: const Text('Uživatel je zablokovaný. Zprávy nelze odesílat.'),
+                          child: Text(AppLanguage.tr(context, 'Uživatel je zablokovaný. Zprávy nelze odesílat.', 'User is blocked. Messages cannot be sent.')),
                         ),
                       Expanded(
                         child: Container(
@@ -10946,7 +11313,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             builder: (context, snapshot) {
                               final value = snapshot.data?.snapshot.value;
                               if (value is! Map) {
-                                return const Center(child: Text('Napiš první zprávu.'));
+                                return Center(child: Text(AppLanguage.tr(context, 'Napiš první zprávu.', 'Write the first message.')));
                               }
 
                               if (_activeOtherUid == null || _activeOtherUidLoginLower != loginLower) {
@@ -11337,7 +11704,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                     _typingPill(),
                                     const SizedBox(width: 8),
                                     Text(
-                                      'Píše @$login',
+                                      '${AppLanguage.tr(context, 'Píše', 'Typing')} @$login',
                                       style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
                                     ),
                                   ],
@@ -11372,7 +11739,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 IconButton(
                                   icon: const Icon(Icons.close, size: 18),
                                   onPressed: _clearReplyTarget,
-                                  tooltip: 'Zrušit odpověď',
+                                  tooltip: AppLanguage.tr(context, 'Zrušit odpověď', 'Cancel reply'),
                                 ),
                               ],
                             ),
@@ -11396,7 +11763,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                         myLogin: myGithub.trim(),
                                         otherUid: _activeOtherUid!,
                                         otherLogin: login,
-                                        messageText: '🔐 Prosím povol sdílení E2EE klíče, ať se naváže šifrovaná komunikace.',
+                                        messageText: AppLanguage.tr(context, '🔐 Prosím povol sdílení E2EE klíče, ať se naváže šifrovaná komunikace.', '🔐 Please allow E2EE key sharing so encrypted communication can start.'),
                                       );
                                       if (!mounted) return;
                                       setState(() {
@@ -11406,15 +11773,15 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                         SnackBar(
                                           content: Text(
                                             dmAccepted
-                                                ? 'Žádost o sdílení klíče odeslána.'
-                                                : 'Invajt + žádost o sdílení klíče odeslána.',
+                                                ? AppLanguage.tr(context, 'Žádost o sdílení klíče odeslána.', 'Key sharing request sent.')
+                                                : AppLanguage.tr(context, 'Invajt + žádost o sdílení klíče odeslána.', 'Invite + key sharing request sent.'),
                                           ),
                                         ),
                                       );
                                     } catch (e) {
                                       if (!mounted) return;
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Chyba: $e')),
+                                        SnackBar(content: Text('${AppLanguage.tr(context, 'Chyba', 'Error')}: $e')),
                                       );
                                     } finally {
                                       if (mounted) setState(() => _sendingInlineKeyRequest = false);
@@ -11429,8 +11796,8 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 : const Icon(Icons.key_outlined),
                             label: Text(
                               dmAccepted
-                                  ? 'Poprosit sdílet klíč'
-                                  : 'Poslat invajt + požádat o klíč',
+                                  ? AppLanguage.tr(context, 'Poprosit sdílet klíč', 'Ask to share key')
+                                  : AppLanguage.tr(context, 'Poslat invajt + požádat o klíč', 'Send invite + ask for key'),
                             ),
                           ),
                         ),
@@ -11441,7 +11808,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             Expanded(
                               child: TextField(
                                 controller: _messageController,
-                                decoration: const InputDecoration(labelText: 'Zpráva / Markdown'),
+                                decoration: InputDecoration(labelText: AppLanguage.tr(context, 'Zpráva / Markdown', 'Message / Markdown')),
                                 enabled: !blocked && canSend,
                                 minLines: 1,
                                 maxLines: 6,
@@ -11458,7 +11825,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             ),
                             const SizedBox(width: 8),
                             PopupMenuButton<String>(
-                              tooltip: 'Více',
+                              tooltip: AppLanguage.tr(context, 'Více', 'More'),
                               enabled: (!blocked && canSend),
                               onSelected: (value) async {
                                 if (value == 'image') {
@@ -11485,21 +11852,21 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 }
                               },
                               itemBuilder: (context) => [
-                                const PopupMenuItem<String>(
+                                PopupMenuItem<String>(
                                   value: 'image',
                                   child: ListTile(
                                     dense: true,
-                                    leading: Icon(Icons.image_outlined),
-                                    title: Text('Poslat obrázek'),
+                                    leading: const Icon(Icons.image_outlined),
+                                    title: Text(AppLanguage.tr(context, 'Poslat obrázek', 'Send image')),
                                     contentPadding: EdgeInsets.zero,
                                   ),
                                 ),
-                                const PopupMenuItem<String>(
+                                PopupMenuItem<String>(
                                   value: 'code',
                                   child: ListTile(
                                     dense: true,
-                                    leading: Icon(Icons.code),
-                                    title: Text('Vložit kód'),
+                                    leading: const Icon(Icons.code),
+                                    title: Text(AppLanguage.tr(context, 'Vložit kód', 'Insert code')),
                                     contentPadding: EdgeInsets.zero,
                                   ),
                                 ),
@@ -11512,7 +11879,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                       leading: Icon(
                                         _dmTtlMode == ttl ? Icons.radio_button_checked : Icons.radio_button_unchecked,
                                       ),
-                                      title: Text('Ničení: ${ttlLabel(ttl)}'),
+                                      title: Text('${AppLanguage.tr(context, 'Ničení', 'TTL')}: ${ttlLabel(ttl)}'),
                                       contentPadding: EdgeInsets.zero,
                                     ),
                                   ),

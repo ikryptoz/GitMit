@@ -7,16 +7,19 @@ import 'package:gitmit/data_usage.dart';
 ///
 /// Provide it at build/run time via:
 /// `--dart-define=GITHUB_TOKEN=...`
-const String githubToken = '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';
+const String githubToken = String.fromEnvironment('GITHUB_TOKEN', defaultValue: '');
 
-Map<String, String> githubApiHeaders({String accept = 'application/vnd.github+json'}) {
+Map<String, String> githubApiHeaders({
+  String accept = 'application/vnd.github+json',
+  bool includeAuth = true,
+}) {
   final headers = <String, String>{
     'Accept': accept,
     'User-Agent': 'gitmit',
   };
 
   final token = githubToken.trim();
-  if (token.isNotEmpty) {
+  if (includeAuth && token.isNotEmpty) {
     // GitHub v3 REST accepts "token <PAT>".
     headers['Authorization'] = 'token $token';
   }
@@ -51,6 +54,27 @@ Future<List<GithubUser>> searchGithubUsers(String query) async {
     headers: githubApiHeaders(),
     category: 'api',
   );
+
+  // If token is invalid/expired, gracefully fallback to unauthenticated search
+  // so Contacts search still works (with stricter rate limits).
+  if ((res.statusCode == 401 || res.statusCode == 403) && githubToken.trim().isNotEmpty) {
+    final retry = await DataUsageTracker.trackedGet(
+      uri,
+      headers: githubApiHeaders(includeAuth: false),
+      category: 'api',
+    );
+    if (retry.statusCode == 200) {
+      final decoded = jsonDecode(retry.body);
+      if (decoded is! Map<String, dynamic>) return const [];
+      final items = decoded['items'];
+      if (items is! List) return const [];
+      return items
+          .whereType<Map>()
+          .map((e) => GithubUser.fromJson(Map<String, dynamic>.from(e)))
+          .where((u) => u.login.isNotEmpty)
+          .toList(growable: false);
+    }
+  }
 
   if (res.statusCode != 200) {
     throw Exception('GitHub API error: ${res.statusCode}');

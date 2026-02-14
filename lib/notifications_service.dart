@@ -31,8 +31,8 @@ class AppNotifications {
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'messages',
-    'Zprávy',
-    description: 'Upozornění na nové zprávy',
+    'Messages',
+    description: 'New message notifications',
     importance: Importance.high,
   );
 
