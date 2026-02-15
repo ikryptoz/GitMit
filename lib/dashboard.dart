@@ -17,6 +17,7 @@ import 'package:gitmit/app_language.dart';
 import 'package:gitmit/group_invites.dart';
 import 'package:gitmit/github_api.dart';
 import 'package:gitmit/join_group_via_link_qr_page.dart';
+import 'package:gitmit/deep_links.dart';
 import 'package:gitmit/plaintext_cache.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:gitmit/data_usage.dart';
@@ -46,6 +47,12 @@ class _InviteSendResult {
   final bool ok;
   final String? error;
   final bool manualFallbackUsed;
+}
+
+void _safeShowSnackBarSnackBar(SnackBar sb) {
+  final ctx = DeepLinks.navigatorKey.currentContext;
+  if (ctx == null) return;
+  ScaffoldMessenger.of(ctx).showSnackBar(sb);
 }
 
 Uri _manualGithubInviteUri({
@@ -485,7 +492,7 @@ class _RichMessageText extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.white24),
         ),
-        blockquote: base.copyWith(color: textColor.withOpacity(0.8)),
+        blockquote: base.copyWith(color: textColor.withAlpha((0.8 * 255).round())),
         listBullet: base,
       ),
       onTapLink: (text, href, title) {
@@ -786,11 +793,11 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     try {
       await action();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t(context, 'Hotovo.', 'Done.'))));
+        _safeShowSnackBarSnackBar(SnackBar(content: Text(t(context, 'Hotovo.', 'Done.'))));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
+        _safeShowSnackBarSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
       }
     }
   }
@@ -822,7 +829,7 @@ class _UserProfilePageState extends State<_UserProfilePage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
+        _safeShowSnackBarSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
       }
     }
   }
@@ -1218,7 +1225,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Chyba: $e')));
+      _safeShowSnackBarSnackBar(SnackBar(content: Text('Chyba: $e')));
     } finally {
       if (mounted) setState(() => _pickingLogo = false);
     }
@@ -1340,7 +1347,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
     final title = _title.text.trim();
     final desc = _description.text.trim();
     if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t(context, 'Vyplň název skupiny.', 'Fill in group title.'))));
+      _safeShowSnackBarSnackBar(SnackBar(content: Text(t(context, 'Vyplň název skupiny.', 'Fill in group title.'))));
       return;
     }
 
@@ -1361,7 +1368,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
           // Don't fail group creation just because logo upload failed.
           logoUrl = null;
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            _safeShowSnackBarSnackBar(
               SnackBar(content: Text('${t(context, 'Logo se nepodařilo nahrát (skupina se vytvoří i tak)', 'Logo upload failed (group will still be created)')}: $e')),
             );
           }
@@ -1416,7 +1423,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
 
       if (!mounted) return;
       if (missing.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _safeShowSnackBarSnackBar(
           SnackBar(content: Text('${t(context, 'Nenalezeno v aplikaci', 'Not found in app')}: ${missing.map((e) => '@$e').join(', ')}')),
         );
       }
@@ -1424,7 +1431,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       Navigator.of(context).pop(groupId);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
+        _safeShowSnackBarSnackBar(SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1720,7 +1727,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${AppLanguage.tr(context, 'Logo se nepodařilo nahrát', 'Failed to upload logo')}: $e')));
+      _safeShowSnackBarSnackBar(SnackBar(content: Text('${AppLanguage.tr(context, 'Logo se nepodařilo nahrát', 'Failed to upload logo')}: $e')));
     }
   }
 
@@ -1977,7 +1984,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                       'createdAt': ServerValue.timestamp,
                                     });
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      _safeShowSnackBarSnackBar(
                                         SnackBar(content: Text(t(context, 'Pozvánka odeslána.', 'Invite sent.'))),
                                       );
                                     }
@@ -1988,14 +1995,14 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                       requestedByGithub: myGithub,
                                     );
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      _safeShowSnackBarSnackBar(
                                         SnackBar(content: Text(t(context, 'Žádost odeslána adminům.', 'Request sent to admins.'))),
                                       );
                                     }
                                   }
                                 } catch (e) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    _safeShowSnackBarSnackBar(
                                       SnackBar(content: Text('${t(context, 'Chyba', 'Error')}: $e')),
                                     );
                                   }
@@ -2078,7 +2085,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 }
                                 if (candidates.isEmpty) {
                                   if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  _safeShowSnackBarSnackBar(
                                     SnackBar(content: Text(t(context, 'Ve skupině není nikdo další. Můžeš ji jen smazat.', 'There is no one else in the group. You can only delete it.'))),
                                   );
                                   return;
@@ -2571,7 +2578,7 @@ class _DashboardPageState extends State<DashboardPage> {
           }
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
+        _safeShowSnackBarSnackBar(
           SnackBar(
             content: Text(
               inviteResult.ok
@@ -2679,6 +2686,182 @@ class _DashboardPageState extends State<DashboardPage> {
 
       await _logout();
     });
+    // After device session is initialized, check pairing state and possibly
+    // show pairing QR if this web session is not paired and the published
+    // signing key on server differs from the local signing key.
+    unawaited(_maybeShowPairingQrIfNeeded());
+  }
+
+  Future<void> _maybeShowPairingQrIfNeeded() async {
+    try {
+      final current = FirebaseAuth.instance.currentUser;
+      if (current == null) return;
+      final deviceId = _currentDeviceId ?? await _getOrCreateLocalDeviceId();
+      if (deviceId.isEmpty) return;
+
+      final pairedSnap = await rtdb().ref('deviceSessions/${current.uid}/$deviceId/paired').get();
+      if (pairedSnap.exists && (pairedSnap.value == true || pairedSnap.value == 'true')) return;
+
+      String localFp = '';
+      String serverFp = '';
+      try {
+        localFp = await E2ee.fingerprintForMySigningKey(bytes: 8);
+      } catch (_) {}
+      try {
+        serverFp = await E2ee.fingerprintForUserSigningKey(uid: current.uid, bytes: 8) ?? '';
+      } catch (_) {}
+
+      if (localFp.isNotEmpty && serverFp.isNotEmpty && localFp == serverFp) {
+        // Keys already match; mark paired so we don't prompt again.
+        try {
+          await rtdb().ref('deviceSessions/${current.uid}/$deviceId').update({'paired': true, 'updatedAt': ServerValue.timestamp});
+        } catch (_) {}
+        return;
+      }
+
+      // Otherwise, start a pairing token and show QR dialog.
+      final token = rtdb().ref().push().key ?? DateTime.now().millisecondsSinceEpoch.toString();
+      final expiresAt = DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch;
+      final ref = rtdb().ref('deviceKeyTransfers/${current.uid}/$token');
+      await ref.set({
+        'status': 'waiting',
+        'createdAt': ServerValue.timestamp,
+        'expiresAt': expiresAt,
+      });
+
+      final qrPayload = Uri(
+        scheme: 'gitmit',
+        host: 'device-pair',
+        queryParameters: {
+          'uid': current.uid,
+          'token': token,
+        },
+      ).toString();
+
+      // Listen for pairing updates: import keys when mobile uploads payload
+      // (status == 'ready'), then mark completed/paired and close dialog.
+      StreamSubscription<DatabaseEvent>? sub;
+      sub = ref.onValue.listen((ev) async {
+        final v = ev.snapshot.value;
+        if (v is! Map) return;
+        final m = Map<String, dynamic>.from(v);
+        final status = (m['status'] ?? '').toString();
+
+        if (status == 'ready') {
+          final payloadRaw = m['payload'];
+          if (payloadRaw is! Map) {
+            if (mounted) {
+              _safeShowSnackBarSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Párovací data jsou neplatná.', 'Pairing payload is invalid.'))));
+            }
+            return;
+          }
+
+          final asMap = Map<dynamic, dynamic>.from(payloadRaw);
+          final material = <String, String>{};
+          final importedPt = <String, String>{};
+
+          final nestedE2ee = asMap['e2ee'];
+          if (nestedE2ee is Map) {
+            for (final e in nestedE2ee.entries) {
+              final k = e.key.toString();
+              final val = (e.value ?? '').toString();
+              if (k.trim().isEmpty || val.trim().isEmpty) continue;
+              material[k] = val;
+            }
+          } else {
+            for (final e in asMap.entries) {
+              final k = e.key.toString();
+              final val = (e.value ?? '').toString();
+              if (k.trim().isEmpty || val.trim().isEmpty) continue;
+              material[k] = val;
+            }
+          }
+
+          final nestedPt = asMap['ptcache'];
+          if (nestedPt is Map) {
+            for (final e in nestedPt.entries) {
+              final k = e.key.toString();
+              final val = (e.value ?? '').toString();
+              if (k.trim().isEmpty || val.trim().isEmpty) continue;
+              importedPt[k] = val;
+            }
+          }
+
+          if (material.isEmpty) {
+            if (mounted) {
+              _safeShowSnackBarSnackBar(SnackBar(content: Text(AppLanguage.tr(context, 'Párovací data neobsahují žádné klíče.', 'Pairing payload contains no keys.'))));
+            }
+            return;
+          }
+
+          try {
+            await E2ee.importDeviceKeyMaterial(material);
+            if (importedPt.isNotEmpty) {
+              await PlaintextCache.importEntries(importedPt);
+            }
+            await E2ee.publishMyPublicKey(uid: current.uid);
+            // Rebuild minimal plaintext cache marker and flush local cache.
+            try {
+              await PlaintextCache.flushNow();
+              await rtdb().ref('users/${current.uid}').update({'e2eeCacheRebuiltAt': ServerValue.timestamp});
+            } catch (_) {}
+            await ref.update({
+              'status': 'completed',
+              'completedAt': ServerValue.timestamp,
+            });
+
+            // Mark session paired
+            try {
+              final did = deviceId;
+              if (did.isNotEmpty) {
+                await rtdb().ref('deviceSessions/${current.uid}/$did').update({'paired': true, 'updatedAt': ServerValue.timestamp});
+              }
+            } catch (_) {}
+
+            await sub?.cancel();
+            if (mounted) Navigator.of(context, rootNavigator: true).pop();
+          } catch (e) {
+            if (mounted) {
+              _safeShowSnackBarSnackBar(SnackBar(content: Text('${AppLanguage.tr(context, 'Přenos klíčů selhal', 'Key transfer failed')}: $e')));
+            }
+          }
+        } else if (status == 'completed') {
+          try {
+            await rtdb().ref('deviceSessions/${current.uid}/$deviceId').update({'paired': true, 'updatedAt': ServerValue.timestamp});
+          } catch (_) {}
+          await sub?.cancel();
+          if (mounted) Navigator.of(context, rootNavigator: true).pop();
+        }
+      });
+
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (context) => AlertDialog(
+          title: Text(AppLanguage.tr(context, 'Spáruj webovou relaci', 'Pair this web session')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(width: 220, height: 220, child: QrImageView(data: qrPayload, backgroundColor: Colors.white)),
+              const SizedBox(height: 12),
+              Text(AppLanguage.tr(context, 'Naskenuj tento QR kód v mobilní aplikaci v Nastavení → Zařízení, aby ses spároval(a) s touto webovou relací.', 'Scan this QR code in the mobile app at Settings → Devices to link your mobile app with this web session.')),
+              const SizedBox(height: 8),
+              Text(AppLanguage.tr(context, 'Pokud nemáš mobilní aplikaci, stáhni GitMit z obchodu s aplikacemi.', 'If you do not have the mobile app, install GitMit from your app store.')),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () async {
+              await ref.update({'status': 'cancelled', 'updatedAt': ServerValue.timestamp});
+              await sub?.cancel();
+              Navigator.pop(context);
+            }, child: Text(AppLanguage.tr(context, 'Zavřít', 'Close'))),
+          ],
+        ),
+      );
+    } catch (_) {
+      // best-effort
+    }
   }
 
   Future<void> _updateDeviceSessionOnline(bool online) async {
@@ -3225,7 +3408,7 @@ Color _resolveBubbleColor(BuildContext context, String key) {
     case 'error':
       return cs.error;
     case 'surfaceVariant':
-      return cs.surfaceVariant;
+      return cs.surfaceContainerHighest;
     case 'primaryContainer':
       return cs.primaryContainer;
     case 'secondaryContainer':
@@ -4552,7 +4735,7 @@ class _SettingsAccountPageState extends State<_SettingsAccountPage> {
     }
 
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _safeShowSnackBarSnackBar(
         SnackBar(content: Text(AppLanguage.tr(context, 'Nepodařilo se otevřít GitHub logout.', 'Failed to open GitHub logout.'))),
       );
     }
@@ -4909,7 +5092,7 @@ class _SettingsPrivacyPage extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             children: [
               DropdownButtonFormField<int>(
-                value: s.autoDeleteSeconds,
+                initialValue: s.autoDeleteSeconds,
                 decoration: InputDecoration(labelText: t(context, 'Auto-delete zpráv', 'Auto-delete messages')),
                 items: [
                   DropdownMenuItem(value: 0, child: Text(t(context, 'Vypnuto', 'Off'))),
@@ -4926,7 +5109,7 @@ class _SettingsPrivacyPage extends StatelessWidget {
                 title: Text(t(context, 'Přítomnost (online/offline)', 'Presence (online/offline)')),
               ),
               DropdownButtonFormField<String>(
-                value: s.presenceStatus,
+                initialValue: s.presenceStatus,
                 decoration: InputDecoration(labelText: t(context, 'Status', 'Status')),
                 items: [
                   const DropdownMenuItem(value: 'online', child: Text('Online')),
@@ -5461,7 +5644,7 @@ class UsagePie extends StatelessWidget {
         painter: _UsagePiePainter(
           data: data,
           colors: colors,
-          background: Theme.of(context).colorScheme.surfaceVariant,
+          background: Theme.of(context).colorScheme.surfaceContainerHighest,
         ),
       ),
     );
@@ -5724,6 +5907,14 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
           'completedAt': ServerValue.timestamp,
         });
 
+        // Mark this web device session as paired so we don't prompt again.
+        try {
+          final deviceId = await _getOrCreateLocalDeviceId();
+          if (deviceId.isNotEmpty) {
+            await rtdb().ref('deviceSessions/$uid/$deviceId').update({'paired': true, 'updatedAt': ServerValue.timestamp});
+          }
+        } catch (_) {}
+
         if (mounted) {
           setState(() {
             _pairingInfo = AppLanguage.tr(
@@ -5733,7 +5924,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
             );
             _pairingBusy = false;
           });
-          ScaffoldMessenger.of(context).showSnackBar(
+          _safeShowSnackBarSnackBar(
             SnackBar(content: Text(_pairingInfo!)),
           );
         }
@@ -5770,14 +5961,14 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
 
     final parsed = _parsePairingPayload(raw);
     if (parsed == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _safeShowSnackBarSnackBar(
         SnackBar(content: Text(AppLanguage.tr(context, 'Neplatný párovací QR kód.', 'Invalid pairing QR code.'))),
       );
       return;
     }
 
     if (parsed.uid != uid) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _safeShowSnackBarSnackBar(
         SnackBar(content: Text(AppLanguage.tr(context, 'QR kód patří jinému účtu.', 'QR code belongs to a different account.'))),
       );
       return;
@@ -5830,7 +6021,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
             'Keys were sent to web. Wait for import confirmation on web.',
           );
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        _safeShowSnackBarSnackBar(
           SnackBar(content: Text(_pairingInfo!)),
         );
       }
@@ -5976,7 +6167,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
         'updatedAt': ServerValue.timestamp,
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      _safeShowSnackBarSnackBar(
         SnackBar(content: Text(AppLanguage.tr(context, 'Zařízení bylo odhlášeno.', 'Device has been signed out.'))),
       );
     } finally {
@@ -6253,7 +6444,7 @@ class _SettingsLanguagePage extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             children: [
               DropdownButtonFormField<String>(
-                value: s.language,
+                initialValue: s.language,
                 decoration: InputDecoration(labelText: AppLanguage.tr(context, 'Jazyk', 'Language')),
                 items: [
                   DropdownMenuItem(value: 'cs', child: Text(AppLanguage.tr(context, 'Čeština', 'Czech'))),
@@ -6306,7 +6497,7 @@ class _ChatPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final bgColor = _backgroundColor(context, settings.wallpaperUrl);
     final decoration = BoxDecoration(
-      color: bgColor ?? Theme.of(context).colorScheme.surfaceVariant,
+      color: bgColor ?? Theme.of(context).colorScheme.surfaceContainerHighest,
       border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       borderRadius: BorderRadius.circular(14),
     );
@@ -6884,7 +7075,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                                         );
                                         if (mounted) {
                                           _verifiedReason.clear();
-                                          ScaffoldMessenger.of(context).showSnackBar(
+                                          _safeShowSnackBarSnackBar(
                                             SnackBar(content: Text(t(context, 'Žádost odeslána, čeká se na moderátora.', 'Request sent, waiting for moderator.'))),
                                           );
                                         }
@@ -6915,7 +7106,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                                         );
                                         if (mounted) {
                                           _verifiedReason.clear();
-                                          ScaffoldMessenger.of(context).showSnackBar(
+                                          _safeShowSnackBarSnackBar(
                                             SnackBar(content: Text(t(context, 'Žádost odeslána, čeká se na moderátora.', 'Request sent, waiting for moderator.'))),
                                           );
                                         }
@@ -7604,6 +7795,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   String? _activeVerifiedGithub;
   bool _moderatorAnonymous = true;
   final _messageController = TextEditingController();
+  final ScrollController _dmScrollController = ScrollController();
+  final ScrollController _verifiedScrollController = ScrollController();
+  final ScrollController _groupScrollController = ScrollController();
 
   final Map<String, String> _decryptedCache = {};
   final Set<String> _decrypting = {};
@@ -7859,7 +8053,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   }
 
   Widget _typingPill() {
-    final dotColor = Theme.of(context).colorScheme.onSurface.withOpacity(0.7);
+    final dotColor = Theme.of(context).colorScheme.onSurface.withAlpha((0.7 * 255).round());
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -7921,7 +8115,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
       width: maxWidth,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(radius),
       ),
       child: Column(
@@ -8340,6 +8534,11 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                   ),
               ],
             ),
+            if (kIsWeb)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('Toto je tento počítač (web)', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              ),
           ],
         ),
         actions: [
@@ -8594,6 +8793,9 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
   @override
   void dispose() {
     _messageController.dispose();
+    _dmScrollController.dispose();
+    _verifiedScrollController.dispose();
+    _groupScrollController.dispose();
     _typingTimeout?.cancel();
     _setTyping(false);
     if (_activeGroupId != null) {
@@ -9096,7 +9298,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         final copied = codePayload?.code ?? text;
         await Clipboard.setData(ClipboardData(text: copied));
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        _safeShowSnackBarSnackBar(
           SnackBar(content: Text(AppLanguage.tr(context, 'Zkopírováno.', 'Copied.'))),
         );
         return;
@@ -9104,7 +9306,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         if (link != null) {
           await Clipboard.setData(ClipboardData(text: link));
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
+          _safeShowSnackBarSnackBar(
             SnackBar(content: Text(AppLanguage.tr(context, 'Odkaz zkopírován.', 'Link copied.'))),
           );
         }
@@ -9134,7 +9336,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
         if (target.isEmpty) return;
         await _forwardToUsername(targetLogin: target, messageText: codePayload?.code ?? text);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        _safeShowSnackBarSnackBar(
           SnackBar(content: Text(AppLanguage.tr(context, 'Přeposláno.', 'Forwarded.'))),
         );
         return;
@@ -10913,7 +11115,23 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                           return at.compareTo(bt);
                         });
 
+                        // After the list rebuilds, scroll to bottom so newest message is visible.
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          try {
+                            if (_verifiedScrollController.hasClients) {
+                              try {
+                                _verifiedScrollController.animateTo(
+                                  _verifiedScrollController.position.maxScrollExtent,
+                                  duration: const Duration(milliseconds: 240),
+                                  curve: Curves.easeOut,
+                                );
+                              } catch (_) {}
+                            }
+                          } catch (_) {}
+                        });
+
                         return ListView.builder(
+                          controller: _verifiedScrollController,
                           padding: const EdgeInsets.all(12),
                           itemCount: items.length,
                           itemBuilder: (context, i) {
@@ -10925,7 +11143,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             final moderatorGithub = (m['moderatorGithub'] ?? myGithub).toString();
 
                             final isMine = (!isModerator && from == 'user') || (isModerator && from == 'moderator');
-                            final bubbleColor = important ? Colors.orange.withOpacity(0.25) : Theme.of(context).colorScheme.surface;
+                            final bubbleColor = important ? Colors.orange.withAlpha((0.25 * 255).round()) : Theme.of(context).colorScheme.surface;
                             final label = from == 'system'
                                 ? AppLanguage.tr(context, 'Systém', 'System')
                                 : (from == 'moderator'
@@ -11222,6 +11440,21 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                               return at.compareTo(bt);
                             });
 
+                            // After the list rebuilds, scroll to bottom so newest message is visible.
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              try {
+                                if (_groupScrollController.hasClients) {
+                                  try {
+                                    _groupScrollController.animateTo(
+                                      _groupScrollController.position.maxScrollExtent,
+                                      duration: const Duration(milliseconds: 240),
+                                      curve: Curves.easeOut,
+                                    );
+                                  } catch (_) {}
+                                }
+                              } catch (_) {}
+                            });
+
                             // Best-effort migration: encrypt old plaintext group messages.
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               for (final msg in items.take(30)) {
@@ -11262,6 +11495,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                             });
 
                             return ListView.builder(
+                              controller: _groupScrollController,
                               padding: const EdgeInsets.all(12),
                               itemCount: items.length,
                               itemBuilder: (context, i) {
@@ -11497,7 +11731,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                               timeLabel,
                                               style: TextStyle(
                                                 fontSize: 11,
-                                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                                color: Theme.of(context).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
                                               ),
                                             ),
                                           ),
@@ -11545,7 +11779,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                   const SizedBox(width: 8),
                                   Text(
                                     label,
-                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha((0.6 * 255).round())),
                                   ),
                                 ],
                               ),
@@ -11955,6 +12189,23 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                 return at.compareTo(bt);
                               });
 
+                              // After the list rebuilds, scroll to bottom so newest message is visible.
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                try {
+                                  if (_dmScrollController.hasClients) {
+                                    try {
+                                      _dmScrollController.animateTo(
+                                        _dmScrollController.position.maxScrollExtent,
+                                        duration: const Duration(milliseconds: 240),
+                                        curve: Curves.easeOut,
+                                      );
+                                    } catch (_) {}
+                                  }
+                                } catch (_) {
+                                  // ignore scroll errors
+                                }
+                              });
+
                               // Best-effort migration: encrypt old plaintext messages.
                               WidgetsBinding.instance.addPostFrameCallback((_) {
                                 for (final msg in items.take(30)) {
@@ -11994,6 +12245,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                               });
 
                               return ListView.builder(
+                                controller: _dmScrollController,
                                 padding: const EdgeInsets.all(12),
                                 itemCount: items.length,
                                 itemBuilder: (context, i) {
@@ -12251,7 +12503,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                       timeLabel,
                                                       style: TextStyle(
                                                         fontSize: 11,
-                                                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                                        color: Theme.of(context).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
                                                       ),
                                                     ),
                                                   if (isMe) ...[
@@ -12259,7 +12511,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                                     _statusChecks(
                                                       message: m,
                                                       otherUid: _activeOtherUid,
-                                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                                      color: Theme.of(context).colorScheme.onSurface.withAlpha((0.7 * 255).round()),
                                                     ),
                                                   ],
                                                 ],
@@ -12293,7 +12545,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                                     const SizedBox(width: 8),
                                     Text(
                                       '${AppLanguage.tr(context, 'Píše', 'Typing')} @$login',
-                                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha((0.6 * 255).round())),
                                     ),
                                   ],
                                 ),
