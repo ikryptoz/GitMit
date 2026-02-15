@@ -4355,8 +4355,8 @@ class _SettingsEncryptionPage extends StatelessWidget {
                   Text(
                     t(
                       context,
-                      'Fingerprint je otisk veřejného podpisového klíče (Ed25519). Ověř si ho s protějškem přes jiný kanál (osobně, Signal).',
-                      'A fingerprint is a hash of the public signing key (Ed25519). Verify it with your peer via another channel (in person, Signal).',
+                      'Fingerprint je otisk veřejného podpisového klíče (Ed25519). Ověř si ho s protějškem přes jiný kanál (osobně).',
+                      'A fingerprint is a hash of the public signing key (Ed25519). Verify it with your peer via another channel (in person).',
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -8295,7 +8295,7 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(AppLanguage.tr(context, 'Porovnejte fingerprint přes jiný kanál (např. osobně / Signal).', 'Compare fingerprint via another channel (e.g. in person / Signal).')),
+            Text(AppLanguage.tr(context, 'Porovnejte fingerprint přes jiný kanál (např. osobně).', 'Compare fingerprint via another channel (e.g. in person).')),
             if (changed == true)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -11077,7 +11077,6 @@ class _ChatsTabState extends State<_ChatsTab> with SingleTickerProviderStateMixi
                       await E2ee.publishMyPublicKey(uid: current.uid);
                     } catch (_) {}
 
-                    // Prefer stronger v2 group encryption (Signal-like sender key) when possible.
                     Map<String, Object?>? encrypted;
                     try {
                       encrypted = await E2ee.encryptForGroupSignalLike(groupId: groupId, myUid: current.uid, plaintext: outgoingText);
