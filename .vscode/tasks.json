@@ -10,6 +10,46 @@
 				"apk"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "build-apk-check",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"build",
+				"apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-apk-check",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"build",
+				"apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-apk-check",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"build",
+				"apk"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-apk-check",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"build",
+				"apk"
+			],
+			"isBackground": false
 		}
 	]
 }

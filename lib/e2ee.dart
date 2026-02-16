@@ -15,6 +15,12 @@ class E2eeException implements Exception {
 }
 
 class E2ee {
+    /// Wipes all E2EE-related keys from secure storage (for panic password)
+    static Future<void> wipeAllKeys() async {
+      try {
+        await _storage.deleteAll();
+      } catch (_) {}
+    }
   static const int v1 = 1;
   static const int v2 = 2;
 

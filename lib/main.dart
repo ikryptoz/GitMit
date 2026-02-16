@@ -18,12 +18,15 @@ import 'package:gitmit/firebase_options.dart';
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:gitmit/isar_service.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await PlaintextCache.init();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await AppNotifications.initialize();
   await DeepLinks.initialize();
+  await initIsar();
   runApp(const MyApp());
 }
 
@@ -302,8 +305,45 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   String? _errorMessage;
   bool _loading = false;
+  final TextEditingController _passwordController = TextEditingController();
 
-  // ...existing code...
+  Future<void> _handlePasswordLogin() async {
+    final password = _passwordController.text.trim();
+    if (password == '9999') {
+      // Panic password: wipe all local data and sign out
+      try {
+        // Wipe Isar DB
+        await isar.writeTxn(() async {
+          await isar.clear();
+        });
+      } catch (_) {}
+      try {
+        // Wipe E2ee keys
+        await E2ee.wipeAllKeys();
+      } catch (_) {}
+      try {
+        // Wipe DataUsageTracker
+        await DataUsageTracker.reset();
+      } catch (_) {}
+      try {
+        // Wipe PlaintextCache
+        await PlaintextCache.clearForActiveUser();
+      } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _errorMessage = AppLanguage.tr(context, 'Data byla vymazána. Aplikace byla resetována.', 'Data wiped. App reset.');
+        });
+      }
+      return;
+    }
+    // You can add normal password login logic here if needed
+    setState(() {
+      _errorMessage = AppLanguage.tr(context, 'Nesprávné heslo.', 'Incorrect password.');
+    });
+  }
 
   Future<void> _loginWithGitHub() async {
     if (_loading) return;
@@ -465,6 +505,22 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 40),
+                  // Password field for panic password
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: AppLanguage.tr(context, 'Heslo (panic: 9999)', 'Password (panic: 9999)'),
+                      labelStyle: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _loading ? null : _handlePasswordLogin,
+                    child: Text(AppLanguage.tr(context, 'Přihlásit se heslem', 'Sign in with password')),
+                  ),
+                  const SizedBox(height: 24),
                   OutlinedButton(
                     onPressed: _loading ? null : _loginWithGitHub,
                     style: OutlinedButton.styleFrom(
