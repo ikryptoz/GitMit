@@ -2412,12 +2412,17 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                               ...entries.map((e) {
                                 final uid = e.key.toString();
                                 final role = (e.value['role'] ?? 'member').toString();
+                                final avatarUrl = (e.value['avatarUrl'] ?? '').toString();
                                 return FutureBuilder<DataSnapshot>(
                                   future: rtdb().ref('users/$uid/githubUsername').get(),
                                   builder: (context, userSnap) {
                                     final gh = userSnap.data?.value?.toString() ?? uid;
                                     return ListTile(
-                                      leading: Icon(role == 'admin' ? Icons.admin_panel_settings : Icons.person),
+                                      leading: _AvatarWithPresenceDot(
+                                        uid: uid,
+                                        avatarUrl: avatarUrl.isNotEmpty ? avatarUrl : null,
+                                        radius: 20,
+                                      ),
                                       title: Text(gh.startsWith('@') ? gh : '@$gh'),
                                       subtitle: Text(role == 'admin' ? t(context, 'Admin', 'Admin') : t(context, 'Člen', 'Member')),
                                     );
