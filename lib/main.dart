@@ -18,7 +18,7 @@ import 'package:gitmit/firebase_options.dart';
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:gitmit/isar_service.dart';
+// ignore: uri_does_not_exist
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,7 +26,6 @@ Future<void> main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await AppNotifications.initialize();
   await DeepLinks.initialize();
-  await initIsar();
   runApp(const MyApp());
 }
 
@@ -311,12 +310,6 @@ class _LoginPageState extends State<LoginPage> {
     final password = _passwordController.text.trim();
     if (password == '9999') {
       // Panic password: wipe all local data and sign out
-      try {
-        // Wipe Isar DB
-        await isar.writeTxn(() async {
-          await isar.clear();
-        });
-      } catch (_) {}
       try {
         // Wipe E2ee keys
         await E2ee.wipeAllKeys();

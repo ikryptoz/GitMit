@@ -5,7 +5,8 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+// ignore: uri_does_not_exist
+import 'flutter_secure_storage_stub.dart' if (dart.library.io) 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:gitmit/rtdb.dart';
 import 'package:http/http.dart' as http;
@@ -98,7 +99,7 @@ class DataUsagePolicy {
 }
 
 class DataUsageTracker {
-  static const _storage = FlutterSecureStorage();
+  static final _storage = FlutterSecureStorage();
   static const _storagePrefix = 'data_usage_v1_';
   static const _policyCacheTtl = Duration(seconds: 30);
 

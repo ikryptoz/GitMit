@@ -3,7 +3,8 @@ import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+// ignore: uri_does_not_exist
+import 'flutter_secure_storage_stub.dart' if (dart.library.io) 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:gitmit/rtdb.dart';
 
 class E2eeException implements Exception {
@@ -49,7 +50,7 @@ class E2ee {
   static const String _kGSendPrefix = 'e2ee_gsender_v2_';
   static const String _kGRecvPrefix = 'e2ee_grecv_v2_';
 
-  static const _storage = FlutterSecureStorage();
+  static final _storage = FlutterSecureStorage();
 
   // Active Firebase UID used to namespace local E2EE state.
   // This prevents leaking keys/sessions across accounts on the same device.

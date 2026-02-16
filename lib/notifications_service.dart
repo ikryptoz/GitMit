@@ -8,7 +8,8 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+// ignore: uri_does_not_exist
+import 'flutter_secure_storage_stub.dart' if (dart.library.io) 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:gitmit/rtdb.dart';
 
 class AppNotifications {
@@ -22,7 +23,7 @@ class AppNotifications {
   static const String _onlineNotifyBackendToken = String.fromEnvironment('GITMIT_NOTIFY_BACKEND_TOKEN', defaultValue: '');
   static const String _webPushVapidKey = String.fromEnvironment('GITMIT_WEB_PUSH_VAPID_KEY', defaultValue: '');
 
-  static const _storage = FlutterSecureStorage();
+  static final _storage = FlutterSecureStorage();
   static const _fcmLastTokenPrefix = 'fcm_last_token_v1_';
 
   static StreamSubscription<DatabaseEvent>? _settingsSub;
@@ -82,7 +83,7 @@ class AppNotifications {
       const iosInit = DarwinInitializationSettings();
       const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
 
-      await _local.initialize(initSettings);
+      await _local.initialize(settings: initSettings);
 
       if (Platform.isAndroid) {
         final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -124,7 +125,7 @@ class AppNotifications {
       );
 
       final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
-      await _local.show(DateTime.now().millisecondsSinceEpoch ~/ 1000, title, body, details);
+      await _local.show(id: DateTime.now().millisecondsSinceEpoch ~/ 1000, title: title, body: body, notificationDetails: details);
     });
 
     _initialized = true;

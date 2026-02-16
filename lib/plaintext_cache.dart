@@ -14,7 +14,7 @@ class PlaintextCache {
   /// - Při navázání komunikace se vymění veřejné klíče a vygeneruje se session (double ratchet, Signal-like).
   /// - Každá zpráva má unikátní šifrovací klíč (forward secrecy, perfect forward secrecy).
   /// - Skupiny používají buď sdílený group key (v1), nebo Signal Sender Keys (v2, pokud všichni podporují).
-  /// - Klíče a sessiony jsou uloženy v zabezpečeném úložišti na zařízení (flutter_secure_storage).
+  /// - Klíče a sessiony jsou uloženy v zabezpečeném úložišti na zařízení (flutter_secure_storage), na webu není použito.
   /// - Fingerprint klíče je hash veřejného podpisového klíče (Ed25519), zobrazovaný v UI pro ověření identity.
   /// - Pokud se fingerprinty shodují, je to podezřelé (viz varování v UI).
   /// - Vyhledávání v chatu funguje pouze nad dešifrovaným obsahem (plaintext cache), nikdy nad ciphertextem.

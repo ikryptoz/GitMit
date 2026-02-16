@@ -1,4 +1,6 @@
-import 'package:isar/isar.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+// ignore: uri_does_not_exist, unused_import
+import 'isar_stub.dart' if (dart.library.io) 'package:isar/isar.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -35,18 +37,7 @@ import 'package:highlight/highlight.dart' as highlight;
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:http/http.dart' as http;
 
-import 'package:gitmit/isar_service.dart';
-import 'package:gitmit/message.dart';
-
-// Získání posledních N zpráv z lokální DB Isar
-Stream<List<Message>> watchMessages(String chatId, {int limit = 20}) {
-  return isar.messages
-      .filter()
-      .chatIdEqualTo(chatId)
-      .sortByTimestampDesc()
-      .watch(fireImmediately: true)
-      .map((msgs) => msgs.take(limit).toList());
-}
+// Dashboard bez Isar DB
 
 // Příklad použití compute pro dešifrování zprávy
 Future<String> decryptMessageInIsolate(Map<String, dynamic> args) async {
@@ -2393,6 +2384,51 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                         ],
                       ),
                       const SizedBox(height: 16),
+                      // --- Group Members Section ---
+                      FutureBuilder<DataSnapshot>(
+                        future: rtdb().ref('groupMembers/${widget.groupId}').get(),
+                        builder: (context, snap) {
+                          if (snap.connectionState != ConnectionState.done) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          final mv = snap.data?.value;
+                          final m = (mv is Map) ? mv : null;
+                          if (m == null || m.isEmpty) {
+                            return ListTile(
+                              leading: const Icon(Icons.group_off),
+                              title: Text(t(context, 'Žádní členové', 'No members')),
+                            );
+                          }
+                          final entries = m.entries.toList()
+                            ..sort((a, b) => (a.value['role'] == 'admin' ? -1 : 1));
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                t(context, 'Členové skupiny', 'Group Members'),
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                              const SizedBox(height: 8),
+                              ...entries.map((e) {
+                                final uid = e.key.toString();
+                                final role = (e.value['role'] ?? 'member').toString();
+                                return FutureBuilder<DataSnapshot>(
+                                  future: rtdb().ref('users/$uid/githubUsername').get(),
+                                  builder: (context, userSnap) {
+                                    final gh = userSnap.data?.value?.toString() ?? uid;
+                                    return ListTile(
+                                      leading: Icon(role == 'admin' ? Icons.admin_panel_settings : Icons.person),
+                                      title: Text(gh.startsWith('@') ? gh : '@$gh'),
+                                      subtitle: Text(role == 'admin' ? t(context, 'Admin', 'Admin') : t(context, 'Člen', 'Member')),
+                                    );
+                                  },
+                                );
+                              }).toList(),
+                              const Divider(height: 32),
+                            ],
+                          );
+                        },
+                      ),
 
                       if (isAdmin) ...[
                         TextField(
@@ -8482,8 +8518,6 @@ class _ChatPreview extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
     );
 
-    final inColor = _resolveBubbleColor(context, settings.bubbleIncoming);
-    final outColor = _resolveBubbleColor(context, settings.bubbleOutgoing);
     final inText = _resolveBubbleTextColor(context, settings.bubbleIncoming);
     final outText = _resolveBubbleTextColor(context, settings.bubbleOutgoing);
 
@@ -8492,8 +8526,7 @@ class _ChatPreview extends StatelessWidget {
       required String text,
       required double maxWidth,
     }) {
-      final color = outgoing ? outColor : inColor;
-      final tcolor = outgoing ? outText : inText;
+        final tcolor = outgoing ? outText : inText;
       return Align(
         alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
         child: ConstrainedBox(
@@ -8502,7 +8535,7 @@ class _ChatPreview extends StatelessWidget {
             margin: const EdgeInsets.symmetric(vertical: 6),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: color,
+                color: Colors.transparent,
               borderRadius: BorderRadius.circular(settings.bubbleRadius),
             ),
             child: Text(
@@ -10369,38 +10402,31 @@ class _ChatsTabState extends State<_ChatsTab>
     final dotColor = Theme.of(
       context,
     ).colorScheme.onSurface.withAlpha((0.7 * 255).round());
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: AnimatedBuilder(
-        animation: _typingAnim,
-        builder: (context, _) {
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: List.generate(3, (i) {
-              final phase = (_typingAnim.value * 2 * pi) + (i * 0.7);
-              final opacity = 0.25 + (0.75 * (0.5 + 0.5 * sin(phase)));
-              return Padding(
-                padding: EdgeInsets.only(right: i == 2 ? 0 : 4),
-                child: Opacity(
-                  opacity: opacity,
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: dotColor,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
+    return AnimatedBuilder(
+      animation: _typingAnim,
+      builder: (context, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (i) {
+            final phase = (_typingAnim.value * 2 * pi) + (i * 0.7);
+            final opacity = 0.25 + (0.75 * (0.5 + 0.5 * sin(phase)));
+            return Padding(
+              padding: EdgeInsets.only(right: i == 2 ? 0 : 4),
+              child: Opacity(
+                opacity: opacity,
+                child: Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: dotColor,
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-              );
-            }),
-          );
-        },
-      ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 
@@ -15733,7 +15759,6 @@ class _ChatsTabState extends State<_ChatsTab>
                                 final bubbleKey = isMe
                                     ? widget.settings.bubbleOutgoing
                                     : widget.settings.bubbleIncoming;
-                                final color = _bubbleColor(context, bubbleKey);
                                 final tcolor = _bubbleTextColor(
                                   context,
                                   bubbleKey,
@@ -15785,7 +15810,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                               vertical: 10,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: color,
+                                              color: Colors.transparent,
                                               borderRadius:
                                                   BorderRadius.circular(
                                                     widget
@@ -15971,58 +15996,6 @@ class _ChatsTabState extends State<_ChatsTab>
                             );
                           },
                         ),
-                      ),
-                      StreamBuilder<DatabaseEvent>(
-                        stream: rtdb().ref('typingGroups/$groupId').onValue,
-                        builder: (context, tSnap) {
-                          final tval = tSnap.data?.snapshot.value;
-                          final tmap = (tval is Map) ? tval : null;
-                          if (tmap == null || tmap.isEmpty)
-                            return const SizedBox.shrink();
-                          final names = <String>[];
-                          for (final entry in tmap.entries) {
-                            final uid = entry.key.toString();
-                            if (uid == current.uid) continue;
-                            final val = entry.value;
-                            if (val is Map) {
-                              final gh = (val['github'] ?? '').toString();
-                              if (gh.isNotEmpty) {
-                                names.add('@$gh');
-                              } else {
-                                names.add(uid);
-                              }
-                            }
-                          }
-                          if (names.isEmpty) return const SizedBox.shrink();
-                          final label = names.length == 1
-                              ? '${AppLanguage.tr(context, 'Píše', 'Typing')} ${names.first}'
-                              : '${AppLanguage.tr(context, 'Píší', 'Typing')} ${names.take(3).join(', ')}${names.length > 3 ? '…' : ''}';
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 6,
-                            ),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _typingPill(),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    label,
-                                    style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withAlpha((0.6 * 255).round()),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
                       ),
                       if (_replyToPreview != null &&
                           _replyToPreview!.isNotEmpty)
@@ -17283,45 +17256,47 @@ class _ChatsTabState extends State<_ChatsTab>
                           if (!blocked &&
                               _activeOtherUid != null &&
                               _activeOtherUid!.isNotEmpty)
-                            StreamBuilder<DatabaseEvent>(
-                              stream: rtdb()
-                                  .ref(
-                                    'typing/${_activeOtherUid!}/${current.uid}',
-                                  )
-                                  .onValue,
-                              builder: (context, tSnap) {
-                                final tval = tSnap.data?.snapshot.value;
-                                final typing = (tval is Map)
-                                    ? (tval['typing'] == true)
-                                    : false;
-                                if (!typing) return const SizedBox.shrink();
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 6,
-                                  ),
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        _typingPill(),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '${AppLanguage.tr(context, 'Píše', 'Typing')} @$login',
-                                          style: TextStyle(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurface
-                                                .withAlpha((0.6 * 255).round()),
+                            ((_activeOtherUid != null && _activeOtherUid != current.uid)
+                                ? StreamBuilder<DatabaseEvent>(
+                                    stream: rtdb()
+                                        .ref(
+                                          'typing/${_activeOtherUid!}/${current.uid}',
+                                        )
+                                        .onValue,
+                                    builder: (context, tSnap) {
+                                      final tval = tSnap.data?.snapshot.value;
+                                      final typing = (tval is Map)
+                                          ? (tval['typing'] == true)
+                                          : false;
+                                      if (!typing) return const SizedBox.shrink();
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 6,
+                                        ),
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              _typingPill(),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                '${AppLanguage.tr(context, 'Píše', 'Typing')} @$login',
+                                                style: TextStyle(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurface
+                                                      .withAlpha((0.6 * 255).round()),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                                      );
+                                    },
+                                  )
+                                : const SizedBox.shrink()),
                           if (_replyToPreview != null &&
                               _replyToPreview!.isNotEmpty)
                             Padding(
