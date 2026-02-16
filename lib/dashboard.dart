@@ -1647,6 +1647,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       setState(() {
         _pickedLogoBytes = bytes;
       });
+        // Typing indicator pills for group chat
     } catch (e) {
       if (!mounted) return;
       _safeShowSnackBarSnackBar(SnackBar(content: Text('Chyba: $e')));
