@@ -498,22 +498,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 40),
-                  // Password field for panic password
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: AppLanguage.tr(context, 'Heslo (panic: 9999)', 'Password (panic: 9999)'),
-                      labelStyle: const TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _loading ? null : _handlePasswordLogin,
-                    child: Text(AppLanguage.tr(context, 'Přihlásit se heslem', 'Sign in with password')),
-                  ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 64),
                   OutlinedButton(
                     onPressed: _loading ? null : _loginWithGitHub,
                     style: OutlinedButton.styleFrom(
