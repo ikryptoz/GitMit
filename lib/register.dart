@@ -26,12 +26,18 @@ class _RegisterPageState extends State<RegisterPage> {
       );
       final user = credential.user;
       if (user != null) {
-        await rtdb().ref('users/${user.uid}').set({
+        final userRef = rtdb().ref('users/${user.uid}');
+        await userRef.set({
           'email': _emailController.text.trim(),
           'createdAt': ServerValue.timestamp,
           'avatarUrl': '',
           'verified': false,
           'isModerator': false,
+        });
+        // Přidat achievement 'first_login'
+        await userRef.child('achievements/first_login').set({
+          'unlockedAt': ServerValue.timestamp,
+          'label': 'První přihlášení',
         });
       }
       if (mounted) {

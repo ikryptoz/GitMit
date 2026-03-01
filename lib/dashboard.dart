@@ -37,6 +37,35 @@ import 'package:highlight/highlight.dart' as highlight;
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:http/http.dart' as http;
 
+
+// Group achievement logic (top-level, accessible everywhere)
+Future<void> checkGroupAchievements(String uid) async {
+  try {
+    final groupsSnap = await rtdb().ref('groupMembers').get();
+    final groupsVal = groupsSnap.value;
+    int groupCount = 0;
+    if (groupsVal is Map) {
+      for (final entry in groupsVal.entries) {
+        final members = entry.value;
+        if (members is Map && members.containsKey(uid)) {
+          groupCount++;
+        }
+      }
+    }
+    if (groupCount >= 1) {
+      await rtdb().ref('users/$uid/achievements/first_group').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': 'První skupina',
+      });
+    }
+    if (groupCount >= 10) {
+      await rtdb().ref('users/$uid/achievements/10_groups').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': '10 skupin',
+      });
+    }
+  } catch (_) {}
+}
 // Dashboard bez Isar DB
 
 // Příklad použití compute pro dešifrování zprávy
@@ -649,6 +678,41 @@ Future<void> _sendDmRequestCore({
 
   Map<String, Object?>? encrypted;
   final pt = (messageText ?? '').trim();
+  // Achievement za 100 zpráv
+  try {
+    final sentSnap = await rtdb().ref('messages/$myUid').get();
+    int sent = 0;
+    if (sentSnap.value is Map) {
+      for (final entry in (sentSnap.value as Map).entries) {
+        final thread = entry.value;
+        if (thread is! Map) continue;
+        for (final msgEntry in thread.entries) {
+          final msg = msgEntry.value;
+          if (msg is! Map) continue;
+          final fromUid = (msg['fromUid'] ?? '').toString();
+          if (fromUid == myUid) sent++;
+        }
+      }
+    }
+    if (sent >= 100) {
+      await rtdb().ref('users/$myUid/achievements/100_messages').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': '100 odeslaných zpráv',
+      });
+    }
+    if (sent >= 1000) {
+      await rtdb().ref('users/$myUid/achievements/1000_messages').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': '1000 odeslaných zpráv',
+      });
+    }
+    if (sent >= 10000) {
+      await rtdb().ref('users/$myUid/achievements/10000_messages').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': '10 000 odeslaných zpráv',
+      });
+    }
+  } catch (_) {}
   if (pt.isNotEmpty) {
     try {
       encrypted = await E2ee.encryptForUser(otherUid: otherUid, plaintext: pt);
@@ -723,21 +787,29 @@ class _UserProfilePageState extends State<_UserProfilePage> {
 
   String _loginLower() => widget.login.trim().toLowerCase();
 
-  List<String> _parseBadges(Object? raw) {
+  List<String> _parseBadges(Object? raw, {int? createdAt}) {
+    final badges = <String>[];
     if (raw is List) {
-      return raw
-          .map((e) => e.toString())
-          .where((e) => e.trim().isNotEmpty)
-          .toList(growable: false);
+      badges.addAll(raw.map((e) => e.toString()).where((e) => e.trim().isNotEmpty));
+    } else if (raw is Map) {
+      // Show all achievement labels if present, otherwise fallback to key
+      for (final entry in raw.entries) {
+        if (entry.value is Map && entry.value['label'] != null) {
+          badges.add(entry.value['label'].toString());
+        } else if (entry.value == true || entry.value == 1) {
+          badges.add(entry.key.toString());
+        }
+      }
     }
-    if (raw is Map) {
-      return raw.entries
-          .where((e) => e.value == true || e.value == 1)
-          .map((e) => e.key.toString())
-          .where((e) => e.trim().isNotEmpty)
-          .toList(growable: false);
+    // Badge za roky v GitMitu
+    if (createdAt != null && createdAt > 0) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final years = ((now - createdAt) / (365.25 * 24 * 60 * 60 * 1000)).floor();
+      for (var i = 1; i <= years; i++) {
+        badges.add('GitMit $i ${i == 1 ? 'rok' : (i < 5 ? 'roky' : 'let')}');
+      }
     }
-    return const [];
+    return badges;
   }
 
   Future<_GitmitStats?> _loadGitmitStats(String uid) async {
@@ -1429,7 +1501,15 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                   builder: (context, otherSnap) {
                                     final vv = otherSnap.data?.value;
                                     final mm = (vv is Map) ? vv : null;
-                                    final badges = _parseBadges(mm?['badges']);
+                                    int createdAt = 0;
+                                    if (mm?['createdAt'] != null) {
+                                      if (mm?['createdAt'] is int) {
+                                        createdAt = mm?['createdAt'] as int;
+                                      } else {
+                                        createdAt = int.tryParse((mm?['createdAt'] ?? '').toString()) ?? 0;
+                                      }
+                                    }
+                                    final badges = _parseBadges(mm?['achievements'], createdAt: createdAt);
                                     return badges.isEmpty
                                         ? Text(
                                             AppLanguage.tr(
@@ -3049,6 +3129,42 @@ class _DashboardPageState extends State<DashboardPage> {
 
   final GlobalKey<_ChatsTabState> _chatsKey = GlobalKey<_ChatsTabState>();
 
+
+// Top-level function for group achievements
+Future<void> checkGroupAchievements(String uid) async {
+  try {
+    final groupsSnap = await rtdb().ref('groupMembers').get();
+    final groupsVal = groupsSnap.value;
+    int groupCount = 0;
+    if (groupsVal is Map) {
+      for (final entry in groupsVal.entries) {
+        final members = entry.value;
+        if (members is Map && members.containsKey(uid)) {
+          groupCount++;
+        }
+      }
+    }
+    if (groupCount >= 1) {
+      await rtdb().ref('users/$uid/achievements/first_group').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': 'První skupina',
+      });
+    }
+    if (groupCount >= 10) {
+      await rtdb().ref('users/$uid/achievements/10_groups').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': '10 skupin',
+      });
+    }
+    if (groupCount >= 100) {
+      await rtdb().ref('users/$uid/achievements/100_groups').set({
+        'unlockedAt': ServerValue.timestamp,
+        'label': '100 skupin',
+      });
+    }
+  } catch (_) {}
+}
+
   String _titleForIndex(BuildContext context, int index) {
     switch (index) {
       case 0:
@@ -3628,6 +3744,20 @@ class _DashboardPageState extends State<DashboardPage> {
       'lastSeenAt': ServerValue.timestamp,
       'updatedAt': ServerValue.timestamp,
     });
+
+    // Achievement za první přihlášení z webu
+    try {
+      if (_devicePlatformLabel().toLowerCase().contains('web')) {
+        final achRef = rtdb().ref('users/${current.uid}/achievements/first_web_login');
+        final snap = await achRef.get();
+        if (!snap.exists) {
+          await achRef.set({
+            'unlockedAt': ServerValue.timestamp,
+            'label': 'První přihlášení z webu',
+          });
+        }
+      }
+    } catch (_) {}
 
     try {
       await ref.onDisconnect().update({
@@ -9513,6 +9643,12 @@ class _ContactsTabState extends State<_ContactsTab> {
 
   Future<void> _addToChats(GithubUser user) async {
     await _onContactTap(login: user.login, avatarUrl: user.avatarUrl);
+
+    // Achievementy za skupiny
+    final current = FirebaseAuth.instance.currentUser;
+    if (current != null) {
+      await checkGroupAchievements(current.uid);
+    }
   }
 
   Future<_InviteSendResult> _notifyGithubInviteFromContacts({
@@ -9745,6 +9881,125 @@ class _ContactsTabState extends State<_ContactsTab> {
     }
 
     widget.onStartChat(login: otherLogin, avatarUrl: avatarUrl);
+
+    // Achievement za 10 přátel
+    try {
+      final savedSnap = await rtdb().ref('savedChats/${current.uid}').get();
+      final savedVal = savedSnap.value;
+      final savedMap = (savedVal is Map)
+          ? Map<String, dynamic>.from(savedVal)
+          : <String, dynamic>{};
+      if (savedMap.length >= 10) {
+        await rtdb().ref('users/${current.uid}/achievements/10_friends').set({
+          'unlockedAt': ServerValue.timestamp,
+          'label': '10 přátel',
+        });
+      }
+      if (savedMap.length >= 50) {
+        await rtdb().ref('users/${current.uid}/achievements/50_friends').set({
+          'unlockedAt': ServerValue.timestamp,
+          'label': '50 přátel',
+        });
+      }
+      if (savedMap.length >= 100) {
+        await rtdb().ref('users/${current.uid}/achievements/100_friends').set({
+          'unlockedAt': ServerValue.timestamp,
+          'label': '100 přátel',
+        });
+      }
+      // Achievement: first file sent
+      Future<void> checkFirstFileAchievement(String uid) async {
+        try {
+          final filesSnap = await rtdb().ref('files/$uid').get();
+          if (filesSnap.exists && filesSnap.value is Map && (filesSnap.value as Map).isNotEmpty) {
+            await rtdb().ref('users/$uid/achievements/first_file').set({
+              'unlockedAt': ServerValue.timestamp,
+              'label': 'První soubor odeslán',
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Achievement: 7 days dark mode
+      Future<void> checkDarkModeStreakAchievement(String uid) async {
+        try {
+          final streakSnap = await rtdb().ref('users/$uid/dark_mode_streak').get();
+          final streak = (streakSnap.value is int) ? streakSnap.value as int : int.tryParse('${streakSnap.value}') ?? 0;
+          if (streak >= 7) {
+            await rtdb().ref('users/$uid/achievements/7_days_dark_mode').set({
+              'unlockedAt': ServerValue.timestamp,
+              'label': '7 dní v tmavém režimu',
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Achievement: 3 platforms
+      Future<void> checkThreePlatformsAchievement(String uid) async {
+        try {
+          final platSnap = await rtdb().ref('users/$uid/platforms').get();
+          if (platSnap.value is List && (platSnap.value as List).toSet().length >= 3) {
+            await rtdb().ref('users/$uid/achievements/3_platforms').set({
+              'unlockedAt': ServerValue.timestamp,
+              'label': 'Přihlášení ze 3 platforem',
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Achievement: 30 days streak
+      Future<void> checkThirtyDaysStreakAchievement(String uid) async {
+        try {
+          final streakSnap = await rtdb().ref('users/$uid/login_streak').get();
+          final streak = (streakSnap.value is int) ? streakSnap.value as int : int.tryParse('${streakSnap.value}') ?? 0;
+          if (streak >= 30) {
+            await rtdb().ref('users/$uid/achievements/30_days_streak').set({
+              'unlockedAt': ServerValue.timestamp,
+              'label': '30 dní v řadě',
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Achievement: first notification
+      Future<void> checkFirstNotificationAchievement(String uid) async {
+        try {
+          final notifSnap = await rtdb().ref('users/$uid/notifications').get();
+          if (notifSnap.exists && notifSnap.value is Map && (notifSnap.value as Map).isNotEmpty) {
+            await rtdb().ref('users/$uid/achievements/first_notification').set({
+              'unlockedAt': ServerValue.timestamp,
+              'label': 'První notifikace',
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Achievement: first search
+      Future<void> checkFirstSearchAchievement(String uid) async {
+        try {
+          final searchSnap = await rtdb().ref('users/$uid/search_history').get();
+          if (searchSnap.exists && searchSnap.value is List && (searchSnap.value as List).isNotEmpty) {
+            await rtdb().ref('users/$uid/achievements/first_search').set({
+              'unlockedAt': ServerValue.timestamp,
+              'label': 'První vyhledávání',
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Achievement: first profile edit
+      Future<void> checkFirstProfileEditAchievement(String uid) async {
+        try {
+          final editSnap = await rtdb().ref('users/$uid/profile_edits').get();
+          if (editSnap.exists && editSnap.value is int && (editSnap.value as int) > 0) {
+            await rtdb().ref('users/$uid/achievements/first_profile_edit').set({
+              'unlockedAt': ServerValue.timestamp,
+              'label': 'První úprava profilu',
+            });
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   Future<void> _refreshLocalRecommendations() async {
