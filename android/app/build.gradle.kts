@@ -32,13 +32,29 @@ android {
         versionName = flutter.versionName
     }
 
-    buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+    // --- Play Store Release Preparation ---
+    signingConfigs {
+        create("release") {
+            storeFile = file("keystore/release.keystore")
+            storePassword = "gitmitstorepass"
+            keyAlias = "gitmitkey"
+            keyPassword = "gitmitstorepass"
         }
     }
+    buildTypes {
+        release {
+            // Use the release signing config for Play Store builds
+            signingConfig = signingConfigs.getByName("release")
+            // Enable code shrinking and obfuscation for release
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    // --- End Play Store Release Preparation ---
 }
 
 flutter {
