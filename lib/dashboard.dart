@@ -8057,18 +8057,22 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
     if (_revoking.contains(deviceId)) return;
     setState(() => _revoking.add(deviceId));
     try {
+      // Nejprve odhlásit zařízení (forceLogoutAt)
       await rtdb().ref('deviceSessions/$uid/$deviceId').update({
         'forceLogoutAt': ServerValue.timestamp,
         'updatedAt': ServerValue.timestamp,
       });
+      // Po krátké prodlevě (nebo ihned) odstranit záznam zařízení
+      await Future.delayed(const Duration(milliseconds: 500));
+      await rtdb().ref('deviceSessions/$uid/$deviceId').remove();
       if (!mounted) return;
       _safeShowSnackBarSnackBar(
         SnackBar(
           content: Text(
             AppLanguage.tr(
               context,
-              'Zařízení bylo odhlášeno.',
-              'Device has been signed out.',
+              'Zařízení bylo odhlášeno a odstraněno.',
+              'Device has been signed out and removed.',
             ),
           ),
         ),
