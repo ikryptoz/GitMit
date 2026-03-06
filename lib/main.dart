@@ -35,9 +35,13 @@ class MyApp extends StatelessWidget {
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    // Barvy z palety
-    const gray5 = Color(0xFF232925); // #232925
-    const gray6 = Color(0xFF101411); // #101411
+    const ghBg = Color(0xFF0D1117);
+    const ghCanvas = Color(0xFF010409);
+    const ghCard = Color(0xFF161B22);
+    const ghBorder = Color(0xFF30363D);
+    const ghText = Color(0xFFC9D1D9);
+    const ghGreen = Color(0xFF238636);
+    const ghBlue = Color(0xFF316DCA);
 
     return ValueListenableBuilder<String>(
       valueListenable: AppLanguage.code,
@@ -57,38 +61,70 @@ class MyApp extends StatelessWidget {
           ],
           theme: ThemeData(
             brightness: Brightness.dark,
-            fontFamily: 'monospace',
-            scaffoldBackgroundColor: gray6,
+            scaffoldBackgroundColor: ghBg,
+            canvasColor: ghCanvas,
+            dividerColor: ghBorder,
             appBarTheme: const AppBarTheme(
-              backgroundColor: gray5,
-              foregroundColor: Colors.white,
+              backgroundColor: ghBg,
+              foregroundColor: ghText,
               elevation: 0,
-              iconTheme: IconThemeData(color: Colors.white),
+              iconTheme: IconThemeData(color: ghText),
+              titleTextStyle: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             colorScheme: const ColorScheme(
               brightness: Brightness.dark,
-              primary: Colors.white,
-              onPrimary: Colors.black,
-              secondary: Colors.white,
-              onSecondary: Colors.black,
-              error: Colors.redAccent,
+              primary: ghGreen,
+              onPrimary: Colors.white,
+              secondary: ghBlue,
+              onSecondary: Colors.white,
+              error: Color(0xFFDA3633),
               onError: Colors.white,
-              background: gray6,
-              onBackground: Colors.white,
-              surface: gray5,
-              onSurface: Colors.white,
+              background: ghBg,
+              onBackground: ghText,
+              surface: ghCard,
+              onSurface: ghText,
             ),
             inputDecorationTheme: const InputDecorationTheme(
               filled: true,
-              fillColor: gray5,
-              labelStyle: TextStyle(color: Colors.white),
+              fillColor: ghCard,
+              labelStyle: TextStyle(color: Color(0xFF8B949E)),
               border: OutlineInputBorder(),
               enabledBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Colors.white24),
+                borderSide: BorderSide(color: ghBorder),
               ),
               focusedBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Colors.white, width: 2),
+                borderSide: BorderSide(color: ghBlue, width: 2),
               ),
+            ),
+            cardTheme: CardThemeData(
+              color: ghCard,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: ghBorder),
+              ),
+            ),
+            dialogTheme: DialogThemeData(
+              backgroundColor: ghCard,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: ghBorder),
+              ),
+            ),
+            bottomSheetTheme: const BottomSheetThemeData(
+              backgroundColor: ghCard,
+              modalBackgroundColor: ghCard,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+            ),
+            listTileTheme: const ListTileThemeData(
+              iconColor: Color(0xFF8B949E),
+              textColor: ghText,
             ),
             switchTheme: SwitchThemeData(
               thumbColor: MaterialStateProperty.resolveWith((states) {
@@ -97,7 +133,9 @@ class MyApp extends StatelessWidget {
               }),
               trackColor: MaterialStateProperty.resolveWith((states) {
                 if (states.contains(MaterialState.disabled)) return Colors.white10;
-                return states.contains(MaterialState.selected) ? Colors.white38 : Colors.white24;
+                return states.contains(MaterialState.selected)
+                    ? const Color(0xAA238636)
+                    : Colors.white24;
               }),
             ),
             elevatedButtonTheme: ElevatedButtonThemeData(
@@ -108,13 +146,17 @@ class MyApp extends StatelessWidget {
                 shape: MaterialStatePropertyAll(RoundedRectangleBorder(
                   borderRadius: BorderRadius.all(Radius.circular(8)),
                 )),
+                side: const MaterialStatePropertyAll(
+                  BorderSide(color: Color(0x22F0F6FC)),
+                ),
                 padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
               ),
             ),
             outlinedButtonTheme: OutlinedButtonThemeData(
               style: ButtonStyle(
-                foregroundColor: const MaterialStatePropertyAll(Colors.white),
-                side: MaterialStatePropertyAll(BorderSide(color: Colors.white38)),
+                foregroundColor: const MaterialStatePropertyAll(ghText),
+                backgroundColor: const MaterialStatePropertyAll(Color(0xFF21262D)),
+                side: MaterialStatePropertyAll(BorderSide(color: ghBorder)),
                 shape: MaterialStatePropertyAll(RoundedRectangleBorder(
                   borderRadius: BorderRadius.all(Radius.circular(8)),
                 )),
@@ -122,7 +164,24 @@ class MyApp extends StatelessWidget {
               ),
             ),
             textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              style: TextButton.styleFrom(foregroundColor: const Color(0xFF58A6FF)),
+            ),
+            chipTheme: ChipThemeData(
+              backgroundColor: const Color(0xFF0D1117),
+              selectedColor: const Color(0xFF1B2230),
+              labelStyle: const TextStyle(color: ghText),
+              side: const BorderSide(color: ghBorder),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+            ),
+            navigationBarTheme: NavigationBarThemeData(
+              backgroundColor: ghCard,
+              indicatorColor: const Color(0x22316DCA),
+              iconTheme: const WidgetStatePropertyAll(
+                IconThemeData(color: Color(0xFF8B949E)),
+              ),
+              labelTextStyle: const WidgetStatePropertyAll(
+                TextStyle(color: ghText, fontWeight: FontWeight.w600),
+              ),
             ),
           ),
           routes: {
@@ -185,7 +244,6 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     if (!_ready) {
       return const Scaffold(
-        backgroundColor: Colors.black,
         body: Center(child: CircularProgressIndicator()),
       );
     }
@@ -267,26 +325,43 @@ class _AccountSetupScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(title, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              Text(message, style: const TextStyle(color: Colors.white70), textAlign: TextAlign.center),
-              const SizedBox(height: 24),
-              if (!showSignOut) const CircularProgressIndicator(),
-              if (showSignOut) ...[
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: () => FirebaseAuth.instance.signOut(),
-                  child: Text(AppLanguage.tr(context, 'Odhlásit', 'Sign out')),
-                ),
-              ],
-            ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF0D1117), Color(0xFF0A1422), Color(0xFF0E1D17)],
+          ),
+        ),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 540),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xCC161B22),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF30363D)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  Text(message, style: const TextStyle(color: Color(0xFF8B949E)), textAlign: TextAlign.center),
+                  const SizedBox(height: 24),
+                  if (!showSignOut) const CircularProgressIndicator(),
+                  if (showSignOut) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: () => FirebaseAuth.instance.signOut(),
+                      child: Text(AppLanguage.tr(context, 'Odhlásit', 'Sign out')),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),

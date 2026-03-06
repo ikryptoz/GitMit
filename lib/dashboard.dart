@@ -4333,29 +4333,55 @@ Future<void> checkGroupAchievements(String uid) async {
           onWillPop: _onWillPop,
           child: useLeftMenu
               ? Scaffold(
-                  body: SafeArea(
-                    child: Row(
-                      children: [
-                        _leftSideNav(
-                          context,
-                          vibrationEnabled: settings.vibrationEnabled,
-                        ),
-                        const VerticalDivider(width: 1),
-                        Expanded(
-                          child: Column(
-                            children: [
-                              _pillAppBar(context),
-                              Expanded(child: pages[_index]),
-                            ],
+                  body: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0xFF0D1117),
+                          Color(0xFF0B1220),
+                          Color(0xFF0D1613),
+                        ],
+                      ),
+                    ),
+                    child: SafeArea(
+                      child: Row(
+                        children: [
+                          _leftSideNav(
+                            context,
+                            vibrationEnabled: settings.vibrationEnabled,
                           ),
-                        ),
-                      ],
+                          const VerticalDivider(width: 1),
+                          Expanded(
+                            child: Column(
+                              children: [
+                                _pillAppBar(context),
+                                Expanded(child: pages[_index]),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 )
               : Scaffold(
                   appBar: _pillAppBar(context),
-                  body: pages[_index],
+                  body: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0xFF0D1117),
+                          Color(0xFF0B1220),
+                          Color(0xFF0D1613),
+                        ],
+                      ),
+                    ),
+                    child: pages[_index],
+                  ),
                   bottomNavigationBar: _pillBottomNav(
                     context,
                     vibrationEnabled: settings.vibrationEnabled,
