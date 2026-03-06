@@ -2571,6 +2571,24 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
     }
   }
 
+  Future<void> _openMemberProfile({
+    required String login,
+    required String avatarUrl,
+  }) async {
+    final cleaned = login.trim().replaceFirst(RegExp(r'^@+'), '');
+    if (cleaned.isEmpty) return;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _UserProfilePage(
+          login: cleaned,
+          avatarUrl: avatarUrl,
+          githubDataFuture: _fetchGithubProfileData(cleaned),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = AppLanguage.tr;
@@ -2731,6 +2749,8 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 final avatar = liveAvatar.trim().isNotEmpty
                                     ? liveAvatar.trim()
                                     : fallbackAvatar.trim();
+                                final canOpenProfile =
+                                  gh.isNotEmpty && gh != uid;
                                 return Container(
                                   margin: const EdgeInsets.symmetric(vertical: 3),
                                   decoration: BoxDecoration(
@@ -2756,6 +2776,12 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                           ? t(context, 'Admin', 'Admin')
                                           : t(context, 'Člen', 'Member'),
                                     ),
+                                    onTap: canOpenProfile
+                                        ? () => _openMemberProfile(
+                                            login: gh,
+                                            avatarUrl: avatar,
+                                          )
+                                        : null,
                                   ),
                                 );
                               }).toList(),
@@ -10759,6 +10785,8 @@ class _ChatsTabState extends State<_ChatsTab>
   List<String> _slashSuggestions = const <String>[];
   int? _oneShotTtlSeconds;
   bool _oneShotBurnAfterRead = false;
+  Timer? _ttlUiTicker;
+  int _ttlUiNowMs = DateTime.now().millisecondsSinceEpoch;
   final Map<String, List<Map<String, dynamic>>> _localOnlyChatNotes =
       <String, List<Map<String, dynamic>>>{};
 
@@ -11007,6 +11035,160 @@ class _ChatsTabState extends State<_ChatsTab>
       'd' => n * 86400,
       _ => null,
     };
+  }
+
+  ({String messageText, int? ttlSeconds, bool burnAfterRead})?
+  _parseInlineTtlPrefix(String rawText) {
+    final input = rawText.trim();
+    if (input.isEmpty) return null;
+
+    final m = RegExp(r'^ttl\s*:\s*([^\s]+)\s+(.+)$', caseSensitive: false)
+        .firstMatch(input);
+    if (m == null) return null;
+
+    final token = (m.group(1) ?? '').trim().toLowerCase();
+    final message = (m.group(2) ?? '').trim();
+    if (token.isEmpty || message.isEmpty) return null;
+
+    if (token == 'burn') {
+      return (messageText: message, ttlSeconds: null, burnAfterRead: true);
+    }
+
+    final secs = _parseDurationSecondsToken(token);
+    if (secs == null || secs <= 0) return null;
+    return (messageText: message, ttlSeconds: secs, burnAfterRead: false);
+  }
+
+  String _formatTtlRemaining(int msRemaining) {
+    var total = (msRemaining / 1000).ceil();
+    if (total < 0) total = 0;
+    final d = total ~/ 86400;
+    final h = (total % 86400) ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+
+    if (d > 0) {
+      return '${d}d ${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  String _ttlModeLabelUi(BuildContext context, int v) {
+    return switch (v) {
+      0 => AppLanguage.tr(context, 'Podle nastavení', 'Use settings'),
+      1 => AppLanguage.tr(context, 'Nikdy', 'Never'),
+      2 => AppLanguage.tr(context, '1 minuta', '1 minute'),
+      3 => AppLanguage.tr(context, '1 hodina', '1 hour'),
+      4 => AppLanguage.tr(context, '1 den', '1 day'),
+      5 => AppLanguage.tr(context, 'Po přečtení', 'Burn after read'),
+      _ => AppLanguage.tr(context, 'Podle nastavení', 'Use settings'),
+    };
+  }
+
+  Future<int?> _showTtlConfigDialog({
+    required BuildContext context,
+    required int currentMode,
+  }) async {
+    var selected = currentMode;
+    final options = const <int>[0, 1, 2, 3, 4, 5];
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            return AlertDialog(
+              title: Text(AppLanguage.tr(context, 'Nastavit TTL', 'Set TTL')),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: ListView(
+                  shrinkWrap: true,
+                  children: options
+                      .map(
+                        (mode) => RadioListTile<int>(
+                          dense: true,
+                          value: mode,
+                          groupValue: selected,
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setLocalState(() => selected = v);
+                          },
+                          title: Text(_ttlModeLabelUi(context, mode)),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: Text(AppLanguage.tr(context, 'Uložit', 'Save')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (ok != true) return null;
+    return selected;
+  }
+
+  Future<String?> _showComposerActionsSheet(BuildContext context) async {
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(ctx)
+                      .colorScheme
+                      .outlineVariant
+                      .withAlpha((0.7 * 255).round()),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: Text(AppLanguage.tr(context, 'Poslat obrázek', 'Send image')),
+                onTap: () => Navigator.of(ctx).pop('image'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.code),
+                title: Text(AppLanguage.tr(context, 'Vložit kód', 'Insert code')),
+                onTap: () => Navigator.of(ctx).pop('code'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.timer_outlined),
+                title: Text(AppLanguage.tr(context, 'Nastavit TTL', 'Set TTL')),
+                subtitle: Text(_ttlModeLabelUi(context, _dmTtlMode)),
+                onTap: () => Navigator.of(ctx).pop('ttl_config'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   String _toHex(List<int> bytes) {
@@ -12522,6 +12704,12 @@ class _ChatsTabState extends State<_ChatsTab>
       _prewarmDmDecryptAfterJoin();
       _prewarmGroupDecryptAfterJoin();
     });
+    _ttlUiTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _ttlUiNowMs = DateTime.now().millisecondsSinceEpoch;
+      });
+    });
   }
 
   @override
@@ -12587,6 +12775,7 @@ class _ChatsTabState extends State<_ChatsTab>
     _verifiedScrollController.dispose();
     _groupScrollController.dispose();
     _groupMentionDebounce?.cancel();
+    _ttlUiTicker?.cancel();
     _typingTimeout?.cancel();
     _setTyping(false);
     if (_activeGroupId != null) {
@@ -13999,6 +14188,10 @@ class _ChatsTabState extends State<_ChatsTab>
     final rawText = _messageController.text.trim();
     if (current == null || login == null || rawText.isEmpty) return;
 
+    final inlineTtl = _parseInlineTtlPrefix(rawText);
+    final commandInput = inlineTtl?.messageText ?? rawText;
+    if (commandInput.trim().isEmpty) return;
+
     final myLogin = await _myGithubUsername(current.uid);
     if (myLogin == null || myLogin.trim().isEmpty) {
       if (mounted) {
@@ -14018,7 +14211,7 @@ class _ChatsTabState extends State<_ChatsTab>
     }
 
     final commandResult = await _applySlashCommand(
-      rawText: rawText,
+      rawText: commandInput,
       myGithub: myLogin,
       isGroup: false,
       chatId: login,
@@ -14138,8 +14331,12 @@ class _ChatsTabState extends State<_ChatsTab>
     _typingTimeout?.cancel();
     _setTyping(false);
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final oneShotBurn = _oneShotBurnAfterRead;
-    final oneShotTtlSeconds = _oneShotTtlSeconds;
+    final oneShotBurn = inlineTtl?.burnAfterRead == true
+      ? true
+      : _oneShotBurnAfterRead;
+    final oneShotTtlSeconds = inlineTtl != null
+      ? inlineTtl.ttlSeconds
+      : _oneShotTtlSeconds;
     if (mounted && (oneShotBurn || oneShotTtlSeconds != null)) {
       setState(() {
         _oneShotBurnAfterRead = false;
@@ -17171,8 +17368,12 @@ class _ChatsTabState extends State<_ChatsTab>
                     final rawText = _messageController.text.trim();
                     if (rawText.isEmpty || !canSend) return;
 
+                    final inlineTtl = _parseInlineTtlPrefix(rawText);
+                    final commandInput = inlineTtl?.messageText ?? rawText;
+                    if (commandInput.trim().isEmpty) return;
+
                     final commandResult = await _applySlashCommand(
-                      rawText: rawText,
+                      rawText: commandInput,
                       myGithub: myGithub,
                       isGroup: true,
                       chatId: groupId,
@@ -17236,8 +17437,12 @@ class _ChatsTabState extends State<_ChatsTab>
                     );
 
                     final nowMs = DateTime.now().millisecondsSinceEpoch;
-                    final oneShotBurn = _oneShotBurnAfterRead;
-                    final oneShotTtlSeconds = _oneShotTtlSeconds;
+                    final oneShotBurn = inlineTtl?.burnAfterRead == true
+                      ? true
+                      : _oneShotBurnAfterRead;
+                    final oneShotTtlSeconds = inlineTtl != null
+                      ? inlineTtl.ttlSeconds
+                      : _oneShotTtlSeconds;
                     if (mounted && (oneShotBurn || oneShotTtlSeconds != null)) {
                       setState(() {
                         _oneShotBurnAfterRead = false;
@@ -17586,6 +17791,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                 final isMe = !isLocalSystem && fromUid == current.uid;
                                 final burnAfterRead =
                                     m['burnAfterRead'] == true;
+                                final expiresAt = (m['expiresAt'] is int)
+                                  ? m['expiresAt'] as int
+                                  : null;
                                 final createdAt = (m['createdAt'] is int)
                                     ? m['createdAt'] as int
                                     : null;
@@ -17850,25 +18058,50 @@ class _ChatsTabState extends State<_ChatsTab>
                                               color: effectiveBubbleColor,
                                               borderRadius:
                                                   BorderRadius.circular(
-                                                    12,
+                                                    14,
                                                   ),
-                                              border: mentioned
-                                                  ? Border.all(
-                                                      color: Colors.amber,
-                                                      width: 2,
-                                                    )
-                                                  : (isLocalSystem
-                                                        ? Border.all(
-                                                            color: const Color(
+                                              border: Border.all(
+                                                color: mentioned
+                                                    ? Colors.amber
+                                                    : (isLocalSystem
+                                                          ? const Color(
                                                               0xFFB8C0CC,
-                                                            ),
-                                                          )
-                                                        : null),
+                                                            )
+                                                          : const Color(
+                                                              0x5530363D,
+                                                            )),
+                                                width: mentioned ? 2 : 1,
+                                              ),
                                             ),
                                             child: Column(
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.start,
                                               children: [
+                                                if (isMe &&
+                                                    expiresAt != null &&
+                                                    expiresAt > _ttlUiNowMs)
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          bottom: 6,
+                                                        ),
+                                                    child: Text(
+                                                      'TTL: ${_formatTtlRemaining(expiresAt - _ttlUiNowMs)}',
+                                                      style: TextStyle(
+                                                        fontSize: widget
+                                                                .settings
+                                                                .chatTextSize -
+                                                            3,
+                                                        color: isLocalSystem
+                                                            ? const Color(
+                                                                0xFF5A6472,
+                                                              )
+                                                            : Colors.white70,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ),
                                                 if (hasReply)
                                                   Container(
                                                     margin:
@@ -18165,10 +18398,17 @@ class _ChatsTabState extends State<_ChatsTab>
                         ),
                       Padding(
                         padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF161B22),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0x5530363D)),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
                                 controller: _messageController,
                                 decoration: InputDecoration(
                                   labelText: AppLanguage.tr(
@@ -18200,13 +18440,18 @@ class _ChatsTabState extends State<_ChatsTab>
                                         );
                                       }
                                     : null,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            PopupMenuButton<String>(
+                              const SizedBox(width: 8),
+                              IconButton(
                               tooltip: AppLanguage.tr(context, 'Více', 'More'),
-                              enabled: canSend,
-                              onSelected: (value) async {
+                              onPressed: canSend
+                                  ? () async {
+                                      final value =
+                                          await _showComposerActionsSheet(
+                                            context,
+                                          );
+                                      if (value == null) return;
                                 if (value == 'image') {
                                   await _sendImageGroup(
                                     groupId: groupId,
@@ -18220,71 +18465,25 @@ class _ChatsTabState extends State<_ChatsTab>
                                   await _insertCodeBlockTemplate();
                                   return;
                                 }
-                                if (value.startsWith('ttl:')) {
-                                  final ttl = int.tryParse(
-                                    value.split(':').last,
+                                if (value == 'ttl_config') {
+                                  final picked = await _showTtlConfigDialog(
+                                    context: context,
+                                    currentMode: _dmTtlMode,
                                   );
-                                  if (ttl != null) {
-                                    setState(() => _dmTtlMode = ttl);
+                                  if (picked != null && mounted) {
+                                    setState(() => _dmTtlMode = picked);
                                   }
                                 }
-                              },
-                              itemBuilder: (context) => [
-                                PopupMenuItem<String>(
-                                  value: 'image',
-                                  child: ListTile(
-                                    dense: true,
-                                    leading: const Icon(Icons.image_outlined),
-                                    title: Text(
-                                      AppLanguage.tr(
-                                        context,
-                                        'Poslat obrázek',
-                                        'Send image',
-                                      ),
-                                    ),
-                                    contentPadding: EdgeInsets.zero,
-                                  ),
-                                ),
-                                PopupMenuItem<String>(
-                                  value: 'code',
-                                  child: ListTile(
-                                    dense: true,
-                                    leading: const Icon(Icons.code),
-                                    title: Text(
-                                      AppLanguage.tr(
-                                        context,
-                                        'Vložit kód',
-                                        'Insert code',
-                                      ),
-                                    ),
-                                    contentPadding: EdgeInsets.zero,
-                                  ),
-                                ),
-                                const PopupMenuDivider(),
-                                for (final ttl in const [0, 1, 2, 3, 4, 5])
-                                  PopupMenuItem<String>(
-                                    value: 'ttl:$ttl',
-                                    child: ListTile(
-                                      dense: true,
-                                      leading: Icon(
-                                        _dmTtlMode == ttl
-                                            ? Icons.radio_button_checked
-                                            : Icons.radio_button_unchecked,
-                                      ),
-                                      title: Text(
-                                        '${AppLanguage.tr(context, 'Ničení', 'TTL')}: ${ttlLabel(ttl)}',
-                                      ),
-                                      contentPadding: EdgeInsets.zero,
-                                    ),
-                                  ),
-                              ],
+                                    }
+                                  : null,
                               icon: const Icon(Icons.more_vert),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.send),
-                              onPressed: canSend ? send : null,
-                            ),
-                          ],
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.send),
+                                onPressed: canSend ? send : null,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -18728,6 +18927,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                         !isLocalSystem && fromUid == current.uid;
                                       final burnAfterRead =
                                           m['burnAfterRead'] == true;
+                                        final expiresAt =
+                                          (m['expiresAt'] is int)
+                                          ? m['expiresAt'] as int
+                                          : null;
                                       final createdAt = (m['createdAt'] is int)
                                           ? m['createdAt'] as int
                                           : null;
@@ -19025,21 +19228,50 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     color: effectiveColor,
                                                     borderRadius:
                                                         BorderRadius.circular(
-                                                          12,
+                                                          14,
                                                         ),
-                                                    border: isLocalSystem
-                                                        ? Border.all(
-                                                            color: const Color(
+                                                    border: Border.all(
+                                                      color: isLocalSystem
+                                                          ? const Color(
                                                               0xFFB8C0CC,
+                                                            )
+                                                          : const Color(
+                                                              0x5530363D,
                                                             ),
-                                                          )
-                                                        : null,
+                                                    ),
                                                   ),
                                                   child: Column(
                                                     crossAxisAlignment:
                                                         CrossAxisAlignment
                                                             .start,
                                                     children: [
+                                                      if (isMe &&
+                                                          expiresAt != null &&
+                                                          expiresAt >
+                                                              _ttlUiNowMs)
+                                                        Padding(
+                                                          padding:
+                                                              const EdgeInsets.only(
+                                                                bottom: 6,
+                                                              ),
+                                                          child: Text(
+                                                            'TTL: ${_formatTtlRemaining(expiresAt - _ttlUiNowMs)}',
+                                                            style: TextStyle(
+                                                              fontSize: widget
+                                                                      .settings
+                                                                      .chatTextSize -
+                                                                  3,
+                                                              color: isLocalSystem
+                                                                  ? const Color(
+                                                                      0xFF5A6472,
+                                                                    )
+                                                                  : Colors.white70,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                            ),
+                                                          ),
+                                                        ),
                                                       if (hasReply)
                                                         Container(
                                                           margin:
@@ -19613,14 +19845,19 @@ class _ChatsTabState extends State<_ChatsTab>
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  PopupMenuButton<String>(
+                                  IconButton(
                                   tooltip: AppLanguage.tr(
                                     context,
                                     'Více',
                                     'More',
                                   ),
-                                  enabled: (!blocked && canSend),
-                                  onSelected: (value) async {
+                                  onPressed: (!blocked && canSend)
+                                      ? () async {
+                                          final value =
+                                              await _showComposerActionsSheet(
+                                                context,
+                                              );
+                                          if (value == null) return;
                                     if (value == 'image') {
                                       final otherUid =
                                           await _ensureActiveOtherUid();
@@ -19639,66 +19876,17 @@ class _ChatsTabState extends State<_ChatsTab>
                                       await _insertCodeBlockTemplate();
                                       return;
                                     }
-                                    if (value.startsWith('ttl:')) {
-                                      final ttl = int.tryParse(
-                                        value.split(':').last,
+                                    if (value == 'ttl_config') {
+                                      final picked = await _showTtlConfigDialog(
+                                        context: context,
+                                        currentMode: _dmTtlMode,
                                       );
-                                      if (ttl != null) {
-                                        setState(() => _dmTtlMode = ttl);
+                                      if (picked != null && mounted) {
+                                        setState(() => _dmTtlMode = picked);
                                       }
                                     }
-                                  },
-                                  itemBuilder: (context) => [
-                                    PopupMenuItem<String>(
-                                      value: 'image',
-                                      child: ListTile(
-                                        dense: true,
-                                        leading: const Icon(
-                                          Icons.image_outlined,
-                                        ),
-                                        title: Text(
-                                          AppLanguage.tr(
-                                            context,
-                                            'Poslat obrázek',
-                                            'Send image',
-                                          ),
-                                        ),
-                                        contentPadding: EdgeInsets.zero,
-                                      ),
-                                    ),
-                                    PopupMenuItem<String>(
-                                      value: 'code',
-                                      child: ListTile(
-                                        dense: true,
-                                        leading: const Icon(Icons.code),
-                                        title: Text(
-                                          AppLanguage.tr(
-                                            context,
-                                            'Vložit kód',
-                                            'Insert code',
-                                          ),
-                                        ),
-                                        contentPadding: EdgeInsets.zero,
-                                      ),
-                                    ),
-                                    const PopupMenuDivider(),
-                                    for (final ttl in const [0, 1, 2, 3, 4, 5])
-                                      PopupMenuItem<String>(
-                                        value: 'ttl:$ttl',
-                                        child: ListTile(
-                                          dense: true,
-                                          leading: Icon(
-                                            _dmTtlMode == ttl
-                                                ? Icons.radio_button_checked
-                                                : Icons.radio_button_unchecked,
-                                          ),
-                                          title: Text(
-                                            '${AppLanguage.tr(context, 'Ničení', 'TTL')}: ${ttlLabel(ttl)}',
-                                          ),
-                                          contentPadding: EdgeInsets.zero,
-                                        ),
-                                      ),
-                                  ],
+                                        }
+                                      : null,
                                     icon: const Icon(Icons.more_vert),
                                   ),
                                   IconButton(
