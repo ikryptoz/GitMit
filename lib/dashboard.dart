@@ -34,7 +34,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:highlight/highlight.dart' as highlight;
-import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:http/http.dart' as http;
 
 
@@ -10789,6 +10788,11 @@ class _ChatsTabState extends State<_ChatsTab>
   int _ttlUiNowMs = DateTime.now().millisecondsSinceEpoch;
   final Map<String, List<Map<String, dynamic>>> _localOnlyChatNotes =
       <String, List<Map<String, dynamic>>>{};
+  String? _lastAutoScrolledChatViewKey;
+
+  static const double _uiRadiusCard = 12;
+  static const double _uiRadiusSheet = 18;
+  static const double _uiActionTileHeight = 50;
 
   static const Map<String, String> _slashCommands = <String, String>{
     'help': 'Show all slash commands',
@@ -11146,8 +11150,10 @@ class _ChatsTabState extends State<_ChatsTab>
     return showModalBottomSheet<String>(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(_uiRadiusSheet),
+        ),
       ),
       builder: (ctx) {
         return SafeArea(
@@ -11156,8 +11162,8 @@ class _ChatsTabState extends State<_ChatsTab>
             children: [
               const SizedBox(height: 8),
               Container(
-                width: 40,
-                height: 4,
+                width: 44,
+                height: 5,
                 decoration: BoxDecoration(
                   color: Theme.of(ctx)
                       .colorScheme
@@ -11167,21 +11173,36 @@ class _ChatsTabState extends State<_ChatsTab>
                 ),
               ),
               const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.image_outlined),
-                title: Text(AppLanguage.tr(context, 'Poslat obrázek', 'Send image')),
-                onTap: () => Navigator.of(ctx).pop('image'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: ListTile(
+                  minTileHeight: _uiActionTileHeight,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  leading: const Icon(Icons.image_outlined),
+                  title: Text(AppLanguage.tr(context, 'Poslat obrázek', 'Send image')),
+                  onTap: () => Navigator.of(ctx).pop('image'),
+                ),
               ),
-              ListTile(
-                leading: const Icon(Icons.code),
-                title: Text(AppLanguage.tr(context, 'Vložit kód', 'Insert code')),
-                onTap: () => Navigator.of(ctx).pop('code'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: ListTile(
+                  minTileHeight: _uiActionTileHeight,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  leading: const Icon(Icons.code),
+                  title: Text(AppLanguage.tr(context, 'Vložit kód', 'Insert code')),
+                  onTap: () => Navigator.of(ctx).pop('code'),
+                ),
               ),
-              ListTile(
-                leading: const Icon(Icons.timer_outlined),
-                title: Text(AppLanguage.tr(context, 'Nastavit TTL', 'Set TTL')),
-                subtitle: Text(_ttlModeLabelUi(context, _dmTtlMode)),
-                onTap: () => Navigator.of(ctx).pop('ttl_config'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: ListTile(
+                  minTileHeight: _uiActionTileHeight,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  leading: const Icon(Icons.timer_outlined),
+                  title: Text(AppLanguage.tr(context, 'Nastavit TTL', 'Set TTL')),
+                  subtitle: Text(_ttlModeLabelUi(context, _dmTtlMode)),
+                  onTap: () => Navigator.of(ctx).pop('ttl_config'),
+                ),
               ),
               const SizedBox(height: 8),
             ],
@@ -13488,12 +13509,16 @@ class _ChatsTabState extends State<_ChatsTab>
     Future<void> Function()? onDeleteForAll,
   }) async {
     final codePayload = _CodeMessagePayload.tryParse(text);
-    final attachmentPayload = _AttachmentPayload.tryParse(text);
     final link = _firstUrlInText(text);
 
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(_uiRadiusSheet),
+        ),
+      ),
       builder: (ctx) {
         const emojis = ['👍', '❤️', '😂', '😮', '😢'];
         return SafeArea(
@@ -13506,65 +13531,117 @@ class _ChatsTabState extends State<_ChatsTab>
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: emojis
                       .map(
-                        (e) => TextButton(
-                          onPressed: () => Navigator.of(ctx).pop('react:$e'),
-                          child: Text(e, style: const TextStyle(fontSize: 22)),
+                        (e) => SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: TextButton(
+                            onPressed: () =>
+                                Navigator.of(ctx).pop('react:$e'),
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  _uiRadiusCard,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              e,
+                              style: const TextStyle(fontSize: 22),
+                            ),
+                          ),
                         ),
                       )
                       .toList(growable: false),
                 ),
               ),
               const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.reply),
-                title: Text(AppLanguage.tr(context, 'Odpovědět', 'Reply')),
-                onTap: () => Navigator.of(ctx).pop('reply'),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: ListTile(
+                  minTileHeight: _uiActionTileHeight,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  leading: const Icon(Icons.reply),
+                  title: Text(AppLanguage.tr(context, 'Odpovědět', 'Reply')),
+                  onTap: () => Navigator.of(ctx).pop('reply'),
+                ),
               ),
-              ListTile(
-                leading: const Icon(Icons.copy),
-                title: Text(AppLanguage.tr(context, 'Kopírovat', 'Copy')),
-                onTap: () => Navigator.of(ctx).pop('copy'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: ListTile(
+                  minTileHeight: _uiActionTileHeight,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  leading: const Icon(Icons.copy),
+                  title: Text(AppLanguage.tr(context, 'Kopírovat', 'Copy')),
+                  onTap: () => Navigator.of(ctx).pop('copy'),
+                ),
               ),
               if (link != null)
-                ListTile(
-                  leading: const Icon(Icons.link),
-                  title: Text(
-                    AppLanguage.tr(context, 'Kopírovat odkaz', 'Copy link'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: ListTile(
+                    minTileHeight: _uiActionTileHeight,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    leading: const Icon(Icons.link),
+                    title: Text(
+                      AppLanguage.tr(context, 'Kopírovat odkaz', 'Copy link'),
+                    ),
+                    onTap: () => Navigator.of(ctx).pop('copy_link'),
                   ),
-                  onTap: () => Navigator.of(ctx).pop('copy_link'),
                 ),
-              ListTile(
-                leading: const Icon(Icons.forward_to_inbox_outlined),
-                title: Text(AppLanguage.tr(context, 'Přeposlat', 'Forward')),
-                onTap: () => Navigator.of(ctx).pop('forward'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: ListTile(
+                  minTileHeight: _uiActionTileHeight,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  leading: const Icon(Icons.forward_to_inbox_outlined),
+                  title: Text(AppLanguage.tr(context, 'Přeposlat', 'Forward')),
+                  onTap: () => Navigator.of(ctx).pop('forward'),
+                ),
               ),
               if (codePayload != null)
-                ListTile(
-                  leading: const Icon(Icons.code),
-                  title: Text(
-                    AppLanguage.tr(context, 'Otevřít kód', 'Open code'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: ListTile(
+                    minTileHeight: _uiActionTileHeight,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    leading: const Icon(Icons.code),
+                    title: Text(
+                      AppLanguage.tr(context, 'Otevřít kód', 'Open code'),
+                    ),
+                    onTap: () => Navigator.of(ctx).pop('open_code'),
                   ),
-                  onTap: () => Navigator.of(ctx).pop('open_code'),
                 ),
               if (canDeleteForMe && onDeleteForMe != null)
-                ListTile(
-                  leading: const Icon(Icons.delete_sweep_outlined),
-                  title: Text(
-                    AppLanguage.tr(context, 'Smazat u mě', 'Delete for me'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: ListTile(
+                    minTileHeight: _uiActionTileHeight,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    leading: const Icon(Icons.delete_sweep_outlined),
+                    title: Text(
+                      AppLanguage.tr(context, 'Smazat u mě', 'Delete for me'),
+                    ),
+                    onTap: () => Navigator.of(ctx).pop('delete_me'),
                   ),
-                  onTap: () => Navigator.of(ctx).pop('delete_me'),
                 ),
               if (canDeleteForAll && onDeleteForAll != null)
-                ListTile(
-                  leading: const Icon(Icons.delete_outline),
-                  title: Text(
-                    AppLanguage.tr(
-                      context,
-                      'Smazat u všech',
-                      'Delete for everyone',
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: ListTile(
+                    minTileHeight: _uiActionTileHeight,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    leading: const Icon(Icons.delete_outline),
+                    title: Text(
+                      AppLanguage.tr(
+                        context,
+                        'Smazat u všech',
+                        'Delete for everyone',
+                      ),
                     ),
+                    onTap: () => Navigator.of(ctx).pop('delete_all'),
                   ),
-                  onTap: () => Navigator.of(ctx).pop('delete_all'),
                 ),
             ],
           ),
@@ -13952,6 +14029,11 @@ class _ChatsTabState extends State<_ChatsTab>
       context: context,
       isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(_uiRadiusSheet),
+        ),
+      ),
       builder: (ctx) {
         final mq = MediaQuery.of(ctx);
         return SafeArea(
@@ -14126,34 +14208,48 @@ class _ChatsTabState extends State<_ChatsTab>
 
     final picked = await showModalBottomSheet<String?>(
       context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(_uiRadiusSheet),
+        ),
+      ),
       builder: (context) {
         return SafeArea(
           child: ListView(
             shrinkWrap: true,
             children: [
-              ListTile(
-                title: Text(
-                  AppLanguage.tr(
-                    context,
-                    'Přesunout do složky',
-                    'Move to folder',
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                child: ListTile(
+                  title: Text(
+                    AppLanguage.tr(
+                      context,
+                      'Přesunout do složky',
+                      'Move to folder',
+                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.inbox_outlined),
-                title: Text(AppLanguage.tr(context, 'Priváty', 'Private')),
-                onTap: () => Navigator.of(context).pop(null),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: ListTile(
+                  leading: const Icon(Icons.inbox_outlined),
+                  title: Text(AppLanguage.tr(context, 'Priváty', 'Private')),
+                  onTap: () => Navigator.of(context).pop(null),
+                ),
               ),
               const Divider(height: 1),
               ...folders.map((f) {
-                return ListTile(
-                  leading: const Icon(Icons.folder_outlined),
-                  title: Text(
-                    f['name'] ?? AppLanguage.tr(context, 'Složka', 'Folder'),
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                  child: ListTile(
+                    leading: const Icon(Icons.folder_outlined),
+                    title: Text(
+                      f['name'] ?? AppLanguage.tr(context, 'Složka', 'Folder'),
+                    ),
+                    onTap: () => Navigator.of(context).pop(f['id']),
                   ),
-                  onTap: () => Navigator.of(context).pop(f['id']),
                 );
               }),
             ],
@@ -14180,6 +14276,155 @@ class _ChatsTabState extends State<_ChatsTab>
 
   Color _bubbleTextColor(BuildContext context, String key) {
     return const Color(0xFFC9D1D9);
+  }
+
+  void _maybeAutoScrollToBottom(ScrollController controller) {
+    if (!controller.hasClients) return;
+    final position = controller.position;
+    final distanceFromBottom = position.maxScrollExtent - position.pixels;
+    // Auto-scroll only when user is already near bottom.
+    if (distanceFromBottom > 72) return;
+    try {
+      controller.animateTo(
+        position.maxScrollExtent,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    } catch (_) {
+      // ignore scroll errors
+    }
+  }
+
+  void _forceScrollToBottom(ScrollController controller) {
+    if (!controller.hasClients) return;
+    final position = controller.position;
+    try {
+      controller.jumpTo(position.maxScrollExtent);
+    } catch (_) {
+      try {
+        controller.animateTo(
+          position.maxScrollExtent,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      } catch (_) {
+        // ignore scroll errors
+      }
+    }
+  }
+
+  void _autoScrollForChatView({
+    required ScrollController controller,
+    required String chatViewKey,
+  }) {
+    if (_lastAutoScrolledChatViewKey != chatViewKey) {
+      _lastAutoScrolledChatViewKey = chatViewKey;
+      _forceScrollToBottom(controller);
+      return;
+    }
+    _maybeAutoScrollToBottom(controller);
+  }
+
+  bool _isSameCalendarDay(int? aMs, int? bMs) {
+    if (aMs == null || bMs == null) return false;
+    final a = DateTime.fromMillisecondsSinceEpoch(aMs).toLocal();
+    final b = DateTime.fromMillisecondsSinceEpoch(bMs).toLocal();
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _dayDividerLabel(int timestampMs) {
+    final d = DateTime.fromMillisecondsSinceEpoch(timestampMs).toLocal();
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yyyy = d.year.toString();
+    return '$dd.$mm.$yyyy';
+  }
+
+  Widget _dayDivider(BuildContext context, int timestampMs) {
+    final label = _dayDividerLabel(timestampMs);
+    final lineColor = Theme.of(context)
+        .colorScheme
+        .outlineVariant
+        .withAlpha((0.55 * 255).round());
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 12, 6, 10),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: lineColor, height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withAlpha((0.72 * 255).round()),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(child: Divider(color: lineColor, height: 1)),
+        ],
+      ),
+    );
+  }
+
+  Widget _codePreviewCard({
+    required BuildContext context,
+    required _CodeMessagePayload payload,
+    required Color textColor,
+  }) {
+    final title = payload.title.trim();
+    final language = payload.language.trim();
+    final subtitle = title.isNotEmpty
+        ? title
+        : (language.isNotEmpty ? language : 'Code snippet');
+
+    return InkWell(
+      onTap: () => _openCodeSnippetSheet(payload),
+      borderRadius: BorderRadius.circular(_uiRadiusCard),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: Colors.white10,
+          borderRadius: BorderRadius.circular(_uiRadiusCard),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0x33238636),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0x55238636)),
+              ),
+              child: const Text(
+                'CODE',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: textColor),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.open_in_full,
+              size: 16,
+              color: textColor.withAlpha((0.9 * 255).round()),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _send() async {
@@ -14533,6 +14778,7 @@ class _ChatsTabState extends State<_ChatsTab>
     if (_activeLogin == null &&
         _activeVerifiedUid == null &&
         _activeGroupId == null) {
+      _lastAutoScrolledChatViewKey = null;
       final chatsMetaRef = rtdb().ref('savedChats/${current.uid}');
       final chatsMessagesRef = rtdb().ref('messages/${current.uid}');
       final blockedRef = rtdb().ref('blocked/${current.uid}');
@@ -17187,19 +17433,11 @@ class _ChatsTabState extends State<_ChatsTab>
 
                         // After the list rebuilds, scroll to bottom so newest message is visible.
                         WidgetsBinding.instance.addPostFrameCallback((_) {
-                          try {
-                            if (_verifiedScrollController.hasClients) {
-                              try {
-                                _verifiedScrollController.animateTo(
-                                  _verifiedScrollController
-                                      .position
-                                      .maxScrollExtent,
-                                  duration: const Duration(milliseconds: 240),
-                                  curve: Curves.easeOut,
-                                );
-                              } catch (_) {}
-                            }
-                          } catch (_) {}
+                          _autoScrollForChatView(
+                            controller: _verifiedScrollController,
+                            chatViewKey:
+                                'verify:${_activeVerifiedUid ?? requestUid}',
+                          );
                         });
 
                         return ListView.builder(
@@ -17696,21 +17934,10 @@ class _ChatsTabState extends State<_ChatsTab>
 
                             // After the list rebuilds, scroll to bottom so newest message is visible.
                             WidgetsBinding.instance.addPostFrameCallback((_) {
-                              try {
-                                if (_groupScrollController.hasClients) {
-                                  try {
-                                    _groupScrollController.animateTo(
-                                      _groupScrollController
-                                          .position
-                                          .maxScrollExtent,
-                                      duration: const Duration(
-                                        milliseconds: 240,
-                                      ),
-                                      curve: Curves.easeOut,
-                                    );
-                                  } catch (_) {}
-                                }
-                              } catch (_) {}
+                              _autoScrollForChatView(
+                                controller: _groupScrollController,
+                                chatViewKey: 'group:$groupId',
+                              );
                             });
 
                             // Best-effort migration: encrypt old plaintext group messages.
@@ -17782,6 +18009,7 @@ class _ChatsTabState extends State<_ChatsTab>
                               itemCount: displayItems.length,
                               itemBuilder: (context, i) {
                                 final m = displayItems[i];
+                                final prev = i > 0 ? displayItems[i - 1] : null;
                                 final isLocalSystem = m['__localSystem'] == true;
                                 final key = (m['__key'] ?? '').toString();
                                 final plaintext = (m['text'] ?? '').toString();
@@ -17798,6 +18026,12 @@ class _ChatsTabState extends State<_ChatsTab>
                                     ? m['createdAt'] as int
                                     : null;
                                 final timeLabel = _formatShortTime(createdAt);
+                                final prevCreatedAt = (prev?['createdAt'] is int)
+                                  ? prev!['createdAt'] as int
+                                  : null;
+                                final showDayDivider =
+                                  createdAt != null &&
+                                  !_isSameCalendarDay(createdAt, prevCreatedAt);
 
                                 final hasCipher =
                                     ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])
@@ -17998,29 +18232,36 @@ class _ChatsTabState extends State<_ChatsTab>
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 6,
                                   ),
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.translucent,
-                                    onLongPress: isLocalSystem
-                                      ? null
-                                      : () => _showMessageActions(
-                                      isGroup: true,
-                                      chatTarget: groupId,
-                                      messageKey: key,
-                                      fromLabel: fromGh.isNotEmpty
-                                          ? fromGh
-                                          : (isMe ? myGithub : 'user'),
-                                      text: text,
-                                      rawMessage: m,
-                                      canDeleteForMe: true,
-                                      canDeleteForAll: isAdmin || isMe,
-                                      onDeleteForMe: () => msgsRef
-                                          .child(key)
-                                          .child('deletedFor')
-                                          .child(current.uid)
-                                          .set(true),
-                                      onDeleteForAll: () => deleteMessage(key),
-                                    ),
-                                    child: Column(
+                                  child: Column(
+                                    children: [
+                                      if (showDayDivider)
+                                        _dayDivider(context, createdAt),
+                                      GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onLongPress: isLocalSystem
+                                            ? null
+                                            : () => _showMessageActions(
+                                                isGroup: true,
+                                                chatTarget: groupId,
+                                                messageKey: key,
+                                                fromLabel: fromGh.isNotEmpty
+                                                    ? fromGh
+                                                    : (isMe
+                                                          ? myGithub
+                                                          : 'user'),
+                                                text: text,
+                                                rawMessage: m,
+                                                canDeleteForMe: true,
+                                                canDeleteForAll: isAdmin || isMe,
+                                                onDeleteForMe: () => msgsRef
+                                                    .child(key)
+                                                    .child('deletedFor')
+                                                    .child(current.uid)
+                                                    .set(true),
+                                                onDeleteForAll: () =>
+                                                    deleteMessage(key),
+                                              ),
+                                        child: Column(
                                       crossAxisAlignment: isMe
                                           ? CrossAxisAlignment.end
                                           : CrossAxisAlignment.start,
@@ -18172,61 +18413,11 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     radius: 12,
                                                   )
                                                 else if (codePayload != null)
-                                                  InkWell(
-                                                    onTap: () =>
-                                                        _openCodeSnippetSheet(
-                                                          codePayload,
-                                                        ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          8,
-                                                        ),
-                                                    child: Container(
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 10,
-                                                            vertical: 8,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white10,
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              8,
-                                                            ),
-                                                        border: Border.all(
-                                                          color: Colors.white24,
-                                                        ),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          const Icon(
-                                                            Icons.code,
-                                                            size: 16,
-                                                          ),
-                                                          const SizedBox(
-                                                            width: 8,
-                                                          ),
-                                                          Flexible(
-                                                            child: Text(
-                                                              codePayload
-                                                                  .previewLabel(),
-                                                              maxLines: 2,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                              style: TextStyle(
-                                                                fontSize: widget
-                                                                    .settings
-                                                                    .chatTextSize,
-                                                                color: effectiveTextColor,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
+                                                  _codePreviewCard(
+                                                    context: context,
+                                                    payload: codePayload,
+                                                    textColor:
+                                                        effectiveTextColor,
                                                   )
                                                 else
                                                   _RichMessageText(
@@ -18265,6 +18456,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                           ),
                                       ],
                                     ),
+                                  ),
+                                    ],
                                   ),
                                 );
                               },
@@ -18824,23 +19017,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                   WidgetsBinding.instance.addPostFrameCallback((
                                     _,
                                   ) {
-                                    try {
-                                      if (_dmScrollController.hasClients) {
-                                        try {
-                                          _dmScrollController.animateTo(
-                                            _dmScrollController
-                                                .position
-                                                .maxScrollExtent,
-                                            duration: const Duration(
-                                              milliseconds: 240,
-                                            ),
-                                            curve: Curves.easeOut,
-                                          );
-                                        } catch (_) {}
-                                      }
-                                    } catch (_) {
-                                      // ignore scroll errors
-                                    }
+                                    _autoScrollForChatView(
+                                      controller: _dmScrollController,
+                                      chatViewKey: 'dm:$loginLower',
+                                    );
                                   });
 
                                   // Best-effort migration: encrypt old plaintext messages.
@@ -18916,6 +19096,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                     itemCount: displayItems.length,
                                     itemBuilder: (context, i) {
                                       final m = displayItems[i];
+                                      final prev = i > 0
+                                          ? displayItems[i - 1]
+                                          : null;
                                       final isLocalSystem =
                                         m['__localSystem'] == true;
                                       final key = (m['__key'] ?? '').toString();
@@ -18934,6 +19117,16 @@ class _ChatsTabState extends State<_ChatsTab>
                                       final createdAt = (m['createdAt'] is int)
                                           ? m['createdAt'] as int
                                           : null;
+                                      final prevCreatedAt =
+                                          (prev?['createdAt'] is int)
+                                          ? prev!['createdAt'] as int
+                                          : null;
+                                      final showDayDivider =
+                                          createdAt != null &&
+                                          !_isSameCalendarDay(
+                                            createdAt,
+                                            prevCreatedAt,
+                                          );
                                       final timeLabel = _formatShortTime(
                                         createdAt,
                                       );
@@ -19152,52 +19345,62 @@ class _ChatsTabState extends State<_ChatsTab>
                                         padding: const EdgeInsets.symmetric(
                                           vertical: 6,
                                         ),
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.translucent,
-                                            onLongPress: (blocked || isLocalSystem)
+                                        child: Column(
+                                          children: [
+                                          if (showDayDivider)
+                                              _dayDivider(context, createdAt),
+                                          GestureDetector(
+                                            behavior:
+                                              HitTestBehavior.translucent,
+                                            onLongPress: (blocked ||
+                                                isLocalSystem)
                                               ? null
                                               : () => _showMessageActions(
-                                                  isGroup: false,
-                                                  chatTarget: login,
-                                                  messageKey: key,
-                                                  fromLabel: isMe
-                                                      ? myGithub
-                                                      : login,
-                                                  text: text,
-                                                  rawMessage: m,
-                                                  canDeleteForMe: true,
-                                                  canDeleteForAll: isMe,
-                                                  onDeleteForMe: () async {
-                                                    await messagesRef
-                                                        .child(key)
-                                                        .remove();
-                                                  },
-                                                  onDeleteForAll: isMe
-                                                      ? () async {
-                                                          final peerUid =
-                                                              await _ensureActiveOtherUid();
-                                                          final myLogin =
-                                                              myGithub.trim();
-                                                          final updates =
-                                                              <String, Object?>{
-                                                                'messages/${current.uid}/$login/$key':
-                                                                    null,
-                                                              };
-                                                          if (peerUid != null &&
-                                                              peerUid
-                                                                  .isNotEmpty &&
-                                                              myLogin
-                                                                  .isNotEmpty) {
-                                                            updates['messages/$peerUid/$myLogin/$key'] =
-                                                                null;
-                                                          }
-                                                          await rtdb()
-                                                              .ref()
-                                                              .update(updates);
-                                                        }
-                                                      : null,
-                                                ),
-                                          child: Column(
+                                                isGroup: false,
+                                                chatTarget: login,
+                                                messageKey: key,
+                                                fromLabel: isMe
+                                                  ? myGithub
+                                                  : login,
+                                                text: text,
+                                                rawMessage: m,
+                                                canDeleteForMe: true,
+                                                canDeleteForAll: isMe,
+                                                onDeleteForMe: () async {
+                                                await messagesRef
+                                                  .child(key)
+                                                  .remove();
+                                                },
+                                                onDeleteForAll: isMe
+                                                  ? () async {
+                                                    final peerUid =
+                                                      await _ensureActiveOtherUid();
+                                                    final myLogin =
+                                                      myGithub
+                                                        .trim();
+                                                    final updates =
+                                                      <String, Object?>{
+                                                      'messages/${current.uid}/$login/$key':
+                                                        null,
+                                                      };
+                                                    if (peerUid !=
+                                                        null &&
+                                                      peerUid
+                                                        .isNotEmpty &&
+                                                      myLogin
+                                                        .isNotEmpty) {
+                                                    updates['messages/$peerUid/$myLogin/$key'] =
+                                                      null;
+                                                    }
+                                                    await rtdb()
+                                                      .ref()
+                                                      .update(
+                                                      updates,
+                                                      );
+                                                  }
+                                                  : null,
+                                              ),
+                                            child: Column(
                                             crossAxisAlignment: isMe
                                                 ? CrossAxisAlignment.end
                                                 : CrossAxisAlignment.start,
@@ -19345,151 +19548,11 @@ class _ChatsTabState extends State<_ChatsTab>
                                                         )
                                                       else if (codePayload !=
                                                           null)
-                                                        Container(
-                                                          margin:
-                                                              const EdgeInsets.symmetric(
-                                                                vertical: 2,
-                                                              ),
-                                                          padding:
-                                                              const EdgeInsets.all(
-                                                                0,
-                                                              ),
-                                                          decoration: BoxDecoration(
-                                                            color:
-                                                                Colors.white10,
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                  8,
-                                                                ),
-                                                            border: Border.all(
-                                                              color: Colors
-                                                                  .white24,
-                                                            ),
-                                                          ),
-                                                          child: Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              if (codePayload
-                                                                  .title
-                                                                  .trim()
-                                                                  .isNotEmpty)
-                                                                Padding(
-                                                                  padding:
-                                                                      const EdgeInsets.only(
-                                                                        left:
-                                                                            12,
-                                                                        top: 8,
-                                                                        right:
-                                                                            12,
-                                                                        bottom:
-                                                                            2,
-                                                                      ),
-                                                                  child: Text(
-                                                                    codePayload
-                                                                        .title,
-                                                                    style: TextStyle(
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
-                                                                      fontSize:
-                                                                          widget
-                                                                              .settings
-                                                                              .chatTextSize +
-                                                                          1,
-                                                                      color:
-                                                                          effectiveTextColor,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              Padding(
-                                                                padding:
-                                                                    const EdgeInsets.symmetric(
-                                                                      horizontal:
-                                                                          10,
-                                                                      vertical:
-                                                                          8,
-                                                                    ),
-                                                                child: SizedBox(
-                                                                  width:
-                                                                      MediaQuery.of(
-                                                                        context,
-                                                                      ).size.width *
-                                                                      0.62,
-                                                                  child: HighlightView(
-                                                                    codePayload
-                                                                        .code,
-                                                                    language:
-                                                                        codePayload
-                                                                            .language
-                                                                            .isNotEmpty
-                                                                        ? codePayload
-                                                                              .language
-                                                                        : 'plaintext',
-                                                                    theme: {
-                                                                      'root': TextStyle(
-                                                                        backgroundColor:
-                                                                            Colors.transparent,
-                                                                        color:
-                                                                          tcolor,
-                                                                        fontFamily:
-                                                                            'monospace',
-                                                                        fontSize: widget
-                                                                            .settings
-                                                                            .chatTextSize,
-                                                                      ),
-                                                                    },
-                                                                    padding:
-                                                                        const EdgeInsets.all(
-                                                                          0,
-                                                                        ),
-                                                                    textStyle: TextStyle(
-                                                                      fontFamily:
-                                                                          'monospace',
-                                                                      fontSize: widget
-                                                                          .settings
-                                                                          .chatTextSize,
-                                                                      color:
-                                                                          effectiveTextColor,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              if (codePayload
-                                                                  .language
-                                                                  .trim()
-                                                                  .isNotEmpty)
-                                                                Padding(
-                                                                  padding:
-                                                                      const EdgeInsets.only(
-                                                                        left:
-                                                                            12,
-                                                                        bottom:
-                                                                            6,
-                                                                        top: 2,
-                                                                      ),
-                                                                  child: Text(
-                                                                    codePayload
-                                                                        .language,
-                                                                    style: TextStyle(
-                                                                      fontSize:
-                                                                          widget
-                                                                              .settings
-                                                                              .chatTextSize -
-                                                                          2,
-                                                                        color: effectiveTextColor
-                                                                          .withOpacity(
-                                                                            0.7,
-                                                                          ),
-                                                                      fontStyle:
-                                                                          FontStyle
-                                                                              .italic,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                            ],
-                                                          ),
+                                                        _codePreviewCard(
+                                                          context: context,
+                                                          payload: codePayload,
+                                                          textColor:
+                                                              effectiveTextColor,
                                                         )
                                                       else
                                                         _RichMessageText(
@@ -19562,6 +19625,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                                 ),
                                             ],
                                           ),
+                                        ),
+                                          ],
                                         ),
                                       );
                                     },

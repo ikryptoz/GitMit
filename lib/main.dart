@@ -42,6 +42,9 @@ class MyApp extends StatelessWidget {
     const ghText = Color(0xFFC9D1D9);
     const ghGreen = Color(0xFF238636);
     const ghBlue = Color(0xFF316DCA);
+    const uiRadius = 12.0;
+    const uiSheetRadius = 18.0;
+    const uiMinTapHeight = 52.0;
 
     return ValueListenableBuilder<String>(
       valueListenable: AppLanguage.code,
@@ -116,7 +119,7 @@ class MyApp extends StatelessWidget {
             dialogTheme: DialogThemeData(
               backgroundColor: ghCard,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(uiRadius),
                 side: const BorderSide(color: ghBorder),
               ),
             ),
@@ -124,20 +127,24 @@ class MyApp extends StatelessWidget {
               backgroundColor: ghCard,
               modalBackgroundColor: ghCard,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(uiSheetRadius),
+                ),
               ),
             ),
             listTileTheme: ListTileThemeData(
               iconColor: Color(0xFF8B949E),
               textColor: ghText,
               tileColor: ghCard,
+              minTileHeight: uiMinTapHeight,
+              minVerticalPadding: 8,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(uiRadius),
                 side: const BorderSide(color: ghBorder),
               ),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14,
-                vertical: 2,
+                vertical: 6,
               ),
             ),
             snackBarTheme: SnackBarThemeData(
@@ -166,13 +173,18 @@ class MyApp extends StatelessWidget {
                 backgroundColor: const MaterialStatePropertyAll(Color(0xFF238636)),
                 foregroundColor: const MaterialStatePropertyAll(Colors.white),
                 textStyle: MaterialStatePropertyAll(TextStyle(fontWeight: FontWeight.bold)),
+                minimumSize: const MaterialStatePropertyAll(
+                  Size.fromHeight(uiMinTapHeight),
+                ),
                 shape: MaterialStatePropertyAll(RoundedRectangleBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(8)),
+                  borderRadius: BorderRadius.all(Radius.circular(uiRadius)),
                 )),
                 side: const MaterialStatePropertyAll(
                   BorderSide(color: Color(0x22F0F6FC)),
                 ),
-                padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+                padding: MaterialStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
               ),
             ),
             outlinedButtonTheme: OutlinedButtonThemeData(
@@ -180,14 +192,35 @@ class MyApp extends StatelessWidget {
                 foregroundColor: const MaterialStatePropertyAll(ghText),
                 backgroundColor: const MaterialStatePropertyAll(Color(0xFF21262D)),
                 side: MaterialStatePropertyAll(BorderSide(color: ghBorder)),
+                minimumSize: const MaterialStatePropertyAll(
+                  Size.fromHeight(uiMinTapHeight),
+                ),
                 shape: MaterialStatePropertyAll(RoundedRectangleBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(8)),
+                  borderRadius: BorderRadius.all(Radius.circular(uiRadius)),
                 )),
-                padding: MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+                padding: MaterialStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
               ),
             ),
             textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(foregroundColor: const Color(0xFF58A6FF)),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF58A6FF),
+                minimumSize: const Size(0, uiMinTapHeight),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(uiRadius),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+            ),
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, uiMinTapHeight),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(uiRadius),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
             ),
             chipTheme: ChipThemeData(
               backgroundColor: const Color(0xFF0D1117),
