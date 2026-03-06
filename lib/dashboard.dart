@@ -908,6 +908,160 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     );
   }
 
+  Future<void> _composeAndSendDmFromProfile({
+    required String myUid,
+    required String otherUid,
+  }) async {
+    if (otherUid == myUid) {
+      _safeShowSnackBarSnackBar(
+        SnackBar(
+          content: Text(
+            AppLanguage.tr(
+              context,
+              'Tohle je tvůj profil.',
+              'This is your profile.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final myLogin = await _myGithubUsername(myUid);
+    if (myLogin == null || myLogin.trim().isEmpty) {
+      _safeShowSnackBarSnackBar(
+        SnackBar(
+          content: Text(
+            AppLanguage.tr(
+              context,
+              'Nepodařilo se zjistit tvůj GitHub username.',
+              'Failed to read your GitHub username.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final ctrl = TextEditingController();
+    var sending = false;
+    String? localError;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            return AlertDialog(
+              title: Text(
+                AppLanguage.tr(
+                  context,
+                  'Napsat @${widget.login}',
+                  'Write to @${widget.login}',
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    minLines: 3,
+                    maxLines: 6,
+                    decoration: InputDecoration(
+                      hintText: AppLanguage.tr(
+                        context,
+                        'Ahoj, zaujala mě tvoje nabídka v Jobs...',
+                        'Hi, your Jobs listing caught my attention...',
+                      ),
+                    ),
+                  ),
+                  if (localError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      localError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: sending ? null : () => Navigator.of(ctx).pop(),
+                  child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+                ),
+                FilledButton.icon(
+                  onPressed: sending
+                      ? null
+                      : () async {
+                          setLocalState(() {
+                            sending = true;
+                            localError = null;
+                          });
+                          try {
+                            final myAvatar = await _myAvatarUrl(myUid);
+                            final entered = ctrl.text.trim();
+                            await _sendDmRequestCore(
+                              myUid: myUid,
+                              myLogin: myLogin,
+                              otherUid: otherUid,
+                              otherLogin: widget.login,
+                              myAvatarUrl: myAvatar,
+                              otherAvatarUrl: widget.avatarUrl,
+                              messageText: entered.isNotEmpty
+                                  ? entered
+                                  : AppLanguage.tr(
+                                      context,
+                                      'Ahoj, píšu ti z tvého veřejného profilu v Jobs.',
+                                      'Hi, I am messaging you from your public Jobs profile.',
+                                    ),
+                            );
+                            if (!mounted) return;
+                            _safeShowSnackBarSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  AppLanguage.tr(
+                                    context,
+                                    'Žádost o chat odeslána. Pokračuj v Chatech.',
+                                    'Chat request sent. Continue in Chats.',
+                                  ),
+                                ),
+                              ),
+                            );
+                            Navigator.of(ctx).pop();
+                          } catch (e) {
+                            setLocalState(() {
+                              localError = e.toString();
+                              sending = false;
+                            });
+                          }
+                        },
+                  icon: sending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_outlined),
+                  label: Text(
+                    sending
+                        ? AppLanguage.tr(context, 'Odesílám...', 'Sending...')
+                        : AppLanguage.tr(context, 'Poslat', 'Send'),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    ctrl.dispose();
+  }
+
   Future<void> _toggleBlock({
     required String myUid,
     required bool currentlyBlocked,
@@ -1247,6 +1401,21 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                               ),
                             ),
                             if (hasOtherUid) ...[
+                              const SizedBox(height: 8),
+                              FilledButton.icon(
+                                onPressed: () => _composeAndSendDmFromProfile(
+                                  myUid: myUid,
+                                  otherUid: otherUid,
+                                ),
+                                icon: const Icon(Icons.chat_bubble_outline),
+                                label: Text(
+                                  AppLanguage.tr(
+                                    context,
+                                    'Napsat zprávu',
+                                    'Write message',
+                                  ),
+                                ),
+                              ),
                               const SizedBox(height: 8),
                               FilledButton.icon(
                                 onPressed: () => _confirmAndRun(
@@ -3211,112 +3380,140 @@ Future<void> checkGroupAchievements(String uid) async {
           final showChatBack = _index == 1 && canStepBack;
           final chatsState = _chatsKey.currentState;
           final showDmActions = _index == 1 && (chatsState?.hasActiveDm ?? false);
-          final showGroupActions =
-              _index == 1 && (chatsState?.hasActiveGroup ?? false);
-          final onPillTap = showGroupActions
-            ? () => chatsState?.openActiveGroupInfo()
-            : (showDmActions
-              ? () => chatsState?.openActiveDmProfile()
-              : null);
-          return AppBar(
-            backgroundColor: Colors.transparent,
-            surfaceTintColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-            centerTitle: true,
-            leadingWidth: showChatBack ? 56 : null,
-            leading: showChatBack
-                ? IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () {
-                      final handled = _chatsKey.currentState?.handleBack() == true;
-                      if (handled && mounted) {
-                        setState(() {});
-                      }
-                    },
-                  )
-                : null,
-            actions: showDmActions
-                ? [
-                    IconButton(
-                      tooltip: AppLanguage.tr(
-                        context,
-                        'Fingerprint klíčů',
-                        'Key fingerprint',
-                      ),
-                      icon: const Icon(Icons.fingerprint),
-                      onPressed: () => chatsState?.openActiveDmFingerprint(),
-                    ),
-                  ]
-                : null,
-            title: ValueListenableBuilder<String?>(
-              valueListenable: _chatsTopHandle,
-              builder: (context, activeHandle, _) {
-                final handle = (_index == 1) ? activeHandle : null;
-                final isPillClickable = onPillTap != null;
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onPillTap,
-                    borderRadius: BorderRadius.circular(999),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: cs.surface,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: cs.outlineVariant),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            title,
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
+          return ValueListenableBuilder<bool>(
+            valueListenable: _chatsHasVerificationAlert,
+            builder: (context, hasVerificationAlert, _) {
+              final showVerificationAction = _index == 1 && hasVerificationAlert;
+              return AppBar(
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                centerTitle: true,
+                leadingWidth: showChatBack ? 56 : null,
+                leading: showChatBack
+                    ? IconButton(
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: () {
+                          final handled = _chatsKey.currentState?.handleBack() == true;
+                          if (handled && mounted) {
+                            setState(() {});
+                          }
+                        },
+                      )
+                    : null,
+                actions: (showVerificationAction || showDmActions)
+                    ? [
+                        if (showVerificationAction)
+                          IconButton(
+                            tooltip: AppLanguage.tr(
+                              context,
+                              'Ověření účtu (notifikace)',
+                              'Account verification (notification)',
+                            ),
+                            icon: const Icon(Icons.check_circle_outline),
+                            onPressed: () =>
+                                chatsState?.openVerificationNotificationChat(),
                           ),
-                          if (handle != null && handle.trim().isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
+                        if (showDmActions)
+                          IconButton(
+                            tooltip: AppLanguage.tr(
+                              context,
+                              'Fingerprint klíčů',
+                              'Key fingerprint',
+                            ),
+                            icon: const Icon(Icons.fingerprint),
+                            onPressed: () => chatsState?.openActiveDmFingerprint(),
+                          ),
+                      ]
+                    : null,
+                title: ValueListenableBuilder<String?>(
+                  valueListenable: _chatsTopHandle,
+                  builder: (context, activeHandle, _) {
+                final handle = (_index == 1) ? activeHandle : null;
+                final currentChatsState = _chatsKey.currentState;
+                final canOpenGroup =
+                    _index == 1 && (currentChatsState?.hasActiveGroup ?? false);
+                final canOpenDmProfile =
+                    _index == 1 && (currentChatsState?.hasActiveDm ?? false);
+                final isPillClickable = canOpenGroup || canOpenDmProfile;
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: isPillClickable
+                            ? () {
+                                final liveState = _chatsKey.currentState;
+                                if (liveState == null) return;
+                                if (liveState.hasActiveGroup) {
+                                  liveState.openActiveGroupInfo();
+                                  return;
+                                }
+                                if (liveState.hasActiveDm) {
+                                  liveState.openActiveDmProfile();
+                                }
+                              }
+                            : null,
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: cs.surface,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: cs.outlineVariant),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                title,
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
                               ),
-                              decoration: BoxDecoration(
-                                color: const Color(0x1A58A6FF),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: const Color(0x4458A6FF)),
-                              ),
-                              child: Text(
-                                handle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xFF8DC4FF),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
+                              if (handle != null && handle.trim().isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0x1A58A6FF),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(color: const Color(0x4458A6FF)),
+                                  ),
+                                  child: Text(
+                                    handle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Color(0xFF8DC4FF),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          ],
-                          if (isPillClickable) ...[
-                            const SizedBox(width: 6),
-                            Icon(
-                              Icons.open_in_new,
-                              size: 14,
-                              color: Theme.of(
-                                context,
-                              ).textTheme.bodySmall?.color?.withValues(alpha: 0.75),
-                            ),
-                          ],
-                        ],
+                              ],
+                              if (isPillClickable) ...[
+                                const SizedBox(width: 6),
+                                Icon(
+                                  Icons.open_in_new,
+                                  size: 14,
+                                  color: Theme.of(
+                                    context,
+                                  ).textTheme.bodySmall?.color?.withValues(alpha: 0.75),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                );
-              },
-            ),
+                    );
+                  },
+                ),
+              );
+            },
           );
         },
       ),
@@ -5800,19 +5997,31 @@ class _JobsPostCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    const ghBorder = Color(0xFF30363D);
+    const ghAccent = Color(0xFF58A6FF);
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         onTap: onOpenProfile,
         child: Container(
           decoration: BoxDecoration(
-            color: cs.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: cs.outlineVariant),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF161B22), Color(0xFF0F1722)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: ghBorder),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33010409),
+                blurRadius: 14,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          padding: const EdgeInsets.fromLTRB(15, 13, 15, 13),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -5827,7 +6036,7 @@ class _JobsPostCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Icon(Icons.public, size: 16),
+                  const Icon(Icons.public, size: 15, color: Color(0xFF8B949E)),
                   if (isMine)
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_horiz),
@@ -5846,11 +6055,41 @@ class _JobsPostCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              Text(
-                '@${post.author} • $timeLabel',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (onOpenProfile != null)
+                    InkWell(
+                      onTap: onOpenProfile,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 2,
+                          vertical: 1,
+                        ),
+                        child: Text(
+                          '@${post.author}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: ghAccent,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ),
+                    )
+                  else
+                    Text(
+                      '@${post.author}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.white70,
+                          ),
+                    ),
+                  Text(
+                    ' • $timeLabel',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                  ),
+                ],
               ),
               if (post.stackTags.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -5865,13 +6104,16 @@ class _JobsPostCard extends StatelessWidget {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.white10,
+                            color: const Color(0x1F58A6FF),
                             borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: Colors.white24),
+                            border: Border.all(color: const Color(0x4458A6FF)),
                           ),
                           child: Text(
                             tag,
-                            style: Theme.of(context).textTheme.bodySmall,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFFB9DCFF),
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
                         ),
                       )
@@ -5879,10 +6121,19 @@ class _JobsPostCard extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 8),
-              _RichMessageText(
-                text: post.body,
-                fontSize: 14,
-                textColor: Theme.of(context).colorScheme.onSurface,
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: const Color(0x660D1117),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: ghBorder),
+                ),
+                padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+                child: _RichMessageText(
+                  text: post.body,
+                  fontSize: 14,
+                  textColor: Theme.of(context).colorScheme.onSurface,
+                ),
               ),
               const SizedBox(height: 10),
               if (!isMine && onApply != null)
@@ -10331,6 +10582,9 @@ Widget _recommendedTile(
 
 final ValueNotifier<String?> _chatsTopHandle = ValueNotifier<String?>(null);
 final ValueNotifier<bool> _chatsCanStepBack = ValueNotifier<bool>(false);
+final ValueNotifier<bool> _chatsHasVerificationAlert = ValueNotifier<bool>(
+  false,
+);
 
 class _ChatsTab extends StatefulWidget {
   const _ChatsTab({
@@ -10389,6 +10643,110 @@ class _ChatsTabState extends State<_ChatsTab>
   bool _sendingInlineKeyRequest = false;
   final Map<String, bool> _peerHasPublishedKey = <String, bool>{};
   final Set<String> _peerKeyProbeInFlight = <String>{};
+  final Map<String, String> _groupMemberLoginCache = <String, String>{};
+  List<String> _groupMentionSuggestions = const <String>[];
+  Timer? _groupMentionDebounce;
+  List<String> _slashSuggestions = const <String>[];
+  int? _oneShotTtlSeconds;
+  bool _oneShotBurnAfterRead = false;
+  final Map<String, List<Map<String, dynamic>>> _localOnlyChatNotes =
+      <String, List<Map<String, dynamic>>>{};
+
+  static const Map<String, String> _slashCommands = <String, String>{
+    'help': 'Show all slash commands',
+    'me': 'Action message: /me text',
+    'shrug': 'Append shrug: /shrug text',
+    'tableflip': 'Send (╯°□°)╯︵ ┻━┻',
+    'unflip': 'Send ┬─┬ ノ( ゜-゜ノ)',
+    'lenny': 'Send ( ͡° ͜ʖ ͡°)',
+    'hash': 'Send SHA-256: /hash text',
+    'ttl': 'Set global auto-delete mode',
+    'timer': 'One-shot timer: /timer3 msg or /timer 3m msg',
+    'burn': 'One-shot burn-after-read: /burn msg',
+    'code': 'Inline code: /code js console.log(1)',
+    'image': 'Open image picker and send image',
+    'img': 'Alias for /image',
+    'bold': 'Format: /bold text',
+    'italic': 'Format: /italic text',
+    'quote': 'Format: /quote text',
+    'spoiler': 'Format: /spoiler text',
+    'h1': 'Format: /h1 text',
+    'h2': 'Format: /h2 text',
+    'h3': 'Format: /h3 text',
+  };
+
+  static const Set<String> _knownCodeLangs = <String>{
+    'dart',
+    'js',
+    'ts',
+    'tsx',
+    'jsx',
+    'python',
+    'java',
+    'kotlin',
+    'swift',
+    'c',
+    'cpp',
+    'cs',
+    'go',
+    'rust',
+    'php',
+    'rb',
+    'sql',
+    'json',
+    'yaml',
+    'xml',
+    'html',
+    'css',
+    'bash',
+    'sh',
+    'zsh',
+    'powershell',
+    'plaintext',
+    'text',
+  };
+
+  String _chatScopeKey({required bool isGroup, required String chatId}) {
+    final normalized = chatId.trim().toLowerCase();
+    return '${isGroup ? 'g' : 'dm'}:$normalized';
+  }
+
+  void _pushLocalOnlyChatNote({
+    required bool isGroup,
+    required String chatId,
+    required String text,
+  }) {
+    final message = text.trim();
+    if (message.isEmpty) return;
+    final scope = _chatScopeKey(isGroup: isGroup, chatId: chatId);
+    final item = <String, dynamic>{
+      '__key': 'local:${DateTime.now().microsecondsSinceEpoch}',
+      '__localSystem': true,
+      'text': message,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    };
+    if (!mounted) return;
+    setState(() {
+      final list = _localOnlyChatNotes.putIfAbsent(
+        scope,
+        () => <Map<String, dynamic>>[],
+      );
+      list.add(item);
+      if (list.length > 40) {
+        list.removeRange(0, list.length - 40);
+      }
+    });
+  }
+
+  List<Map<String, dynamic>> _localNotesForChat({
+    required bool isGroup,
+    required String chatId,
+  }) {
+    final scope = _chatScopeKey(isGroup: isGroup, chatId: chatId);
+    final list = _localOnlyChatNotes[scope];
+    if (list == null || list.isEmpty) return const <Map<String, dynamic>>[];
+    return List<Map<String, dynamic>>.from(list);
+  }
 
   void _syncShellChatMeta({String? groupTitle}) {
     String? label;
@@ -10414,6 +10772,533 @@ class _ChatsTabState extends State<_ChatsTab>
     }
     if (_chatsCanStepBack.value != canBack) {
       _chatsCanStepBack.value = canBack;
+    }
+  }
+
+  bool _mentionsMyHandle(String text, String myGithubLower) {
+    if (myGithubLower.trim().isEmpty || text.trim().isEmpty) return false;
+    final escaped = RegExp.escape(myGithubLower.trim());
+    final re = RegExp(
+      '(^|\\s)@$escaped(?![A-Za-z0-9-])',
+      caseSensitive: false,
+    );
+    return re.hasMatch(text);
+  }
+
+  String? _currentComposerSlashQuery() {
+    final text = _messageController.text;
+    var cursor = _messageController.selection.baseOffset;
+    if (cursor < 0 || cursor > text.length) cursor = text.length;
+
+    final before = text.substring(0, cursor);
+    final tokenMatch = RegExp(r'(^|\s)/([^\s/]*)$').firstMatch(before);
+    if (tokenMatch == null) return null;
+    return (tokenMatch.group(2) ?? '').trim().toLowerCase();
+  }
+
+  void _updateSlashSuggestions() {
+    final q = _currentComposerSlashQuery();
+    if (q == null) {
+      if (_slashSuggestions.isNotEmpty && mounted) {
+        setState(() => _slashSuggestions = const <String>[]);
+      }
+      return;
+    }
+    final next = _slashCommands.keys
+        .where((c) => c.startsWith(q))
+        .take(8)
+        .toList(growable: false);
+    if (!listEquals(_slashSuggestions, next) && mounted) {
+      setState(() => _slashSuggestions = next);
+    }
+  }
+
+  void _applySlashSuggestion(String command) {
+    final text = _messageController.text;
+    var cursor = _messageController.selection.baseOffset;
+    if (cursor < 0 || cursor > text.length) cursor = text.length;
+
+    var start = cursor;
+    while (start > 0 && text[start - 1] != ' ' && text[start - 1] != '\n') {
+      start--;
+    }
+
+    final replacement = '/$command ';
+    final nextText = text.replaceRange(start, cursor, replacement);
+    final nextCursor = start + replacement.length;
+    _messageController.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextCursor),
+    );
+    if (mounted) {
+      setState(() => _slashSuggestions = const <String>[]);
+    }
+  }
+
+  String _ttlLabelGlobal(int v) {
+    return switch (v) {
+      0 => 'default',
+      1 => 'off',
+      2 => '1m',
+      3 => '1h',
+      4 => '1d',
+      5 => 'burn',
+      _ => 'default',
+    };
+  }
+
+  String _ttlShortLabelFromSeconds(int seconds) {
+    if (seconds <= 0) return 'off';
+    if (seconds % 86400 == 0) return '${seconds ~/ 86400}d';
+    if (seconds % 3600 == 0) return '${seconds ~/ 3600}h';
+    if (seconds % 60 == 0) return '${seconds ~/ 60}m';
+    return '${seconds}s';
+  }
+
+  int? _parseSlashTtl(String arg) {
+    switch (arg.trim().toLowerCase()) {
+      case 'default':
+        return 0;
+      case 'off':
+      case 'never':
+        return 1;
+      case '1m':
+      case '1min':
+      case '1minute':
+        return 2;
+      case '1h':
+      case '1hour':
+        return 3;
+      case '1d':
+      case '1day':
+        return 4;
+      case 'burn':
+      case 'burnafterread':
+        return 5;
+      default:
+        return null;
+    }
+  }
+
+  int? _parseDurationSecondsToken(String token) {
+    final t = token.trim().toLowerCase();
+    if (t.isEmpty) return null;
+    if (t == 'burn') return -1;
+
+    final m = RegExp(r'^(\d+)([smhd]?)$').firstMatch(t);
+    if (m == null) return null;
+    final n = int.tryParse(m.group(1) ?? '');
+    if (n == null || n <= 0) return null;
+    final unit = m.group(2) ?? '';
+    return switch (unit) {
+      's' => n,
+      'm' || '' => n * 60,
+      'h' => n * 3600,
+      'd' => n * 86400,
+      _ => null,
+    };
+  }
+
+  String _toHex(List<int> bytes) {
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  String _normalizeCodeLanguage(String token) {
+    final t = token.trim().toLowerCase();
+    if (t == 'javascript') return 'js';
+    if (t == 'typescript') return 'ts';
+    if (t == 'shell') return 'bash';
+    if (t == 'txt') return 'plaintext';
+    return t;
+  }
+
+  Future<String?> _applySlashCommand({
+    required String rawText,
+    required String myGithub,
+    required bool isGroup,
+    required String chatId,
+  }) async {
+    final text = rawText.trim();
+    if (!text.startsWith('/')) return text;
+
+    final parts = text.substring(1).split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.trim().isEmpty) return text;
+    final cmdRaw = parts.first.trim().toLowerCase();
+    final args = (parts.length > 1) ? parts.sublist(1).join(' ').trim() : '';
+
+    if (cmdRaw.startsWith('timer') && cmdRaw.length > 5) {
+      final token = cmdRaw.substring(5);
+      final sec = _parseDurationSecondsToken(token);
+      if (sec == null) {
+        _pushLocalOnlyChatNote(
+          isGroup: isGroup,
+          chatId: chatId,
+          text: 'Use: /timer3 message, /timer 90s message, /timer 3m message',
+        );
+        return null;
+      }
+      final message = args.trim();
+      if (message.isEmpty) {
+        _pushLocalOnlyChatNote(
+          isGroup: isGroup,
+          chatId: chatId,
+          text: 'Add message: /timer3 your message',
+        );
+        return null;
+      }
+      if (mounted) {
+        setState(() {
+          _oneShotBurnAfterRead = sec < 0;
+          _oneShotTtlSeconds = sec < 0 ? null : sec;
+        });
+      }
+      _pushLocalOnlyChatNote(
+        isGroup: isGroup,
+        chatId: chatId,
+        text: sec < 0
+            ? 'One-shot timer: burn-after-read for next message'
+            : 'One-shot timer: ${_ttlShortLabelFromSeconds(sec)} for next message',
+      );
+      return message;
+    }
+
+    final cmd = cmdRaw;
+
+    switch (cmd) {
+      case 'help':
+        _pushLocalOnlyChatNote(
+          isGroup: isGroup,
+          chatId: chatId,
+          text:
+            'Commands: /help /me /shrug /tableflip /unflip /lenny /hash /ttl /timer /burn /code /image /img /bold /italic /quote /spoiler /h1 /h2 /h3',
+        );
+        return null;
+      case 'me':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /me your action',
+          );
+          return null;
+        }
+        return '*@$myGithub $args*';
+      case 'shrug':
+        return args.isEmpty ? r'¯\_(ツ)_/¯' : '$args ${r'¯\_(ツ)_/¯'}';
+      case 'tableflip':
+        return args.isEmpty ? '(╯°□°)╯︵ ┻━┻' : '$args (╯°□°)╯︵ ┻━┻';
+      case 'unflip':
+        return args.isEmpty ? '┬─┬ ノ( ゜-゜ノ)' : '$args ┬─┬ ノ( ゜-゜ノ)';
+      case 'lenny':
+        return args.isEmpty ? '( ͡° ͜ʖ ͡°)' : '$args ( ͡° ͜ʖ ͡°)';
+      case 'hash':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /hash text',
+          );
+          return null;
+        }
+        final digest = await Sha256().hash(utf8.encode(args));
+        return '`sha256:${_toHex(digest.bytes)}`';
+      case 'ttl':
+        final ttl = _parseSlashTtl(args);
+        if (ttl == null) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /ttl off|1m|1h|1d|burn|default',
+          );
+          return null;
+        }
+        if (mounted) {
+          setState(() => _dmTtlMode = ttl);
+        }
+        _pushLocalOnlyChatNote(
+          isGroup: isGroup,
+          chatId: chatId,
+          text: 'TTL set to ${_ttlLabelGlobal(ttl)}',
+        );
+        return null;
+      case 'timer':
+        final split = args.split(RegExp(r'\s+'));
+        if (split.length < 2) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /timer 3m message (supports s/m/h/d)',
+          );
+          return null;
+        }
+        final sec = _parseDurationSecondsToken(split.first);
+        if (sec == null) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Invalid timer. Example: /timer 3m hello',
+          );
+          return null;
+        }
+        final message = split.sublist(1).join(' ').trim();
+        if (message.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Add message after timer: /timer 3m your message',
+          );
+          return null;
+        }
+        if (mounted) {
+          setState(() {
+            _oneShotBurnAfterRead = sec < 0;
+            _oneShotTtlSeconds = sec < 0 ? null : sec;
+          });
+        }
+        _pushLocalOnlyChatNote(
+          isGroup: isGroup,
+          chatId: chatId,
+          text: sec < 0
+              ? 'One-shot timer: burn-after-read for next message'
+              : 'One-shot timer: ${_ttlShortLabelFromSeconds(sec)} for next message',
+        );
+        return message;
+      case 'burn':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /burn your message',
+          );
+          return null;
+        }
+        if (mounted) {
+          setState(() {
+            _oneShotBurnAfterRead = true;
+            _oneShotTtlSeconds = null;
+          });
+        }
+        _pushLocalOnlyChatNote(
+          isGroup: isGroup,
+          chatId: chatId,
+          text: 'One-shot timer: burn-after-read for next message',
+        );
+        return args;
+      case 'code':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /code js console.log(1) or /code python print("hi")',
+          );
+          return null;
+        }
+        final bits = args.split(RegExp(r'\s+'));
+        final first = bits.first.trim();
+        final langCandidate = _normalizeCodeLanguage(first);
+        var language = '';
+        var code = args;
+        if (_knownCodeLangs.contains(langCandidate) && bits.length > 1) {
+          language = langCandidate;
+          code = bits.sublist(1).join(' ').trim();
+        }
+        if (code.trim().isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Code cannot be empty.',
+          );
+          return null;
+        }
+        final payload = _CodeMessagePayload(
+          title: '',
+          language: language,
+          code: code,
+        );
+        return jsonEncode(payload.toJson());
+      case 'image':
+      case 'img':
+        return '__SLASH_IMAGE__';
+      case 'bold':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /bold text',
+          );
+          return null;
+        }
+        return '**$args**';
+      case 'italic':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /italic text',
+          );
+          return null;
+        }
+        return '*$args*';
+      case 'quote':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /quote text',
+          );
+          return null;
+        }
+        return '> $args';
+      case 'spoiler':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /spoiler text',
+          );
+          return null;
+        }
+        return '||$args||';
+      case 'h1':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /h1 text',
+          );
+          return null;
+        }
+        return '# $args';
+      case 'h2':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /h2 text',
+          );
+          return null;
+        }
+        return '## $args';
+      case 'h3':
+        if (args.isEmpty) {
+          _pushLocalOnlyChatNote(
+            isGroup: isGroup,
+            chatId: chatId,
+            text: 'Use: /h3 text',
+          );
+          return null;
+        }
+        return '### $args';
+      default:
+        _pushLocalOnlyChatNote(
+          isGroup: isGroup,
+          chatId: chatId,
+          text: 'Unknown command: /$cmd (use /help)',
+        );
+        return null;
+    }
+  }
+
+  String? _currentComposerMentionQuery() {
+    final text = _messageController.text;
+    var cursor = _messageController.selection.baseOffset;
+    if (cursor < 0 || cursor > text.length) cursor = text.length;
+
+    final before = text.substring(0, cursor);
+    final tokenMatch = RegExp(r'(^|\s)@([^\s@]*)$').firstMatch(before);
+    if (tokenMatch == null) return null;
+    final q = (tokenMatch.group(2) ?? '').trim();
+    return q;
+  }
+
+  Future<List<String>> _resolveGroupMemberLogins(List<String> memberUids) async {
+    final out = <String>[];
+    for (final uid in memberUids) {
+      var login = _groupMemberLoginCache[uid];
+      if (login == null || login.trim().isEmpty) {
+        try {
+          final snap = await rtdb().ref('users/$uid/githubUsername').get();
+          final raw = snap.value?.toString() ?? '';
+          login = raw.trim();
+          if (login.isNotEmpty) {
+            _groupMemberLoginCache[uid] = login;
+          }
+        } catch (_) {
+          // ignore
+        }
+      }
+      if (login != null && login.trim().isNotEmpty) {
+        out.add(login.trim());
+      }
+    }
+    out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return out.toSet().toList(growable: false);
+  }
+
+  void _scheduleGroupMentionSuggestions({required String groupId}) {
+    _groupMentionDebounce?.cancel();
+    _groupMentionDebounce = Timer(const Duration(milliseconds: 220), () async {
+      final q = _currentComposerMentionQuery();
+      if (q == null) {
+        if (_groupMentionSuggestions.isNotEmpty && mounted) {
+          setState(() => _groupMentionSuggestions = const <String>[]);
+        }
+        return;
+      }
+
+      final membersSnap = await rtdb().ref('groupMembers/$groupId').get();
+      final mv = membersSnap.value;
+      final mm = (mv is Map) ? mv : null;
+      if (mm == null) {
+        if (_groupMentionSuggestions.isNotEmpty && mounted) {
+          setState(() => _groupMentionSuggestions = const <String>[]);
+        }
+        return;
+      }
+
+      final memberUids = <String>[];
+      for (final e in mm.entries) {
+        memberUids.add(e.key.toString());
+      }
+      final memberLogins = await _resolveGroupMemberLogins(memberUids);
+
+      final qLower = q.toLowerCase();
+      final filtered = memberLogins
+          .where((u) => u.toLowerCase().startsWith(qLower))
+          .take(8)
+          .toList(growable: false);
+
+      if (!listEquals(_groupMentionSuggestions, filtered) && mounted) {
+        setState(() => _groupMentionSuggestions = filtered);
+      }
+    });
+  }
+
+  void _applyGroupMentionSuggestion(String login) {
+    final text = _messageController.text;
+    var cursor = _messageController.selection.baseOffset;
+    if (cursor < 0 || cursor > text.length) cursor = text.length;
+
+    var start = cursor;
+    while (start > 0 && text[start - 1] != ' ' && text[start - 1] != '\n') {
+      start--;
+    }
+
+    final replacement = '@$login';
+    var nextText = text.replaceRange(start, cursor, replacement);
+    var nextCursor = start + replacement.length;
+    if (nextCursor >= nextText.length || nextText[nextCursor] != ' ') {
+      nextText = nextText.replaceRange(nextCursor, nextCursor, ' ');
+      nextCursor += 1;
+    }
+
+    _messageController.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextCursor),
+    );
+
+    if (mounted) {
+      setState(() => _groupMentionSuggestions = const <String>[]);
     }
   }
 
@@ -11591,6 +12476,7 @@ class _ChatsTabState extends State<_ChatsTab>
     _dmScrollController.dispose();
     _verifiedScrollController.dispose();
     _groupScrollController.dispose();
+    _groupMentionDebounce?.cancel();
     _typingTimeout?.cancel();
     _setTyping(false);
     if (_activeGroupId != null) {
@@ -11598,6 +12484,7 @@ class _ChatsTabState extends State<_ChatsTab>
     }
     _chatsTopHandle.value = null;
     _chatsCanStepBack.value = false;
+    _chatsHasVerificationAlert.value = false;
     _typingAnim.dispose();
     super.dispose();
   }
@@ -11617,8 +12504,86 @@ class _ChatsTabState extends State<_ChatsTab>
   bool get hasActiveDm =>
       _activeLogin != null && _activeLogin!.trim().isNotEmpty;
 
-    bool get hasActiveGroup =>
+  bool get hasActiveGroup =>
       _activeGroupId != null && _activeGroupId!.trim().isNotEmpty;
+
+  void _syncVerificationAlertBadge(bool value) {
+    if (_chatsHasVerificationAlert.value != value) {
+      _chatsHasVerificationAlert.value = value;
+    }
+  }
+
+  Future<void> openVerificationNotificationChat() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null || !mounted) return;
+
+    final myReqSnap = await _verifiedRequestRef(current.uid).get();
+    final myReqRaw = myReqSnap.value;
+    final myReq = (myReqRaw is Map)
+        ? Map<String, dynamic>.from(myReqRaw)
+        : null;
+    final myStatus = (myReq?['status'] ?? '').toString();
+    final hasNewModeratorMessage = myReq?['hasNewModeratorMessage'] == true;
+    final myGithub = (myReq?['githubUsername'] ?? '').toString();
+
+    if (hasNewModeratorMessage && myStatus.isNotEmpty) {
+      setState(() {
+        _activeVerifiedUid = current.uid;
+        _activeVerifiedGithub = myGithub;
+      });
+      _syncShellChatMeta();
+      await _verifiedRequestRef(current.uid).update({'hasNewModeratorMessage': false});
+      _syncVerificationAlertBadge(false);
+      return;
+    }
+
+    final meSnap = await rtdb().ref('users/${current.uid}').get();
+    final meRaw = meSnap.value;
+    final me = (meRaw is Map) ? meRaw : null;
+    final isModerator = _isModeratorFromUserMap(me);
+
+    if (isModerator) {
+      final allSnap = await rtdb().ref('verifiedRequests').get();
+      final allRaw = allSnap.value;
+      final all = (allRaw is Map) ? allRaw : null;
+      if (all != null) {
+        String? pickedUid;
+        String pickedGithub = '';
+        int pickedCreatedAt = -1;
+        for (final entry in all.entries) {
+          final uid = entry.key.toString();
+          final rv = entry.value;
+          if (rv is! Map) continue;
+          final req = Map<String, dynamic>.from(rv);
+          if ((req['status'] ?? '').toString() != 'pending') continue;
+          final createdAt = (req['createdAt'] is int) ? req['createdAt'] as int : 0;
+          if (createdAt >= pickedCreatedAt) {
+            pickedCreatedAt = createdAt;
+            pickedUid = uid;
+            pickedGithub = (req['githubUsername'] ?? '').toString();
+          }
+        }
+        if (pickedUid != null && pickedUid.isNotEmpty) {
+          setState(() {
+            _activeVerifiedUid = pickedUid;
+            _activeVerifiedGithub = pickedGithub;
+            _moderatorAnonymous = true;
+          });
+          _syncShellChatMeta();
+          _syncVerificationAlertBadge(false);
+          return;
+        }
+      }
+    }
+
+    if (myStatus.isNotEmpty) {
+      setState(() {
+        _activeVerifiedUid = current.uid;
+        _activeVerifiedGithub = myGithub;
+      });
+      _syncShellChatMeta();
+    }
+  }
 
   Future<void> openActiveDmFingerprint() async {
     final login = _activeLogin;
@@ -12574,8 +13539,58 @@ class _ChatsTabState extends State<_ChatsTab>
   Future<void> _send() async {
     final current = FirebaseAuth.instance.currentUser;
     final login = _activeLogin;
-    final text = _messageController.text.trim();
-    if (current == null || login == null || text.isEmpty) return;
+    final rawText = _messageController.text.trim();
+    if (current == null || login == null || rawText.isEmpty) return;
+
+    final myLogin = await _myGithubUsername(current.uid);
+    if (myLogin == null || myLogin.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLanguage.tr(
+                context,
+                'Nelze zjistit tvůj GitHub username.',
+                'Unable to determine your GitHub username.',
+              ),
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final commandResult = await _applySlashCommand(
+      rawText: rawText,
+      myGithub: myLogin,
+      isGroup: false,
+      chatId: login,
+    );
+    if (commandResult == null || commandResult.trim().isEmpty) return;
+    final text = commandResult.trim();
+    if (text == '__SLASH_IMAGE__') {
+      final otherUid = await _ensureActiveOtherUid();
+      if (otherUid == null || otherUid.isEmpty) {
+        _pushLocalOnlyChatNote(
+          isGroup: false,
+          chatId: login,
+          text: 'Cannot send image: user is not available in GitMit.',
+        );
+        return;
+      }
+      _messageController.clear();
+      if (_slashSuggestions.isNotEmpty && mounted) {
+        setState(() => _slashSuggestions = const <String>[]);
+      }
+      await _sendImageDm(
+        current: current,
+        login: login,
+        myLogin: myLogin,
+        otherUid: otherUid,
+        canSend: true,
+      );
+      return;
+    }
 
     final pendingCode = _pendingCodePayload;
     final isPendingCodeText = pendingCode != null && text.startsWith('<> kód');
@@ -12595,24 +13610,6 @@ class _ChatsTabState extends State<_ChatsTab>
         !outgoingText.trim().startsWith('@')) {
       final cleanFrom = replyToFrom.trim().replaceFirst(RegExp(r'^@+'), '');
       outgoingText = '@$cleanFrom $outgoingText';
-    }
-
-    final myLogin = await _myGithubUsername(current.uid);
-    if (myLogin == null || myLogin.trim().isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              AppLanguage.tr(
-                context,
-                'Nelze zjistit tvůj GitHub username.',
-                'Unable to determine your GitHub username.',
-              ),
-            ),
-          ),
-        );
-      }
-      return;
     }
 
     final otherUid = await _ensureActiveOtherUid();
@@ -12678,18 +13675,35 @@ class _ChatsTabState extends State<_ChatsTab>
     }
 
     _messageController.clear();
+    if (_slashSuggestions.isNotEmpty && mounted) {
+      setState(() => _slashSuggestions = const <String>[]);
+    }
     _typingTimeout?.cancel();
     _setTyping(false);
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final burnAfterRead = _dmTtlMode == 5;
-    final ttlSeconds = switch (_dmTtlMode) {
+    final oneShotBurn = _oneShotBurnAfterRead;
+    final oneShotTtlSeconds = _oneShotTtlSeconds;
+    if (mounted && (oneShotBurn || oneShotTtlSeconds != null)) {
+      setState(() {
+        _oneShotBurnAfterRead = false;
+        _oneShotTtlSeconds = null;
+      });
+    } else {
+      _oneShotBurnAfterRead = false;
+      _oneShotTtlSeconds = null;
+    }
+    final burnAfterRead = oneShotBurn || _dmTtlMode == 5;
+    final ttlSeconds = oneShotBurn
+        ? 0
+        : (oneShotTtlSeconds ??
+              switch (_dmTtlMode) {
       0 => widget.settings.autoDeleteSeconds,
       1 => 0,
       2 => 60,
       3 => 60 * 60,
       4 => 60 * 60 * 24,
       _ => widget.settings.autoDeleteSeconds,
-    };
+    });
     final expiresAt = (!burnAfterRead && ttlSeconds > 0)
         ? (nowMs + (ttlSeconds * 1000))
         : null;
@@ -12916,6 +13930,11 @@ class _ChatsTabState extends State<_ChatsTab>
                       return bt.compareTo(at);
                     });
                   }
+
+                  final hasVerificationAlert =
+                      (hasNew && myStatus != null) ||
+                      (isModerator && pendingReqs.isNotEmpty);
+                  _syncVerificationAlertBadge(hasVerificationAlert);
 
                   return StreamBuilder<DatabaseEvent>(
                     stream: blockedRef.onValue,
@@ -15525,8 +16544,32 @@ class _ChatsTabState extends State<_ChatsTab>
                   }
 
                   Future<void> send() async {
-                    final text = _messageController.text.trim();
-                    if (text.isEmpty || !canSend) return;
+                    final rawText = _messageController.text.trim();
+                    if (rawText.isEmpty || !canSend) return;
+
+                    final commandResult = await _applySlashCommand(
+                      rawText: rawText,
+                      myGithub: myGithub,
+                      isGroup: true,
+                      chatId: groupId,
+                    );
+                    if (commandResult == null || commandResult.trim().isEmpty) {
+                      return;
+                    }
+                    final text = commandResult.trim();
+                    if (text == '__SLASH_IMAGE__') {
+                      _messageController.clear();
+                      if (_slashSuggestions.isNotEmpty && mounted) {
+                        setState(() => _slashSuggestions = const <String>[]);
+                      }
+                      await _sendImageGroup(
+                        groupId: groupId,
+                        current: current,
+                        myGithub: myGithub,
+                        canSend: canSend,
+                      );
+                      return;
+                    }
 
                     final pendingCode = _pendingCodePayload;
                     final isPendingCodeText =
@@ -15553,6 +16596,14 @@ class _ChatsTabState extends State<_ChatsTab>
                     }
 
                     _messageController.clear();
+                    if (_slashSuggestions.isNotEmpty && mounted) {
+                      setState(() => _slashSuggestions = const <String>[]);
+                    }
+                    if (_groupMentionSuggestions.isNotEmpty && mounted) {
+                      setState(
+                        () => _groupMentionSuggestions = const <String>[],
+                      );
+                    }
                     _typingTimeout?.cancel();
                     _setGroupTyping(
                       groupId: groupId,
@@ -15561,15 +16612,29 @@ class _ChatsTabState extends State<_ChatsTab>
                     );
 
                     final nowMs = DateTime.now().millisecondsSinceEpoch;
-                    final burnAfterRead = _dmTtlMode == 5;
-                    final ttlSeconds = switch (_dmTtlMode) {
+                    final oneShotBurn = _oneShotBurnAfterRead;
+                    final oneShotTtlSeconds = _oneShotTtlSeconds;
+                    if (mounted && (oneShotBurn || oneShotTtlSeconds != null)) {
+                      setState(() {
+                        _oneShotBurnAfterRead = false;
+                        _oneShotTtlSeconds = null;
+                      });
+                    } else {
+                      _oneShotBurnAfterRead = false;
+                      _oneShotTtlSeconds = null;
+                    }
+                    final burnAfterRead = oneShotBurn || _dmTtlMode == 5;
+                    final ttlSeconds = oneShotBurn
+                        ? 0
+                        : (oneShotTtlSeconds ??
+                              switch (_dmTtlMode) {
                       0 => widget.settings.autoDeleteSeconds,
                       1 => 0,
                       2 => 60,
                       3 => 60 * 60,
                       4 => 60 * 60 * 24,
                       _ => widget.settings.autoDeleteSeconds,
-                    };
+                    });
                     final expiresAt = (!burnAfterRead && ttlSeconds > 0)
                         ? (nowMs + (ttlSeconds * 1000))
                         : null;
@@ -15764,6 +16829,23 @@ class _ChatsTabState extends State<_ChatsTab>
                               return at.compareTo(bt);
                             });
 
+                            final displayItems = <Map<String, dynamic>>[
+                              ...items,
+                              ..._localNotesForChat(
+                                isGroup: true,
+                                chatId: groupId,
+                              ),
+                            ];
+                            displayItems.sort((a, b) {
+                              final at = (a['createdAt'] is int)
+                                  ? a['createdAt'] as int
+                                  : 0;
+                              final bt = (b['createdAt'] is int)
+                                  ? b['createdAt'] as int
+                                  : 0;
+                              return at.compareTo(bt);
+                            });
+
                             // After the list rebuilds, scroll to bottom so newest message is visible.
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               try {
@@ -15849,15 +16931,16 @@ class _ChatsTabState extends State<_ChatsTab>
                             return ListView.builder(
                               controller: _groupScrollController,
                               padding: const EdgeInsets.all(12),
-                              itemCount: items.length,
+                              itemCount: displayItems.length,
                               itemBuilder: (context, i) {
-                                final m = items[i];
+                                final m = displayItems[i];
+                                final isLocalSystem = m['__localSystem'] == true;
                                 final key = (m['__key'] ?? '').toString();
                                 final plaintext = (m['text'] ?? '').toString();
                                 final fromUid = (m['fromUid'] ?? '').toString();
                                 final fromGh = (m['fromGithub'] ?? '')
                                     .toString();
-                                final isMe = fromUid == current.uid;
+                                final isMe = !isLocalSystem && fromUid == current.uid;
                                 final burnAfterRead =
                                     m['burnAfterRead'] == true;
                                 final createdAt = (m['createdAt'] is int)
@@ -15981,12 +17064,11 @@ class _ChatsTabState extends State<_ChatsTab>
                                 }
 
                                 final mentioned =
+                                  !isLocalSystem &&
                                     !isAttachment &&
                                     !isCode &&
                                     myGithubLower.isNotEmpty &&
-                                    text.toLowerCase().contains(
-                                      '@$myGithubLower',
-                                    );
+                                    _mentionsMyHandle(text, myGithubLower);
 
                                 final replyToFrom = (m['replyToFrom'] ?? '')
                                     .toString()
@@ -16049,6 +17131,17 @@ class _ChatsTabState extends State<_ChatsTab>
                                   bubbleKey,
                                 );
                                 final tcolor = _bubbleTextColor(context, bubbleKey);
+                                final mentionHighlight = mentioned && !isMe;
+                                final effectiveBubbleColor = isLocalSystem
+                                  ? const Color(0xFFDDE1E6)
+                                  : (mentionHighlight
+                                      ? const Color(0x66F2CC60)
+                                      : bubbleColor);
+                                final effectiveTextColor = isLocalSystem
+                                  ? const Color(0xFF30363D)
+                                  : (mentionHighlight
+                                      ? const Color(0xFFFFF5CC)
+                                      : tcolor);
 
                                 return Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -16056,7 +17149,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                   ),
                                   child: GestureDetector(
                                     behavior: HitTestBehavior.translucent,
-                                    onLongPress: () => _showMessageActions(
+                                    onLongPress: isLocalSystem
+                                      ? null
+                                      : () => _showMessageActions(
                                       isGroup: true,
                                       chatTarget: groupId,
                                       messageKey: key,
@@ -16078,7 +17173,19 @@ class _ChatsTabState extends State<_ChatsTab>
                                           ? CrossAxisAlignment.end
                                           : CrossAxisAlignment.start,
                                       children: [
-                                        if (fromGh.isNotEmpty)
+                                        if (isLocalSystem)
+                                          Text(
+                                            AppLanguage.tr(
+                                              context,
+                                              'Jen pro tebe',
+                                              'Only visible to you',
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Color(0xFF9CA3AF),
+                                            ),
+                                          )
+                                        else if (fromGh.isNotEmpty)
                                           Text(
                                             '@$fromGh',
                                             style: const TextStyle(
@@ -16096,7 +17203,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                               vertical: 10,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: bubbleColor,
+                                              color: effectiveBubbleColor,
                                               borderRadius:
                                                   BorderRadius.circular(
                                                     12,
@@ -16106,7 +17213,13 @@ class _ChatsTabState extends State<_ChatsTab>
                                                       color: Colors.amber,
                                                       width: 2,
                                                     )
-                                                  : null,
+                                                  : (isLocalSystem
+                                                        ? Border.all(
+                                                            color: const Color(
+                                                              0xFFB8C0CC,
+                                                            ),
+                                                          )
+                                                        : null),
                                             ),
                                             child: Column(
                                               crossAxisAlignment:
@@ -16159,8 +17272,11 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                       .settings
                                                                       .chatTextSize -
                                                                   2,
-                                                              color: Colors
-                                                                  .white70,
+                                                              color: mentionHighlight
+                                                                  ? const Color(
+                                                                      0xFFFFF1B8,
+                                                                    )
+                                                                  : Colors.white70,
                                                             ),
                                                           ),
                                                         ),
@@ -16227,7 +17343,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                 fontSize: widget
                                                                     .settings
                                                                     .chatTextSize,
-                                                                color: tcolor,
+                                                                color: effectiveTextColor,
                                                               ),
                                                             ),
                                                           ),
@@ -16241,7 +17357,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     fontSize: widget
                                                         .settings
                                                         .chatTextSize,
-                                                    textColor: tcolor,
+                                                    textColor: effectiveTextColor,
                                                   ),
                                               ],
                                             ),
@@ -16328,6 +17444,81 @@ class _ChatsTabState extends State<_ChatsTab>
                             ),
                           ),
                         ),
+                      if (_groupMentionSuggestions.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.outlineVariant,
+                              ),
+                            ),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 180),
+                              child: ListView(
+                                shrinkWrap: true,
+                                padding: EdgeInsets.zero,
+                                children: _groupMentionSuggestions
+                                    .map(
+                                      (login) => ListTile(
+                                        dense: true,
+                                        leading: const Icon(
+                                          Icons.alternate_email,
+                                          size: 16,
+                                        ),
+                                        title: Text('@$login'),
+                                        onTap: () =>
+                                            _applyGroupMentionSuggestion(login),
+                                      ),
+                                    )
+                                    .toList(growable: false),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_slashSuggestions.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.outlineVariant,
+                              ),
+                            ),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 210),
+                              child: ListView(
+                                shrinkWrap: true,
+                                padding: EdgeInsets.zero,
+                                children: _slashSuggestions
+                                    .map(
+                                      (command) => ListTile(
+                                        dense: true,
+                                        leading: const Icon(
+                                          Icons.terminal,
+                                          size: 16,
+                                        ),
+                                        title: Text('/$command'),
+                                        subtitle: Text(
+                                          _slashCommands[command] ?? '',
+                                        ),
+                                        onTap: () =>
+                                            _applySlashSuggestion(command),
+                                      ),
+                                    )
+                                    .toList(growable: false),
+                              ),
+                            ),
+                          ),
+                        ),
                       Padding(
                         padding: const EdgeInsets.all(12),
                         child: Row(
@@ -16358,6 +17549,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                           groupId: groupId,
                                           text: text,
                                           myGithub: myGithub,
+                                        );
+                                        _updateSlashSuggestions();
+                                        _scheduleGroupMentionSuggestions(
+                                          groupId: groupId,
                                         );
                                       }
                                     : null,
@@ -16479,7 +17674,6 @@ class _ChatsTabState extends State<_ChatsTab>
         final uv = uSnap.data?.snapshot.value;
         final um = (uv is Map) ? uv : null;
         final myGithub = (um?['githubUsername'] ?? '').toString();
-        final myGithubLower = myGithub.toLowerCase();
 
         return StreamBuilder<DatabaseEvent>(
           stream: dmContactRef.onValue,
@@ -16766,6 +17960,23 @@ class _ChatsTabState extends State<_ChatsTab>
                                     return at.compareTo(bt);
                                   });
 
+                                  final displayItems = <Map<String, dynamic>>[
+                                    ...items,
+                                    ..._localNotesForChat(
+                                      isGroup: false,
+                                      chatId: login,
+                                    ),
+                                  ];
+                                  displayItems.sort((a, b) {
+                                    final at = (a['createdAt'] is int)
+                                        ? a['createdAt'] as int
+                                        : 0;
+                                    final bt = (b['createdAt'] is int)
+                                        ? b['createdAt'] as int
+                                        : 0;
+                                    return at.compareTo(bt);
+                                  });
+
                                   // After the list rebuilds, scroll to bottom so newest message is visible.
                                   WidgetsBinding.instance.addPostFrameCallback((
                                     _,
@@ -16859,15 +18070,18 @@ class _ChatsTabState extends State<_ChatsTab>
                                   return ListView.builder(
                                     controller: _dmScrollController,
                                     padding: const EdgeInsets.all(12),
-                                    itemCount: items.length,
+                                    itemCount: displayItems.length,
                                     itemBuilder: (context, i) {
-                                      final m = items[i];
+                                      final m = displayItems[i];
+                                      final isLocalSystem =
+                                        m['__localSystem'] == true;
                                       final key = (m['__key'] ?? '').toString();
                                       final plaintext = (m['text'] ?? '')
                                           .toString();
                                       final fromUid = (m['fromUid'] ?? '')
                                           .toString();
-                                      final isMe = fromUid == current.uid;
+                                      final isMe =
+                                        !isLocalSystem && fromUid == current.uid;
                                       final burnAfterRead =
                                           m['burnAfterRead'] == true;
                                       final createdAt = (m['createdAt'] is int)
@@ -16876,10 +18090,11 @@ class _ChatsTabState extends State<_ChatsTab>
                                       final timeLabel = _formatShortTime(
                                         createdAt,
                                       );
-                                      final otherUid = isMe
+                                        final otherUid = isMe
                                           ? (_activeOtherUid ?? '')
                                           : fromUid;
-                                      if (!isMe &&
+                                        if (!isLocalSystem &&
+                                          !isMe &&
                                           otherUid.isNotEmpty &&
                                           canSend &&
                                           !blocked) {
@@ -16994,10 +18209,8 @@ class _ChatsTabState extends State<_ChatsTab>
 
                                       final attachment =
                                           _AttachmentPayload.tryParse(text);
-                                      final isAttachment = attachment != null;
                                       final codePayload =
                                           _CodeMessagePayload.tryParse(text);
-                                      final isCode = codePayload != null;
                                       if (attachment != null) {
                                         final cacheKey = 'dm:$loginLower:$key';
                                         if (!_attachmentCache.containsKey(
@@ -17009,14 +18222,6 @@ class _ChatsTabState extends State<_ChatsTab>
                                           );
                                         }
                                       }
-
-                                      final mentioned =
-                                          !isAttachment &&
-                                          !isCode &&
-                                          myGithubLower.isNotEmpty &&
-                                          text.toLowerCase().contains(
-                                            '@$myGithubLower',
-                                          );
 
                                       final replyToFrom =
                                           (m['replyToFrom'] ?? '')
@@ -17041,6 +18246,12 @@ class _ChatsTabState extends State<_ChatsTab>
                                         context,
                                         bubbleKey,
                                       );
+                                        final effectiveColor = isLocalSystem
+                                            ? const Color(0xFFDDE1E6)
+                                            : color;
+                                        final effectiveTextColor = isLocalSystem
+                                            ? const Color(0xFF30363D)
+                                            : tcolor;
 
                                       final reactions = (m['reactions'] is Map)
                                           ? (m['reactions'] as Map)
@@ -17096,7 +18307,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                         ),
                                         child: GestureDetector(
                                           behavior: HitTestBehavior.translucent,
-                                          onLongPress: blocked
+                                            onLongPress: (blocked || isLocalSystem)
                                               ? null
                                               : () => _showMessageActions(
                                                   isGroup: false,
@@ -17143,6 +18354,18 @@ class _ChatsTabState extends State<_ChatsTab>
                                                 ? CrossAxisAlignment.end
                                                 : CrossAxisAlignment.start,
                                             children: [
+                                              if (isLocalSystem)
+                                                Text(
+                                                  AppLanguage.tr(
+                                                    context,
+                                                    'Jen pro tebe',
+                                                    'Only visible to you',
+                                                  ),
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Color(0xFF9CA3AF),
+                                                  ),
+                                                ),
                                               Align(
                                                 alignment: isMe
                                                     ? Alignment.centerRight
@@ -17154,15 +18377,16 @@ class _ChatsTabState extends State<_ChatsTab>
                                                         vertical: 10,
                                                       ),
                                                   decoration: BoxDecoration(
-                                                    color: color,
+                                                    color: effectiveColor,
                                                     borderRadius:
                                                         BorderRadius.circular(
                                                           12,
                                                         ),
-                                                    border: mentioned
+                                                    border: isLocalSystem
                                                         ? Border.all(
-                                                            color: Colors.amber,
-                                                            width: 2,
+                                                            color: const Color(
+                                                              0xFFB8C0CC,
+                                                            ),
                                                           )
                                                         : null,
                                                   ),
@@ -17298,7 +18522,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                               .chatTextSize +
                                                                           1,
                                                                       color:
-                                                                          tcolor,
+                                                                          effectiveTextColor,
                                                                     ),
                                                                   ),
                                                                 ),
@@ -17331,7 +18555,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                         backgroundColor:
                                                                             Colors.transparent,
                                                                         color:
-                                                                            tcolor,
+                                                                          tcolor,
                                                                         fontFamily:
                                                                             'monospace',
                                                                         fontSize: widget
@@ -17350,7 +18574,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                           .settings
                                                                           .chatTextSize,
                                                                       color:
-                                                                          tcolor,
+                                                                          effectiveTextColor,
                                                                     ),
                                                                   ),
                                                                 ),
@@ -17377,7 +18601,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                               .settings
                                                                               .chatTextSize -
                                                                           2,
-                                                                      color: tcolor
+                                                                        color: effectiveTextColor
                                                                           .withOpacity(
                                                                             0.7,
                                                                           ),
@@ -17396,7 +18620,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                                           fontSize: widget
                                                               .settings
                                                               .chatTextSize,
-                                                          textColor: tcolor,
+                                                          textColor:
+                                                              effectiveTextColor,
                                                         ),
                                                     ],
                                                   ),
@@ -17435,7 +18660,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                 ),
                                                           ),
                                                         ),
-                                                      if (isMe) ...[
+                                                      if (isMe && !isLocalSystem) ...[
                                                         if (timeLabel
                                                             .isNotEmpty)
                                                           const SizedBox(
@@ -17657,6 +18882,47 @@ class _ChatsTabState extends State<_ChatsTab>
                                 ),
                               ),
                             ),
+                          if (!blocked && canSend && _slashSuggestions.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surface,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.outlineVariant,
+                                  ),
+                                ),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxHeight: 210,
+                                  ),
+                                  child: ListView(
+                                    shrinkWrap: true,
+                                    padding: EdgeInsets.zero,
+                                    children: _slashSuggestions
+                                        .map(
+                                          (command) => ListTile(
+                                            dense: true,
+                                            leading: const Icon(
+                                              Icons.terminal,
+                                              size: 16,
+                                            ),
+                                            title: Text('/$command'),
+                                            subtitle: Text(
+                                              _slashCommands[command] ?? '',
+                                            ),
+                                            onTap: () =>
+                                                _applySlashSuggestion(command),
+                                          ),
+                                        )
+                                        .toList(growable: false),
+                                  ),
+                                ),
+                              ),
+                            ),
                           Padding(
                             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                             child: Container(
@@ -17696,6 +18962,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                 );
                                               }
                                               _onTypingChanged(text);
+                                              _updateSlashSuggestions();
                                             }
                                           : null,
                                     ),

@@ -104,9 +104,14 @@ class MyApp extends StatelessWidget {
               color: ghCard,
               elevation: 0,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
                 side: const BorderSide(color: ghBorder),
               ),
+            ),
+            dividerTheme: const DividerThemeData(
+              color: ghBorder,
+              space: 1,
+              thickness: 1,
             ),
             dialogTheme: DialogThemeData(
               backgroundColor: ghCard,
@@ -122,9 +127,27 @@ class MyApp extends StatelessWidget {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
               ),
             ),
-            listTileTheme: const ListTileThemeData(
+            listTileTheme: ListTileThemeData(
               iconColor: Color(0xFF8B949E),
               textColor: ghText,
+              tileColor: ghCard,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: ghBorder),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 2,
+              ),
+            ),
+            snackBarTheme: SnackBarThemeData(
+              backgroundColor: const Color(0xFF161B22),
+              contentTextStyle: const TextStyle(color: ghText),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: const BorderSide(color: ghBorder),
+              ),
+              behavior: SnackBarBehavior.floating,
             ),
             switchTheme: SwitchThemeData(
               thumbColor: MaterialStateProperty.resolveWith((states) {
