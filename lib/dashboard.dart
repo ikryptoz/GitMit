@@ -2359,6 +2359,10 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
   final _title = TextEditingController();
   final _description = TextEditingController();
   final _logoUrl = TextEditingController();
+  final _logoEmoji = TextEditingController();
+  final Map<String, Map<String, String>> _memberProfileCache =
+      <String, Map<String, String>>{};
+  final Set<String> _memberProfileLoading = <String>{};
 
   bool _inited = false;
   Future<String?>? _inviteCodeFuture;
@@ -2368,6 +2372,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
     _title.dispose();
     _description.dispose();
     _logoUrl.dispose();
+    _logoEmoji.dispose();
     super.dispose();
   }
 
@@ -2507,10 +2512,11 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
 
       final bytes = await file.readAsBytes();
       final url = await _uploadGroupLogo(groupId: groupId, bytes: bytes);
-      await _update(groupId, {'logoUrl': url});
+      await _update(groupId, {'logoUrl': url, 'logoEmoji': null});
       if (mounted) {
         setState(() {
           _logoUrl.text = url;
+          _logoEmoji.text = '';
         });
       }
     } catch (e) {
@@ -2522,6 +2528,46 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
           ),
         ),
       );
+    }
+  }
+
+  Future<void> _prefetchMemberProfiles(Map membersMap) async {
+    final toLoad = <String>[];
+    for (final e in membersMap.entries) {
+      final uid = e.key.toString();
+      if (uid.isEmpty) continue;
+      if (_memberProfileCache.containsKey(uid)) continue;
+      if (_memberProfileLoading.contains(uid)) continue;
+      toLoad.add(uid);
+    }
+    if (toLoad.isEmpty) return;
+
+    for (final uid in toLoad) {
+      _memberProfileLoading.add(uid);
+    }
+
+    var changed = false;
+    for (final uid in toLoad) {
+      try {
+        final snap = await rtdb().ref('users/$uid').get();
+        final v = snap.value;
+        final m = (v is Map) ? Map<String, dynamic>.from(v) : null;
+        final login = (m?['githubUsername'] ?? uid).toString().trim();
+        final avatar = (m?['avatarUrl'] ?? '').toString().trim();
+        _memberProfileCache[uid] = <String, String>{
+          'login': login,
+          'avatarUrl': avatar,
+        };
+        changed = true;
+      } catch (_) {
+        // ignore single profile failures
+      } finally {
+        _memberProfileLoading.remove(uid);
+      }
+    }
+
+    if (changed && mounted) {
+      setState(() {});
     }
   }
 
@@ -2554,6 +2600,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
         final title = (gm['title'] ?? '').toString();
         final desc = (gm['description'] ?? '').toString();
         final logo = (gm['logoUrl'] ?? '').toString();
+        final logoEmoji = (gm['logoEmoji'] ?? '').toString();
         final inviteCode = (gm['inviteCode'] ?? '').toString();
         final perms = (gm['permissions'] is Map)
             ? (gm['permissions'] as Map)
@@ -2566,6 +2613,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
           _title.text = title;
           _description.text = desc;
           _logoUrl.text = logo;
+          _logoEmoji.text = logoEmoji;
           _inited = true;
         }
 
@@ -2608,7 +2656,12 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 ? NetworkImage(logo)
                                 : null,
                             child: logo.isEmpty
-                                ? const Icon(Icons.group)
+                                ? (logoEmoji.trim().isNotEmpty
+                                      ? Text(
+                                          logoEmoji.trim(),
+                                          style: const TextStyle(fontSize: 24),
+                                        )
+                                      : const Icon(Icons.group))
                                 : null,
                           ),
                           const SizedBox(width: 12),
@@ -2635,13 +2688,12 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                       ),
                       const SizedBox(height: 16),
                       // --- Group Members Section ---
-                      FutureBuilder<DataSnapshot>(
-                        future: rtdb().ref('groupMembers/${widget.groupId}').get(),
+                      StreamBuilder<DatabaseEvent>(
+                        stream: rtdb()
+                            .ref('groupMembers/${widget.groupId}')
+                            .onValue,
                         builder: (context, snap) {
-                          if (snap.connectionState != ConnectionState.done) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-                          final mv = snap.data?.value;
+                          final mv = snap.data?.snapshot.value;
                           final m = (mv is Map) ? mv : null;
                           if (m == null || m.isEmpty) {
                             return ListTile(
@@ -2649,6 +2701,9 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                               title: Text(t(context, 'Žádní členové', 'No members')),
                             );
                           }
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _prefetchMemberProfiles(m);
+                          });
                           final entries = m.entries.toList()
                             ..sort((a, b) => (a.value['role'] == 'admin' ? -1 : 1));
                           return Column(
@@ -2661,22 +2716,47 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                               const SizedBox(height: 8),
                               ...entries.map((e) {
                                 final uid = e.key.toString();
-                                final role = (e.value['role'] ?? 'member').toString();
-                                final avatarUrl = (e.value['avatarUrl'] ?? '').toString();
-                                return FutureBuilder<DataSnapshot>(
-                                  future: rtdb().ref('users/$uid/githubUsername').get(),
-                                  builder: (context, userSnap) {
-                                    final gh = userSnap.data?.value?.toString() ?? uid;
-                                    return ListTile(
-                                      leading: _AvatarWithPresenceDot(
-                                        uid: uid,
-                                        avatarUrl: avatarUrl.isNotEmpty ? avatarUrl : null,
-                                        radius: 20,
-                                      ),
-                                      title: Text(gh.startsWith('@') ? gh : '@$gh'),
-                                      subtitle: Text(role == 'admin' ? t(context, 'Admin', 'Admin') : t(context, 'Člen', 'Member')),
-                                    );
-                                  },
+                                final memberMap = (e.value is Map)
+                                    ? Map<String, dynamic>.from(e.value as Map)
+                                    : <String, dynamic>{};
+                                final role =
+                                    (memberMap['role'] ?? 'member').toString();
+                                final fallbackAvatar =
+                                    (memberMap['avatarUrl'] ?? '').toString();
+                                final cached = _memberProfileCache[uid];
+                                final gh =
+                                    (cached?['login'] ?? uid).toString().trim();
+                                final liveAvatar =
+                                    (cached?['avatarUrl'] ?? '').toString();
+                                final avatar = liveAvatar.trim().isNotEmpty
+                                    ? liveAvatar.trim()
+                                    : fallbackAvatar.trim();
+                                return Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest
+                                        .withAlpha((0.35 * 255).round()),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: ListTile(
+                                    leading: _AvatarWithPresenceDot(
+                                      uid: uid,
+                                      avatarUrl: avatar.isNotEmpty
+                                          ? avatar
+                                          : null,
+                                      radius: 20,
+                                    ),
+                                    title: Text(
+                                      gh.startsWith('@') ? gh : '@$gh',
+                                    ),
+                                    subtitle: Text(
+                                      role == 'admin'
+                                          ? t(context, 'Admin', 'Admin')
+                                          : t(context, 'Člen', 'Member'),
+                                    ),
+                                  ),
                                 );
                               }).toList(),
                               const Divider(height: 32),
@@ -2692,7 +2772,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                             labelText: t(context, 'Název', 'Title'),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         TextField(
                           controller: _description,
                           decoration: InputDecoration(
@@ -2700,14 +2780,39 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                           ),
                           maxLines: 3,
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         TextField(
                           controller: _logoUrl,
                           decoration: InputDecoration(
                             labelText: t(context, 'Logo URL', 'Logo URL'),
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _logoEmoji,
+                          maxLength: 2,
+                          decoration: InputDecoration(
+                            labelText: t(
+                              context,
+                              'Emoji logo (volitelné)',
+                              'Emoji logo (optional)',
+                            ),
+                            hintText: '🙂',
+                          ),
+                        ),
+                        Wrap(
+                          spacing: 8,
+                          children: ['🙂', '🔥', '🚀', '💬', '🎯', '💻']
+                              .map(
+                                (emoji) => ActionChip(
+                                  label: Text(emoji),
+                                  onPressed: () =>
+                                      setState(() => _logoEmoji.text = emoji),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                            const SizedBox(height: 16),
                         FilledButton.tonalIcon(
                           onPressed: () =>
                               _pickAndUploadLogo(groupId: widget.groupId),
@@ -2720,16 +2825,20 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         FilledButton(
                           onPressed: () => _update(widget.groupId, {
                             'title': _title.text.trim(),
                             'description': _description.text.trim(),
                             'logoUrl': _logoUrl.text.trim(),
+                            'logoEmoji': _logoEmoji.text.trim().isEmpty
+                                ? null
+                                : _logoEmoji.text.trim(),
                           }),
                           child: Text(t(context, 'Uložit', 'Save')),
                         ),
-                        const Divider(height: 32),
+                        const SizedBox(height: 8),
+                        const Divider(height: 36),
                         Text(
                           t(context, 'Oprávnění', 'Permissions'),
                           style: const TextStyle(fontWeight: FontWeight.bold),
@@ -8289,10 +8398,10 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
             if (otherUid.isEmpty) continue;
 
             try {
-              final plain = await decryptMessageWithCompute({
-                'otherUid': otherUid,
-                'cipher': m,
-              });
+              final plain = await E2ee.decryptFromUser(
+                otherUid: otherUid,
+                message: m,
+              );
               PlaintextCache.putDm(
                 otherLoginLower: loginLower,
                 messageKey: key,
@@ -10625,6 +10734,7 @@ class _ChatsTabState extends State<_ChatsTab>
   final Set<String> _migrating = {};
   final Map<String, SecretKey> _groupKeyCache = {};
   final Map<String, String> _attachmentCache = {};
+  final Map<String, int> _groupReadCursorCache = <String, int>{};
   final Set<String> _attachmentLoading = {};
   final Set<String> _deliveredMarked = {};
   final Set<String> _readMarked = {};
@@ -11912,10 +12022,10 @@ class _ChatsTabState extends State<_ChatsTab>
           continue;
         }
 
-        final plain = await decryptMessageWithCompute({
-          'otherUid': otherUid,
-          'cipher': m,
-        });
+        final plain = await E2ee.decryptFromUser(
+          otherUid: otherUid,
+          message: m,
+        );
         if (!mounted) return;
         if (((_activeLogin ?? '').trim().toLowerCase()) != loginLower) return;
 
@@ -12501,6 +12611,46 @@ class _ChatsTabState extends State<_ChatsTab>
     }
   }
 
+  Widget _unreadBadge(int count) {
+    final label = count > 99 ? '99+' : '$count';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.redAccent,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _syncGroupReadCursor({
+    required String groupId,
+    required String myUid,
+    required int latestAt,
+  }) async {
+    if (groupId.trim().isEmpty || myUid.trim().isEmpty || latestAt <= 0) {
+      return;
+    }
+    final cacheKey = '$myUid:$groupId';
+    final prev = _groupReadCursorCache[cacheKey] ?? 0;
+    if (latestAt <= prev) return;
+    _groupReadCursorCache[cacheKey] = latestAt;
+    try {
+      await rtdb().ref('groupReadState/$myUid/$groupId').update({
+        'lastReadAt': latestAt,
+      });
+    } catch (_) {
+      // ignore read cursor write failures
+    }
+  }
+
   bool get hasActiveDm =>
       _activeLogin != null && _activeLogin!.trim().isNotEmpty;
 
@@ -13000,6 +13150,7 @@ class _ChatsTabState extends State<_ChatsTab>
   Future<void> _forwardToUsername({
     required String targetLogin,
     required String messageText,
+    bool preservePayload = false,
   }) async {
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) return;
@@ -13025,7 +13176,9 @@ class _ChatsTabState extends State<_ChatsTab>
       return;
     }
 
-    final forwardedText = 'Přeposláno:\n$messageText';
+    final forwardedText = preservePayload
+      ? messageText
+      : 'Přeposláno:\n$messageText';
     final accepted = await _isDmAccepted(
       myUid: current.uid,
       otherLoginLower: cleaned.toLowerCase(),
@@ -13076,18 +13229,77 @@ class _ChatsTabState extends State<_ChatsTab>
     await rtdb().ref().update(updates);
   }
 
+  Future<String> _resolveForwardPlaintext({
+    required bool isGroup,
+    required String chatTarget,
+    required String displayedText,
+    required Map<String, dynamic>? rawMessage,
+  }) async {
+    final text = displayedText;
+    final raw = rawMessage;
+    if (raw == null) return text;
+
+    final rawText = (raw['text'] ?? '').toString();
+    final hasCipher =
+        ((raw['ciphertext'] ?? raw['ct'] ?? raw['cipher'])
+            ?.toString()
+            .isNotEmpty ??
+        false);
+
+    if (!hasCipher) {
+      return rawText.trim().isNotEmpty ? rawText : text;
+    }
+
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return text;
+
+    try {
+      if (isGroup) {
+        SecretKey? gk = _groupKeyCache[chatTarget];
+        gk ??= await E2ee.fetchGroupKey(groupId: chatTarget, myUid: current.uid);
+        if (gk != null) _groupKeyCache[chatTarget] = gk;
+        final plain = await E2ee.decryptGroupMessage(
+          groupId: chatTarget,
+          myUid: current.uid,
+          groupKey: gk,
+          message: raw,
+        );
+        if (plain.trim().isNotEmpty) return plain;
+      } else {
+        final fromUid = (raw['fromUid'] ?? '').toString();
+        final peerUid = await _ensureActiveOtherUid();
+        final otherUid = (fromUid == current.uid)
+            ? (peerUid ?? '')
+            : (fromUid.isNotEmpty ? fromUid : (peerUid ?? ''));
+        if (otherUid.isNotEmpty) {
+          final plain = await E2ee.decryptFromUser(
+            otherUid: otherUid,
+            message: raw,
+          );
+          if (plain.trim().isNotEmpty) return plain;
+        }
+      }
+    } catch (_) {
+      // fall back to displayed text
+    }
+
+    return rawText.trim().isNotEmpty ? rawText : text;
+  }
+
   Future<void> _showMessageActions({
     required bool isGroup,
     required String chatTarget,
     required String messageKey,
     required String fromLabel,
     required String text,
+    Map<String, dynamic>? rawMessage,
     required bool canDeleteForMe,
     required bool canDeleteForAll,
     Future<void> Function()? onDeleteForMe,
     Future<void> Function()? onDeleteForAll,
   }) async {
     final codePayload = _CodeMessagePayload.tryParse(text);
+    final attachmentPayload = _AttachmentPayload.tryParse(text);
     final link = _firstUrlInText(text);
 
     final action = await showModalBottomSheet<String>(
@@ -13228,49 +13440,294 @@ class _ChatsTabState extends State<_ChatsTab>
         return;
       case 'forward':
         final targetCtrl = TextEditingController();
-        final ok =
-            await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: Text(
-                  AppLanguage.tr(
-                    context,
-                    'Přeposlat zprávu',
-                    'Forward message',
-                  ),
-                ),
-                content: TextField(
-                  controller: targetCtrl,
-                  decoration: InputDecoration(
-                    labelText: AppLanguage.tr(
+        String? selectedLogin;
+        final foundUsers = <Map<String, String>>[];
+        String? findError;
+        var finding = false;
+
+        final target = await showDialog<String>(
+          context: context,
+          builder: (ctx) {
+            return StatefulBuilder(
+              builder: (ctx, setLocalState) {
+                Future<void> findUser() async {
+                  final entered = targetCtrl.text.trim().replaceFirst(
+                    RegExp(r'^@+'),
+                    '',
+                  );
+                  if (entered.isEmpty) {
+                    setLocalState(() {
+                      findError = AppLanguage.tr(
+                        context,
+                        'Zadej username.',
+                        'Enter username.',
+                      );
+                      selectedLogin = null;
+                      foundUsers.clear();
+                    });
+                    return;
+                  }
+
+                  setLocalState(() {
+                    finding = true;
+                    findError = null;
+                    selectedLogin = null;
+                    foundUsers.clear();
+                  });
+
+                  try {
+                    final enteredLower = entered.toLowerCase();
+                    final usernamesSnap = await rtdb().ref('usernames').get();
+                    final usernamesRaw = usernamesSnap.value;
+                    final usernames = (usernamesRaw is Map)
+                        ? usernamesRaw
+                        : null;
+                    if (usernames == null || usernames.isEmpty) {
+                      setLocalState(() {
+                        findError = AppLanguage.tr(
+                          context,
+                          'Uživatel nenalezen.',
+                          'User not found.',
+                        );
+                        foundUsers.clear();
+                        finding = false;
+                      });
+                      return;
+                    }
+
+                    final candidates = <Map<String, String>>[];
+
+                    // Exact match first.
+                    final exactUid = usernames[enteredLower]?.toString() ?? '';
+                    if (exactUid.isNotEmpty) {
+                      candidates.add({'loginLower': enteredLower, 'uid': exactUid});
+                    }
+
+                    // Partial matches (prefix first, then contains).
+                    final prefix = <Map<String, String>>[];
+                    final contains = <Map<String, String>>[];
+                    for (final e in usernames.entries) {
+                      final loginLower = e.key.toString().trim().toLowerCase();
+                      final uid = e.value?.toString().trim() ?? '';
+                      if (loginLower.isEmpty || uid.isEmpty) continue;
+                      if (loginLower == enteredLower) continue;
+                      if (loginLower.startsWith(enteredLower)) {
+                        prefix.add({'loginLower': loginLower, 'uid': uid});
+                      } else if (loginLower.contains(enteredLower)) {
+                        contains.add({'loginLower': loginLower, 'uid': uid});
+                      }
+                    }
+                    prefix.sort(
+                      (a, b) => (a['loginLower'] ?? '').compareTo(b['loginLower'] ?? ''),
+                    );
+                    contains.sort(
+                      (a, b) => (a['loginLower'] ?? '').compareTo(b['loginLower'] ?? ''),
+                    );
+                    candidates.addAll(prefix);
+                    candidates.addAll(contains);
+
+                    final hydrated = <Map<String, String>>[];
+                    final seen = <String>{};
+                    for (final c in candidates) {
+                      if (hydrated.length >= 8) break;
+                      final uid = c['uid'] ?? '';
+                      final lower = c['loginLower'] ?? '';
+                      if (uid.isEmpty || lower.isEmpty) continue;
+                      if (seen.contains(lower)) continue;
+                      seen.add(lower);
+
+                      final userSnap = await rtdb().ref('users/$uid').get();
+                      final uv = userSnap.value;
+                      final um = (uv is Map)
+                          ? Map<String, dynamic>.from(uv)
+                          : <String, dynamic>{};
+                      final loginFound =
+                          (um['githubUsername'] ?? lower).toString().trim();
+                      final avatar = (um['avatarUrl'] ?? '').toString().trim();
+                      hydrated.add({
+                        'login': loginFound.isNotEmpty ? loginFound : lower,
+                        'avatarUrl': avatar,
+                      });
+                    }
+
+                    if (hydrated.isEmpty) {
+                      setLocalState(() {
+                        findError = AppLanguage.tr(
+                          context,
+                          'Uživatel nenalezen.',
+                          'User not found.',
+                        );
+                        foundUsers.clear();
+                        selectedLogin = null;
+                        finding = false;
+                      });
+                      return;
+                    }
+
+                    setLocalState(() {
+                      foundUsers
+                        ..clear()
+                        ..addAll(hydrated);
+                      selectedLogin = foundUsers.first['login'];
+                      findError = null;
+                      finding = false;
+                    });
+                  } catch (_) {
+                    setLocalState(() {
+                      findError = AppLanguage.tr(
+                        context,
+                        'Vyhledání selhalo.',
+                        'Search failed.',
+                      );
+                      foundUsers.clear();
+                      selectedLogin = null;
+                      finding = false;
+                    });
+                  }
+                }
+
+                return AlertDialog(
+                  title: Text(
+                    AppLanguage.tr(
                       context,
-                      'GitHub username',
-                      'GitHub username',
-                    ),
-                    prefixText: '@',
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    child: Text(
-                      AppLanguage.tr(context, 'Přeposlat', 'Forward'),
+                      'Přeposlat zprávu',
+                      'Forward message',
                     ),
                   ),
-                ],
-              ),
-            ) ??
-            false;
-        if (!ok) return;
-        final target = targetCtrl.text.trim();
-        if (target.isEmpty) return;
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: targetCtrl,
+                        decoration: InputDecoration(
+                          labelText: AppLanguage.tr(
+                            context,
+                            'GitHub username',
+                            'GitHub username',
+                          ),
+                          prefixText: '@',
+                        ),
+                        onSubmitted: (_) => findUser(),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.tonalIcon(
+                          onPressed: finding ? null : findUser,
+                          icon: finding
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.search),
+                          label: Text(
+                            AppLanguage.tr(context, 'Najít', 'Find'),
+                          ),
+                        ),
+                      ),
+                      if (findError != null) ...[
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            findError!,
+                            style: const TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
+                      ],
+                      if (selectedLogin != null) ...[
+                        const SizedBox(height: 8),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          child: ListView(
+                            shrinkWrap: true,
+                            padding: EdgeInsets.zero,
+                            children: foundUsers.map((u) {
+                              final login = (u['login'] ?? '').trim();
+                              final avatarUrl = (u['avatarUrl'] ?? '').trim();
+                              final isSelected = selectedLogin == login;
+                              return ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: CircleAvatar(
+                                  backgroundImage: avatarUrl.isNotEmpty
+                                      ? NetworkImage(avatarUrl)
+                                      : null,
+                                  child: avatarUrl.isEmpty
+                                      ? const Icon(Icons.person)
+                                      : null,
+                                ),
+                                title: Text(
+                                  login.startsWith('@') ? login : '@$login',
+                                ),
+                                subtitle: Text(
+                                  AppLanguage.tr(
+                                    context,
+                                    'Nalezený uživatel',
+                                    'Found user',
+                                  ),
+                                ),
+                                trailing: isSelected
+                                    ? const Icon(
+                                        Icons.check_circle,
+                                        color: Colors.green,
+                                      )
+                                    : null,
+                                onTap: () =>
+                                    setLocalState(() => selectedLogin = login),
+                              );
+                            }).toList(growable: false),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+                    ),
+                    TextButton(
+                      onPressed: selectedLogin == null
+                          ? null
+                          : () => Navigator.of(ctx).pop(selectedLogin),
+                      child: Text(
+                        AppLanguage.tr(context, 'Přeposlat', 'Forward'),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+        if (target == null || target.trim().isEmpty) return;
+
+        final forwardPlaintext = await _resolveForwardPlaintext(
+          isGroup: isGroup,
+          chatTarget: chatTarget,
+          displayedText: text,
+          rawMessage: rawMessage,
+        );
+
+        final forwardAttachment = _AttachmentPayload.tryParse(forwardPlaintext);
+        final forwardCode = _CodeMessagePayload.tryParse(forwardPlaintext);
+
+        final forwardText = (forwardAttachment != null)
+            ? jsonEncode(forwardAttachment.toJson())
+            : (forwardCode != null)
+                  ? jsonEncode(forwardCode.toJson())
+                  : forwardPlaintext;
+        final preservePayload =
+            forwardAttachment != null || forwardCode != null;
+
         await _forwardToUsername(
           targetLogin: target,
-          messageText: codePayload?.code ?? text,
+          messageText: forwardText,
+          preservePayload: preservePayload,
         );
         if (!mounted) return;
         _safeShowSnackBarSnackBar(
@@ -13973,6 +14430,8 @@ class _ChatsTabState extends State<_ChatsTab>
 
                                   int lastAt = 0;
                                   String lastText = '';
+                                  String? lastKey;
+                                  int unreadCount = 0;
                                   for (final me in thread.entries) {
                                     if (me.value is! Map) continue;
                                     final mm = Map<String, dynamic>.from(
@@ -13981,9 +14440,35 @@ class _ChatsTabState extends State<_ChatsTab>
                                     final createdAt = (mm['createdAt'] is int)
                                         ? mm['createdAt'] as int
                                         : 0;
+                                    final fromUid = (mm['fromUid'] ?? '')
+                                        .toString();
+                                    final readBy = (mm['readBy'] is Map)
+                                        ? (mm['readBy'] as Map)
+                                        : null;
+                                    final isUnreadForMe =
+                                        fromUid != current.uid &&
+                                        (readBy == null ||
+                                            readBy[current.uid] != true);
+                                    if (isUnreadForMe) unreadCount++;
                                     if (createdAt >= lastAt) {
                                       lastAt = createdAt;
+                                      lastKey = me.key.toString();
                                       lastText = (mm['text'] ?? '').toString();
+                                    }
+                                  }
+
+                                  if (lastText.trim().isEmpty &&
+                                      lastKey != null &&
+                                      lastKey!.isNotEmpty) {
+                                    final cached =
+                                        PlaintextCache.tryGetDm(
+                                          otherLoginLower: lower,
+                                          messageKey: lastKey!,
+                                        ) ??
+                                        _decryptedCache[lastKey!];
+                                    if (cached != null &&
+                                        cached.trim().isNotEmpty) {
+                                      lastText = cached;
                                     }
                                   }
 
@@ -13999,6 +14484,18 @@ class _ChatsTabState extends State<_ChatsTab>
                                     lastText = 'Žádost o chat';
                                   } else if (lastText.trim().isEmpty) {
                                     lastText = '🔒';
+                                  } else {
+                                    final attachment =
+                                        _AttachmentPayload.tryParse(lastText);
+                                    final codePayload =
+                                        _CodeMessagePayload.tryParse(lastText);
+                                    if (attachment != null) {
+                                      lastText = '🖼️';
+                                    } else if (codePayload != null) {
+                                      lastText = codePayload.previewLabel();
+                                    } else {
+                                      lastText = lastText.replaceAll('\n', ' ');
+                                    }
                                   }
 
                                   handled.add(lower);
@@ -14009,6 +14506,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                     'lastAt': lastAt,
                                     'lastText': lastText,
                                     'status': status,
+                                    'unreadCount': unreadCount,
                                   });
                                 }
                               }
@@ -14048,6 +14546,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                     'lastAt': lastAt,
                                     'lastText': lastText,
                                     'status': status,
+                                    'unreadCount': 0,
                                   });
                                 }
                               }
@@ -14057,8 +14556,21 @@ class _ChatsTabState extends State<_ChatsTab>
                                     .compareTo(((a['lastAt'] as int?) ?? 0)),
                               );
 
-                              return ListView(
-                                children: [
+                              return RefreshIndicator(
+                                onRefresh: () async {
+                                  await Future.wait<void>([
+                                    chatsMetaRef.get(),
+                                    chatsMessagesRef.get(),
+                                    blockedRef.get(),
+                                    myVerifyReqRef.get(),
+                                    invitesRef.get(),
+                                    userGroupsRef.get(),
+                                  ]);
+                                  if (mounted) setState(() {});
+                                },
+                                child: ListView(
+                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  children: [
                                   if (myStatus != null) ...[
                                     ListTile(
                                       leading: const Icon(Icons.verified_user),
@@ -14883,6 +15395,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                         final status =
                                             (r['status'] ?? 'accepted')
                                                 .toString();
+                                        final unreadCount =
+                                          (r['unreadCount'] as int?) ?? 0;
                                         return ListTile(
                                           leading: _ChatLoginAvatar(
                                             login: login,
@@ -14899,6 +15413,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                                 ),
                                             ],
                                           ),
+                                          trailing: unreadCount > 0
+                                              ? _unreadBadge(unreadCount)
+                                              : null,
                                           subtitle: lastText.isNotEmpty
                                               ? Text(
                                                   lastText,
@@ -15057,36 +15574,142 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     final logo =
                                                         (m['logoUrl'] ?? '')
                                                             .toString();
-                                                    return ListTile(
-                                                      leading: CircleAvatar(
-                                                        radius: 18,
-                                                        backgroundImage:
-                                                            logo.isNotEmpty
-                                                            ? NetworkImage(logo)
-                                                            : null,
-                                                        child: logo.isEmpty
-                                                            ? const Icon(
-                                                                Icons.group,
+                                                    return StreamBuilder<
+                                                      DatabaseEvent
+                                                    >(
+                                                      stream: rtdb()
+                                                          .ref(
+                                                            'groupReadState/${current.uid}/$gid/lastReadAt',
+                                                          )
+                                                          .onValue,
+                                                      builder: (context, rs) {
+                                                        final readAtRaw = rs
+                                                            .data
+                                                            ?.snapshot
+                                                            .value;
+                                                        final readAt =
+                                                            (readAtRaw is int)
+                                                            ? readAtRaw
+                                                            : int.tryParse(
+                                                                '$readAtRaw',
+                                                              ) ??
+                                                                  0;
+
+                                                        return StreamBuilder<
+                                                          DatabaseEvent
+                                                        >(
+                                                          stream: rtdb()
+                                                              .ref(
+                                                                'groupMessages/$gid',
                                                               )
-                                                            : null,
-                                                      ),
-                                                      title: Text(title),
-                                                      subtitle: desc.isNotEmpty
-                                                          ? Text(
-                                                              desc,
-                                                              maxLines: 1,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                            )
-                                                          : null,
-                                                      onTap: () {
-                                                        setState(() {
-                                                          _activeGroupId = gid;
-                                                          _activeLogin = null;
-                                                          _activeVerifiedUid =
-                                                              null;
-                                                        });
+                                                              .onValue,
+                                                          builder: (
+                                                            context,
+                                                            ms,
+                                                          ) {
+                                                            final mv = ms
+                                                                .data
+                                                                ?.snapshot
+                                                                .value;
+                                                            final mmap =
+                                                                (mv is Map)
+                                                                ? mv
+                                                                : null;
+                                                            var unreadCount = 0;
+                                                            var latestAt = 0;
+                                                            if (mmap != null) {
+                                                              for (final e
+                                                                  in mmap
+                                                                      .entries) {
+                                                                if (e.value
+                                                                    is! Map) {
+                                                                  continue;
+                                                                }
+                                                                final mm =
+                                                                    Map<String, dynamic>.from(
+                                                                      e.value
+                                                                          as Map,
+                                                                    );
+                                                                final createdAt =
+                                                                    (mm['createdAt']
+                                                                            is int)
+                                                                    ? mm['createdAt']
+                                                                          as int
+                                                                    : 0;
+                                                                if (createdAt >
+                                                                    latestAt) {
+                                                                  latestAt =
+                                                                      createdAt;
+                                                                }
+                                                                final fromUid =
+                                                                    (mm['fromUid'] ?? '')
+                                                                        .toString();
+                                                                if (fromUid !=
+                                                                        current.uid &&
+                                                                    createdAt >
+                                                                        readAt) {
+                                                                  unreadCount++;
+                                                                }
+                                                              }
+                                                            }
+
+                                                            return ListTile(
+                                                              leading: CircleAvatar(
+                                                                radius: 18,
+                                                                backgroundImage:
+                                                                    logo.isNotEmpty
+                                                                    ? NetworkImage(
+                                                                        logo,
+                                                                      )
+                                                                    : null,
+                                                                child: logo
+                                                                        .isEmpty
+                                                                    ? const Icon(
+                                                                        Icons
+                                                                            .group,
+                                                                      )
+                                                                    : null,
+                                                              ),
+                                                              title: Text(title),
+                                                              trailing:
+                                                                  unreadCount > 0
+                                                                  ? _unreadBadge(
+                                                                      unreadCount,
+                                                                    )
+                                                                  : null,
+                                                              subtitle:
+                                                                  desc.isNotEmpty
+                                                                  ? Text(
+                                                                      desc,
+                                                                      maxLines: 1,
+                                                                      overflow:
+                                                                          TextOverflow
+                                                                              .ellipsis,
+                                                                    )
+                                                                  : null,
+                                                              onTap: () {
+                                                                if (latestAt > 0) {
+                                                                  _syncGroupReadCursor(
+                                                                    groupId: gid,
+                                                                    myUid:
+                                                                        current
+                                                                            .uid,
+                                                                    latestAt:
+                                                                        latestAt,
+                                                                  );
+                                                                }
+                                                                setState(() {
+                                                                  _activeGroupId =
+                                                                      gid;
+                                                                  _activeLogin =
+                                                                      null;
+                                                                  _activeVerifiedUid =
+                                                                      null;
+                                                                });
+                                                              },
+                                                            );
+                                                          },
+                                                        );
                                                       },
                                                     );
                                                   },
@@ -16168,7 +16791,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                       },
                                     ),
                                   ],
-                                ],
+                                  ],
+                                ),
                               );
                             },
                           );
@@ -16829,6 +17453,25 @@ class _ChatsTabState extends State<_ChatsTab>
                               return at.compareTo(bt);
                             });
 
+                            var latestGroupMessageAt = 0;
+                            for (final m in items) {
+                              final at = (m['createdAt'] is int)
+                                  ? m['createdAt'] as int
+                                  : 0;
+                              if (at > latestGroupMessageAt) {
+                                latestGroupMessageAt = at;
+                              }
+                            }
+                            if (latestGroupMessageAt > 0) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _syncGroupReadCursor(
+                                  groupId: groupId,
+                                  myUid: current.uid,
+                                  latestAt: latestGroupMessageAt,
+                                );
+                              });
+                            }
+
                             final displayItems = <Map<String, dynamic>>[
                               ...items,
                               ..._localNotesForChat(
@@ -17159,6 +17802,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                           ? fromGh
                                           : (isMe ? myGithub : 'user'),
                                       text: text,
+                                      rawMessage: m,
                                       canDeleteForMe: true,
                                       canDeleteForAll: isAdmin || isMe,
                                       onDeleteForMe: () => msgsRef
@@ -18317,6 +18961,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                       ? myGithub
                                                       : login,
                                                   text: text,
+                                                  rawMessage: m,
                                                   canDeleteForMe: true,
                                                   canDeleteForAll: isMe,
                                                   onDeleteForMe: () async {
