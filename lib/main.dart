@@ -102,8 +102,8 @@ class MyApp extends StatelessWidget {
             ),
             elevatedButtonTheme: ElevatedButtonThemeData(
               style: ButtonStyle(
-                backgroundColor: MaterialStatePropertyAll(Colors.white),
-                foregroundColor: MaterialStatePropertyAll(Colors.black),
+                backgroundColor: const MaterialStatePropertyAll(Color(0xFF238636)),
+                foregroundColor: const MaterialStatePropertyAll(Colors.white),
                 textStyle: MaterialStatePropertyAll(TextStyle(fontWeight: FontWeight.bold)),
                 shape: MaterialStatePropertyAll(RoundedRectangleBorder(
                   borderRadius: BorderRadius.all(Radius.circular(8)),
@@ -304,39 +304,6 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   String? _errorMessage;
   bool _loading = false;
-  final TextEditingController _passwordController = TextEditingController();
-
-  Future<void> _handlePasswordLogin() async {
-    final password = _passwordController.text.trim();
-    if (password == '9999') {
-      // Panic password: wipe all local data and sign out
-      try {
-        // Wipe E2ee keys
-        await E2ee.wipeAllKeys();
-      } catch (_) {}
-      try {
-        // Wipe DataUsageTracker
-        await DataUsageTracker.reset();
-      } catch (_) {}
-      try {
-        // Wipe PlaintextCache
-        await PlaintextCache.clearForActiveUser();
-      } catch (_) {}
-      try {
-        await FirebaseAuth.instance.signOut();
-      } catch (_) {}
-      if (mounted) {
-        setState(() {
-          _errorMessage = AppLanguage.tr(context, 'Data byla vymazána. Aplikace byla resetována.', 'Data wiped. App reset.');
-        });
-      }
-      return;
-    }
-    // You can add normal password login logic here if needed
-    setState(() {
-      _errorMessage = AppLanguage.tr(context, 'Nesprávné heslo.', 'Incorrect password.');
-    });
-  }
 
   Future<void> _loginWithGitHub() async {
     if (_loading) return;
@@ -475,55 +442,364 @@ class _LoginPageState extends State<LoginPage> {
 
         final signInTitle = AppLanguage.tr(context, 'Přihlásit do GitMit', 'Sign in to GitMit');
         final signInWithGithub = AppLanguage.tr(context, 'Přihlásit přes GitHub', 'Sign in with GitHub');
+        final badge = AppLanguage.tr(
+          context,
+          'E2EE MESSENGER PRO GITHUB TVURCE',
+          'E2EE MESSENGER FOR GITHUB CREATORS',
+        );
+        final heroText = AppLanguage.tr(
+          context,
+          'Code, Chat a Keep it Private.',
+          'Code, Chat, and Keep it Private.',
+        );
+        final description = AppLanguage.tr(
+          context,
+          'Bezpecna komunikace pro GitHub tymy. End-to-end sifrovani, rychle DM a skupiny na jednom miste.',
+          'Secure communication for GitHub teams. End-to-end encryption, fast DMs, and groups in one place.',
+        );
 
         return Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 32),
-                  Center(
-                    child: Text(
-                      signInTitle,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 28,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  const SizedBox(height: 64),
-                  OutlinedButton(
-                    onPressed: _loading ? null : _loginWithGitHub,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white38),
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                      shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(8)),
-                      ),
-                    ),
-                    child: Text(
-                      signInWithGithub,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 16),
-                    Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent)),
-                  ],
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF061628),
+                  Color(0xFF0A1C2E),
+                  Color(0xFF0F2C26),
                 ],
               ),
+            ),
+            child: Stack(
+              children: [
+                const Positioned(top: -90, left: -40, child: _GlowOrb(size: 220, color: Color(0x332CA7FF))),
+                const Positioned(bottom: -120, right: -20, child: _GlowOrb(size: 280, color: Color(0x3335D07F))),
+                SafeArea(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 980),
+                        child: LayoutBuilder(
+                          builder: (context, c) {
+                            final compact = c.maxWidth < 860;
+                            final brandSection = _BrandPanel(
+                              badge: badge,
+                              headline: heroText,
+                              description: description,
+                            );
+                            final loginSection = _LoginPanel(
+                              title: signInTitle,
+                              buttonLabel: signInWithGithub,
+                              loading: _loading,
+                              errorMessage: _errorMessage,
+                              onLogin: _loginWithGitHub,
+                            );
+
+                            if (compact) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [brandSection, const SizedBox(height: 18), loginSection],
+                              );
+                            }
+
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(flex: 11, child: brandSection),
+                                const SizedBox(width: 18),
+                                Expanded(flex: 9, child: loginSection),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _GlowOrb extends StatelessWidget {
+  const _GlowOrb({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color, Colors.transparent],
+            stops: const [0.0, 1.0],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrandPanel extends StatelessWidget {
+  const _BrandPanel({
+    required this.badge,
+    required this.headline,
+    required this.description,
+  });
+
+  final String badge;
+  final String headline;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = headline.split('Private.');
+    final first = parts.first.trim();
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: const Color(0x88101820),
+        border: Border.all(color: const Color(0x3349D3A6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF2A5D93)),
+              color: const Color(0xFF17324A),
+            ),
+            child: Text(
+              badge,
+              style: const TextStyle(
+                color: Color(0xFF8DC4FF),
+                letterSpacing: 0.6,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            first,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 44,
+              fontWeight: FontWeight.w800,
+              height: 1.05,
+            ),
+          ),
+          ShaderMask(
+            shaderCallback: (rect) {
+              return const LinearGradient(
+                colors: [Color(0xFF37D07F), Color(0xFF2F91FF)],
+              ).createShader(rect);
+            },
+            child: const Text(
+              'Private.',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 44,
+                fontWeight: FontWeight.w800,
+                height: 1.05,
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            description,
+            style: const TextStyle(
+              color: Color(0xFFB3BDC9),
+              fontSize: 18,
+              height: 1.42,
+            ),
+          ),
+          const SizedBox(height: 22),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: const [
+              _TagChip(text: '[STAR] Open Source'),
+              _TagChip(text: '[LOCK] E2EE X25519 + Ratchet'),
+              _TagChip(text: '[TEAM] DM + Group Chat'),
+              _TagChip(text: '[FAST] Flutter + Firebase'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TagChip extends StatelessWidget {
+  const _TagChip({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xCC0C131D),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0x333A4C62)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFFAAB8C8),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.25,
+        ),
+      ),
+    );
+  }
+}
+
+class _LoginPanel extends StatelessWidget {
+  const _LoginPanel({
+    required this.title,
+    required this.buttonLabel,
+    required this.loading,
+    required this.errorMessage,
+    required this.onLogin,
+  });
+
+  final String title;
+  final String buttonLabel;
+  final bool loading;
+  final String? errorMessage;
+  final VoidCallback onLogin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xCC0F1723),
+        border: Border.all(color: const Color(0x33406387)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 54,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
+              color: Color(0xFF121D2D),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2CA36B),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'GM',
+                    style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD83E4A),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: const Text(
+                    'SECURE',
+                    style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            constraints: const BoxConstraints(minHeight: 200),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  r'$ init GitMit.session --e2ee',
+                  style: TextStyle(color: Color(0xFF3FE17D), fontFamily: 'monospace', fontSize: 13),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  r'$ connect github.identity',
+                  style: TextStyle(color: Color(0xFF9FB3CC), fontFamily: 'monospace', fontSize: 13),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  r'$ handshake complete',
+                  style: TextStyle(color: Color(0xFF9FB3CC), fontFamily: 'monospace', fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: ElevatedButton(
+              onPressed: loading ? null : onLogin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF238636),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: loading
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : Text(
+                      buttonLabel,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+            ),
+          ),
+          if (errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Text(
+                errorMessage!,
+                style: const TextStyle(color: Color(0xFFFF6B6B), fontWeight: FontWeight.w600),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
