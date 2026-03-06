@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "gitmit" "\0"
+            VALUE "FileDescription", "GitMit" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "gitmit" "\0"
+            VALUE "InternalName", "GitMit" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "gitmit.exe" "\0"
-            VALUE "ProductName", "gitmit" "\0"
+            VALUE "OriginalFilename", "GitMit.exe" "\0"
+            VALUE "ProductName", "GitMit" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
