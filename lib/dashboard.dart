@@ -3203,26 +3203,122 @@ Future<void> checkGroupAchievements(String uid) async {
   PreferredSizeWidget _pillAppBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final title = _titleForIndex(context, _index);
-    return AppBar(
-      backgroundColor: Colors.transparent,
-      surfaceTintColor: Colors.transparent,
-      shadowColor: Colors.transparent,
-      elevation: 0,
-      scrolledUnderElevation: 0,
-      centerTitle: true,
-      title: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: cs.outlineVariant),
-        ),
-        child: Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(kToolbarHeight),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _chatsCanStepBack,
+        builder: (context, canStepBack, _) {
+          final showChatBack = _index == 1 && canStepBack;
+          final chatsState = _chatsKey.currentState;
+          final showDmActions = _index == 1 && (chatsState?.hasActiveDm ?? false);
+          final showGroupActions =
+              _index == 1 && (chatsState?.hasActiveGroup ?? false);
+          final onPillTap = showGroupActions
+            ? () => chatsState?.openActiveGroupInfo()
+            : (showDmActions
+              ? () => chatsState?.openActiveDmProfile()
+              : null);
+          return AppBar(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            centerTitle: true,
+            leadingWidth: showChatBack ? 56 : null,
+            leading: showChatBack
+                ? IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () {
+                      final handled = _chatsKey.currentState?.handleBack() == true;
+                      if (handled && mounted) {
+                        setState(() {});
+                      }
+                    },
+                  )
+                : null,
+            actions: showDmActions
+                ? [
+                    IconButton(
+                      tooltip: AppLanguage.tr(
+                        context,
+                        'Fingerprint klíčů',
+                        'Key fingerprint',
+                      ),
+                      icon: const Icon(Icons.fingerprint),
+                      onPressed: () => chatsState?.openActiveDmFingerprint(),
+                    ),
+                  ]
+                : null,
+            title: ValueListenableBuilder<String?>(
+              valueListenable: _chatsTopHandle,
+              builder: (context, activeHandle, _) {
+                final handle = (_index == 1) ? activeHandle : null;
+                final isPillClickable = onPillTap != null;
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onPillTap,
+                    borderRadius: BorderRadius.circular(999),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: cs.surface,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: cs.outlineVariant),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          if (handle != null && handle.trim().isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0x1A58A6FF),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: const Color(0x4458A6FF)),
+                              ),
+                              child: Text(
+                                handle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF8DC4FF),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (isPillClickable) ...[
+                            const SizedBox(width: 6),
+                            Icon(
+                              Icons.open_in_new,
+                              size: 14,
+                              color: Theme.of(
+                                context,
+                              ).textTheme.bodySmall?.color?.withValues(alpha: 0.75),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        },
       ),
     );
   }
@@ -5864,7 +5960,6 @@ class _SettingsHome extends StatelessWidget {
         final m = (v is Map) ? v : null;
         final gh = (m?['githubUsername'] ?? '').toString();
         final avatar = (m?['avatarUrl'] ?? '').toString();
-
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           children: [
@@ -6601,33 +6696,6 @@ class _SettingsChatPage extends StatefulWidget {
 }
 
 class _SettingsChatPageState extends State<_SettingsChatPage> {
-  static const _bgPalette = <({String key, String label, Color color})>[
-    (key: 'none', label: 'Default', color: Color(0x00000000)),
-    (key: 'graphite', label: 'Graphite', color: Color(0xFF1B1F1D)),
-    (key: 'teal', label: 'Teal', color: Color(0xFF1A2B2C)),
-    (key: 'pine', label: 'Pine', color: Color(0xFF1C2A24)),
-    (key: 'sand', label: 'Sand', color: Color(0xFF2B241C)),
-    (key: 'slate', label: 'Slate', color: Color(0xFF20242C)),
-  ];
-
-  static const _bubblePalette = <({String key, Color color})>[
-    (key: 'custom_01', color: Color(0xFFEF5350)),
-    (key: 'custom_02', color: Color(0xFFEC407A)),
-    (key: 'custom_03', color: Color(0xFFAB47BC)),
-    (key: 'custom_04', color: Color(0xFF7E57C2)),
-    (key: 'custom_05', color: Color(0xFF5C6BC0)),
-    (key: 'custom_06', color: Color(0xFF42A5F5)),
-    (key: 'custom_07', color: Color(0xFF26C6DA)),
-    (key: 'custom_08', color: Color(0xFF26A69A)),
-    (key: 'custom_09', color: Color(0xFF66BB6A)),
-    (key: 'custom_10', color: Color(0xFF9CCC65)),
-    (key: 'custom_11', color: Color(0xFFD4E157)),
-    (key: 'custom_12', color: Color(0xFFFFCA28)),
-    (key: 'custom_13', color: Color(0xFFFFA726)),
-    (key: 'custom_14', color: Color(0xFF8D6E63)),
-    (key: 'custom_15', color: Color(0xFF90A4AE)),
-  ];
-
   @override
   void dispose() {
     super.dispose();
@@ -6643,10 +6711,6 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
   Future<void> _reset(String uid) async {
     await _updateSetting(uid, {
       'chatTextSize': 16,
-      'bubbleRadius': 12,
-      'bubbleIncoming': 'surface',
-      'bubbleOutgoing': 'secondaryContainer',
-      'wallpaperUrl': '',
       'reactionsEnabled': true,
       'stickersEnabled': false,
     });
@@ -6684,135 +6748,6 @@ class _SettingsChatPageState extends State<_SettingsChatPage> {
                 ),
                 trailing: Text(settings.chatTextSize.toStringAsFixed(0)),
               ),
-              ListTile(
-                title: Text(t(context, 'Zaoblení bublin', 'Bubble radius')),
-                subtitle: Slider(
-                  min: 4,
-                  max: 28,
-                  value: settings.bubbleRadius.clamp(4, 28),
-                  onChanged: (v) => _updateSetting(u.uid, {'bubbleRadius': v}),
-                ),
-                trailing: Text(settings.bubbleRadius.toStringAsFixed(0)),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                t(context, 'Pozadí chatu', 'Chat background'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: _bgPalette
-                    .map((bg) {
-                      final selected =
-                          (settings.wallpaperUrl.isEmpty && bg.key == 'none') ||
-                          settings.wallpaperUrl == bg.key;
-                      final swatchColor = bg.key == 'none'
-                          ? Theme.of(context).colorScheme.surface
-                          : bg.color;
-                      return GestureDetector(
-                        onTap: () => _updateSetting(u.uid, {
-                          'wallpaperUrl': bg.key == 'none' ? '' : bg.key,
-                        }),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                color: swatchColor,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: selected
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.white24,
-                                  width: selected ? 2 : 1,
-                                ),
-                              ),
-                              child: bg.key == 'none'
-                                  ? const Icon(Icons.block, size: 20)
-                                  : null,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              bg.label,
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-              Text(
-                t(context, 'Příchozí bublina', 'Incoming bubble'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: _bubblePalette
-                    .map((p) {
-                      final selected = settings.bubbleIncoming == p.key;
-                      return GestureDetector(
-                        onTap: () =>
-                            _updateSetting(u.uid, {'bubbleIncoming': p.key}),
-                        child: Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: p.color,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: selected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.white24,
-                              width: selected ? 3 : 1,
-                            ),
-                          ),
-                        ),
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                t(context, 'Odchozí bublina', 'Outgoing bubble'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: _bubblePalette
-                    .map((p) {
-                      final selected = settings.bubbleOutgoing == p.key;
-                      return GestureDetector(
-                        onTap: () =>
-                            _updateSetting(u.uid, {'bubbleOutgoing': p.key}),
-                        child: Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: p.color,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: selected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.white24,
-                              width: selected ? 3 : 1,
-                            ),
-                          ),
-                        ),
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-              const SizedBox(height: 12),
-              _ChatPreview(settings: settings),
               const SizedBox(height: 12),
               SwitchListTile(
                 value: settings.reactionsEnabled,
@@ -10394,6 +10329,9 @@ Widget _recommendedTile(
   );
 }
 
+final ValueNotifier<String?> _chatsTopHandle = ValueNotifier<String?>(null);
+final ValueNotifier<bool> _chatsCanStepBack = ValueNotifier<bool>(false);
+
 class _ChatsTab extends StatefulWidget {
   const _ChatsTab({
     super.key,
@@ -10451,6 +10389,33 @@ class _ChatsTabState extends State<_ChatsTab>
   bool _sendingInlineKeyRequest = false;
   final Map<String, bool> _peerHasPublishedKey = <String, bool>{};
   final Set<String> _peerKeyProbeInFlight = <String>{};
+
+  void _syncShellChatMeta({String? groupTitle}) {
+    String? label;
+    if (_activeLogin != null && _activeLogin!.trim().isNotEmpty) {
+      label = '@${_activeLogin!.trim()}';
+    } else if (_activeGroupId != null) {
+      label = (groupTitle != null && groupTitle.trim().isNotEmpty)
+          ? groupTitle.trim()
+          : '#group';
+    } else if (_activeVerifiedUid != null) {
+      label = 'verification';
+    }
+
+    final canBack =
+        _activeLogin != null ||
+        _activeVerifiedUid != null ||
+        _activeGroupId != null ||
+        _activeFolderId != null ||
+        _overviewMode != 0;
+
+    if (_chatsTopHandle.value != label) {
+      _chatsTopHandle.value = label;
+    }
+    if (_chatsCanStepBack.value != canBack) {
+      _chatsCanStepBack.value = canBack;
+    }
+  }
 
   Future<File> _attachmentFile(String cacheKey, String ext) async {
     final dir = await getApplicationDocumentsDirectory();
@@ -11511,6 +11476,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToFrom = null;
         _replyToPreview = null;
       });
+      _syncShellChatMeta();
       return true;
     }
     if (_activeGroupId != null) {
@@ -11523,6 +11489,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToFrom = null;
         _replyToPreview = null;
       });
+      _syncShellChatMeta();
       return true;
     }
     if (_activeVerifiedUid != null) {
@@ -11530,14 +11497,17 @@ class _ChatsTabState extends State<_ChatsTab>
         _activeVerifiedUid = null;
         _activeVerifiedGithub = null;
       });
+      _syncShellChatMeta();
       return true;
     }
     if (_overviewMode == 2) {
       if (_activeFolderId != null) {
         setState(() => _activeFolderId = null);
+        _syncShellChatMeta();
         return true;
       }
       setState(() => _overviewMode = 0);
+      _syncShellChatMeta();
       return true;
     }
     return false;
@@ -11552,6 +11522,7 @@ class _ChatsTabState extends State<_ChatsTab>
     )..repeat();
     _activeLogin = widget.initialOpenLogin;
     _activeAvatarUrl = widget.initialOpenAvatarUrl;
+    _syncShellChatMeta();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prewarmDmDecryptAfterJoin();
       _prewarmGroupDecryptAfterJoin();
@@ -11578,6 +11549,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToFrom = null;
         _replyToPreview = null;
       });
+      _syncShellChatMeta();
       return;
     }
 
@@ -11593,6 +11565,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToFrom = null;
         _replyToPreview = null;
       });
+      _syncShellChatMeta();
       return;
     }
 
@@ -11608,6 +11581,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToFrom = null;
         _replyToPreview = null;
       });
+      _syncShellChatMeta();
     }
   }
 
@@ -11622,6 +11596,8 @@ class _ChatsTabState extends State<_ChatsTab>
     if (_activeGroupId != null) {
       _setGroupTyping(groupId: _activeGroupId!, value: false);
     }
+    _chatsTopHandle.value = null;
+    _chatsCanStepBack.value = false;
     _typingAnim.dispose();
     super.dispose();
   }
@@ -11635,6 +11611,45 @@ class _ChatsTabState extends State<_ChatsTab>
   void _hapticMedium() {
     if (widget.settings.vibrationEnabled) {
       HapticFeedback.mediumImpact();
+    }
+  }
+
+  bool get hasActiveDm =>
+      _activeLogin != null && _activeLogin!.trim().isNotEmpty;
+
+    bool get hasActiveGroup =>
+      _activeGroupId != null && _activeGroupId!.trim().isNotEmpty;
+
+  Future<void> openActiveDmFingerprint() async {
+    final login = _activeLogin;
+    if (login == null || login.trim().isEmpty) return;
+    final peerUid = await _ensureActiveOtherUid();
+    if (peerUid == null || peerUid.isEmpty || !mounted) return;
+    await _showPeerFingerprintDialog(peerUid: peerUid, peerLogin: login);
+  }
+
+  Future<void> openActiveDmProfile() async {
+    final login = _activeLogin;
+    if (login == null || login.trim().isEmpty) return;
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+    if (myLogin.isNotEmpty && login.toLowerCase() == myLogin.toLowerCase()) {
+      return;
+    }
+    await _openUserProfile(login: login, avatarUrl: _activeAvatarUrl ?? '');
+  }
+
+  Future<void> openActiveGroupInfo() async {
+    final groupId = _activeGroupId;
+    if (groupId == null || groupId.trim().isEmpty || !mounted) return;
+    final res = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => _GroupInfoPage(groupId: groupId)),
+    );
+    if (!mounted) return;
+    if (res == 'left' || res == 'deleted') {
+      setState(() => _activeGroupId = null);
+      _syncShellChatMeta();
     }
   }
 
@@ -12545,11 +12560,15 @@ class _ChatsTabState extends State<_ChatsTab>
   }
 
   Color _bubbleColor(BuildContext context, String key) {
-    return _resolveBubbleColor(context, key);
+    final k = key.toLowerCase();
+    if (k.contains('out')) {
+      return const Color(0x26316DCA);
+    }
+    return const Color(0xFF161B22);
   }
 
   Color _bubbleTextColor(BuildContext context, String key) {
-    return _resolveBubbleTextColor(context, key);
+    return const Color(0xFFC9D1D9);
   }
 
   Future<void> _send() async {
@@ -12830,6 +12849,8 @@ class _ChatsTabState extends State<_ChatsTab>
 
   @override
   Widget build(BuildContext context) {
+    _syncShellChatMeta();
+
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) {
       return Center(
@@ -15481,6 +15502,7 @@ class _ChatsTabState extends State<_ChatsTab>
                   final gm = (gv is Map) ? gv : null;
                   if (gm == null) return const SizedBox.shrink();
                   final title = (gm['title'] ?? '').toString();
+                  _syncShellChatMeta(groupTitle: title);
                   final perms = (gm['permissions'] is Map)
                       ? (gm['permissions'] as Map)
                       : null;
@@ -15678,32 +15700,6 @@ class _ChatsTabState extends State<_ChatsTab>
 
                   return Column(
                     children: [
-                      ListTile(
-                        leading: IconButton(
-                          icon: const Icon(Icons.arrow_back),
-                          onPressed: () =>
-                              setState(() => _activeGroupId = null),
-                        ),
-                        title: Text(title),
-                        subtitle: Text(
-                          isAdmin
-                              ? AppLanguage.tr(context, 'Admin', 'Admin')
-                              : AppLanguage.tr(context, 'Člen', 'Member'),
-                        ),
-                        trailing: const Icon(Icons.info_outline),
-                        onTap: () async {
-                          final res = await Navigator.of(context).push<String>(
-                            MaterialPageRoute(
-                              builder: (_) => _GroupInfoPage(groupId: groupId),
-                            ),
-                          );
-                          if (!mounted) return;
-                          if (res == 'left' || res == 'deleted') {
-                            setState(() => _activeGroupId = null);
-                          }
-                        },
-                      ),
-                      const Divider(height: 1),
                       Expanded(
                         child: StreamBuilder<DatabaseEvent>(
                           stream: msgsRef.onValue,
@@ -16047,13 +16043,12 @@ class _ChatsTabState extends State<_ChatsTab>
                                   }
                                 }
 
-                                final bubbleKey = isMe
-                                    ? widget.settings.bubbleOutgoing
-                                    : widget.settings.bubbleIncoming;
-                                final tcolor = _bubbleTextColor(
+                                final bubbleKey = isMe ? 'outgoing' : 'incoming';
+                                final bubbleColor = _bubbleColor(
                                   context,
                                   bubbleKey,
                                 );
+                                final tcolor = _bubbleTextColor(context, bubbleKey);
 
                                 return Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -16101,12 +16096,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                               vertical: 10,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: Colors.transparent,
+                                              color: bubbleColor,
                                               borderRadius:
                                                   BorderRadius.circular(
-                                                    widget
-                                                        .settings
-                                                        .bubbleRadius,
+                                                    12,
                                                   ),
                                               border: mentioned
                                                   ? Border.all(
@@ -16183,9 +16176,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                           context,
                                                         ).size.width *
                                                         0.62,
-                                                    radius: widget
-                                                        .settings
-                                                        .bubbleRadius,
+                                                    radius: 12,
                                                   )
                                                 else if (codePayload != null)
                                                   InkWell(
@@ -16481,29 +16472,7 @@ class _ChatsTabState extends State<_ChatsTab>
       otherLoginLower: loginLower,
     );
 
-    final bg = widget.settings.wallpaperUrl.trim();
-    Color? bgColor;
-    if (bg.isNotEmpty) {
-      switch (bg) {
-        case 'graphite':
-          bgColor = const Color(0xFF1B1F1D);
-          break;
-        case 'teal':
-          bgColor = const Color(0xFF1A2B2C);
-          break;
-        case 'pine':
-          bgColor = const Color(0xFF1C2A24);
-          break;
-        case 'sand':
-          bgColor = const Color(0xFF2B241C);
-          break;
-        case 'slate':
-          bgColor = const Color(0xFF20242C);
-          break;
-        default:
-          bgColor = null;
-      }
-    }
+    const bgColor = Color(0xFF0D1117);
     return StreamBuilder<DatabaseEvent>(
       stream: currentUserRef.onValue,
       builder: (context, uSnap) {
@@ -16532,46 +16501,7 @@ class _ChatsTabState extends State<_ChatsTab>
 
             return Column(
               children: [
-                ListTile(
-                  leading: IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () => setState(() => _activeLogin = null),
-                  ),
-                  title: Text('@$login'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: AppLanguage.tr(
-                          context,
-                          'Fingerprint klíčů',
-                          'Key fingerprint',
-                        ),
-                        icon: const Icon(Icons.fingerprint),
-                        onPressed: () async {
-                          final peerUid = await _ensureActiveOtherUid();
-                          if (peerUid == null || peerUid.isEmpty) return;
-                          await _showPeerFingerprintDialog(
-                            peerUid: peerUid,
-                            peerLogin: login,
-                          );
-                        },
-                      ),
-                      _ChatLoginAvatar(
-                        login: login,
-                        avatarUrl: _activeAvatarUrl ?? '',
-                        radius: 18,
-                      ),
-                    ],
-                  ),
-                  onTap: (loginLower == myGithubLower)
-                      ? null
-                      : () => _openUserProfile(
-                          login: login,
-                          avatarUrl: _activeAvatarUrl ?? '',
-                        ),
-                ),
-                const Divider(height: 1),
+                const SizedBox(height: 4),
                 // DM žádosti – zobrazené i během chatu
                 StreamBuilder<DatabaseEvent>(
                   stream: rtdb().ref('dmRequests/${current.uid}').onValue,
@@ -16748,9 +16678,7 @@ class _ChatsTabState extends State<_ChatsTab>
                           Expanded(
                             child: Container(
                               decoration: BoxDecoration(
-                                color:
-                                    bgColor ??
-                                    Theme.of(context).colorScheme.surface,
+                                color: bgColor,
                               ),
                               child: StreamBuilder<DatabaseEvent>(
                                 stream: messagesRef.onValue,
@@ -17102,9 +17030,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                           replyToFrom.isNotEmpty &&
                                           replyToPreview.isNotEmpty;
 
-                                      final bubbleKey = isMe
-                                          ? widget.settings.bubbleOutgoing
-                                          : widget.settings.bubbleIncoming;
+                                        final bubbleKey = isMe
+                                          ? 'outgoing'
+                                          : 'incoming';
                                       final color = _bubbleColor(
                                         context,
                                         bubbleKey,
@@ -17229,9 +17157,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     color: color,
                                                     borderRadius:
                                                         BorderRadius.circular(
-                                                          widget
-                                                              .settings
-                                                              .bubbleRadius,
+                                                          12,
                                                         ),
                                                     border: mentioned
                                                         ? Border.all(
@@ -17314,9 +17240,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                 context,
                                                               ).size.width *
                                                               0.62,
-                                                          radius: widget
-                                                              .settings
-                                                              .bubbleRadius,
+                                                            radius: 12,
                                                         )
                                                       else if (codePayload !=
                                                           null)
@@ -17734,43 +17658,50 @@ class _ChatsTabState extends State<_ChatsTab>
                               ),
                             ),
                           Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _messageController,
-                                    decoration: InputDecoration(
-                                      labelText: AppLanguage.tr(
-                                        context,
-                                        'Zpráva / Markdown',
-                                        'Message / Markdown',
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            child: Container(
+                              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF161B22),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0x5530363D)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _messageController,
+                                      decoration: InputDecoration(
+                                        labelText: AppLanguage.tr(
+                                          context,
+                                          'Zpráva / Markdown',
+                                          'Message / Markdown',
+                                        ),
                                       ),
-                                    ),
-                                    enabled: !blocked && canSend,
-                                    minLines: 1,
-                                    maxLines: 6,
-                                    onSubmitted: (!blocked && canSend)
-                                        ? (_) => _send()
-                                        : null,
-                                    onChanged: (!blocked && canSend)
-                                        ? (text) {
-                                            if (_pendingCodePayload != null &&
-                                                !text.trim().startsWith(
-                                                  '<> kód',
-                                                )) {
-                                              setState(
-                                                () =>
-                                                    _pendingCodePayload = null,
-                                              );
+                                      enabled: !blocked && canSend,
+                                      minLines: 1,
+                                      maxLines: 6,
+                                      onSubmitted: (!blocked && canSend)
+                                          ? (_) => _send()
+                                          : null,
+                                      onChanged: (!blocked && canSend)
+                                          ? (text) {
+                                              if (_pendingCodePayload != null &&
+                                                  !text.trim().startsWith(
+                                                    '<> kód',
+                                                  )) {
+                                                setState(
+                                                  () =>
+                                                      _pendingCodePayload = null,
+                                                );
+                                              }
+                                              _onTypingChanged(text);
                                             }
-                                            _onTypingChanged(text);
-                                          }
-                                        : null,
+                                          : null,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                PopupMenuButton<String>(
+                                  const SizedBox(width: 8),
+                                  PopupMenuButton<String>(
                                   tooltip: AppLanguage.tr(
                                     context,
                                     'Více',
@@ -17856,15 +17787,16 @@ class _ChatsTabState extends State<_ChatsTab>
                                         ),
                                       ),
                                   ],
-                                  icon: const Icon(Icons.more_vert),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.send),
-                                  onPressed: (!blocked && canSend)
-                                      ? _send
-                                      : null,
-                                ),
-                              ],
+                                    icon: const Icon(Icons.more_vert),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.send),
+                                    onPressed: (!blocked && canSend)
+                                        ? _send
+                                        : null,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ],
