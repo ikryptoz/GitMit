@@ -69,12 +69,9 @@ Future<void> checkGroupAchievements(String uid) async {
 
 // Příklad použití compute pro dešifrování zprávy
 Future<String> decryptMessageInIsolate(Map<String, dynamic> args) async {
-  // args: {"cipher": ..., "key": ...}
-  // Zde by měla být vaše logika dešifrování (například volání E2ee.decrypt...)
-  // Příklad:
-  // return await E2ee.decryptForUser(otherUid: args["otherUid"], message: args["cipher"]);
-  // Pro šablonu:
-  return "decrypted: ${args['cipher']}";
+  // Security hardening: never echo raw encrypted payloads into UI/log strings.
+  // This helper is only a placeholder and should be replaced by real decrypt flow.
+  return 'decryption helper placeholder';
 }
 
 // Volání compute pro dešifrování
