@@ -3739,6 +3739,21 @@ Future<void> checkGroupAchievements(String uid) async {
                 final canCallGroup =
                     _index == 1 && (currentChatsState?.hasActiveGroup ?? false);
                 final showCallLeft = canCallDm || canCallGroup;
+                final screenWidth = MediaQuery.sizeOf(context).width;
+                final pillMaxWidth =
+                  (screenWidth * (showCallLeft ? 0.46 : 0.56))
+                    .clamp(160.0, 320.0)
+                    .toDouble();
+                final handleMaxWidth =
+                  (pillMaxWidth * 0.58).clamp(90.0, 190.0).toDouble();
+                final dmPresenceUid =
+                  _index == 1 && (currentChatsState?.hasActiveDm ?? false)
+                  ? ((currentChatsState?.activeDmPresenceUid ?? '').trim())
+                  : '';
+                final isDmCompactPill =
+                  _index == 1 &&
+                  (currentChatsState?.hasActiveDm ?? false) &&
+                  (handle != null && handle.trim().isNotEmpty);
                 final isCallActive =
                     (currentChatsState?.hasActiveDmCall ?? false) ||
                     (currentChatsState?.hasActiveGroupCall ?? false);
@@ -3772,73 +3787,109 @@ Future<void> checkGroupAchievements(String uid) async {
                             },
                           ),
                         Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: isPillClickable
-                                ? () {
-                                    final liveState = _chatsKey.currentState;
-                                    if (liveState == null) return;
-                                    if (liveState.hasActiveGroup) {
-                                      liveState.openActiveGroupInfo();
-                                      return;
-                                    }
-                                    if (liveState.hasActiveDm) {
-                                      liveState.openActiveDmProfile();
-                                    }
-                                  }
-                                : null,
-                            borderRadius: BorderRadius.circular(999),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: cs.surface,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: pillMaxWidth),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: isPillClickable
+                                    ? () {
+                                        final liveState = _chatsKey.currentState;
+                                        if (liveState == null) return;
+                                        if (liveState.hasActiveGroup) {
+                                          liveState.openActiveGroupInfo();
+                                          return;
+                                        }
+                                        if (liveState.hasActiveDm) {
+                                          liveState.openActiveDmProfile();
+                                        }
+                                      }
+                                    : null,
                                 borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: cs.outlineVariant),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    title,
-                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                        ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 8,
                                   ),
-                                  if (handle != null && handle.trim().isNotEmpty) ...[
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 3,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0x1A58A6FF),
-                                        borderRadius: BorderRadius.circular(999),
-                                        border: Border.all(color: const Color(0x4458A6FF)),
-                                      ),
-                                      child: Text(
-                                        handle,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Color(0xFF8DC4FF),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
+                                  decoration: BoxDecoration(
+                                    color: cs.surface,
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(color: cs.outlineVariant),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (!isDmCompactPill)
+                                        Flexible(
+                                          child: Text(
+                                            title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  ],
-                                  if (isPillClickable) ...[
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      Icons.open_in_new,
-                                      size: 14,
-                                      color: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall?.color?.withValues(alpha: 0.75),
-                                    ),
-                                  ],
-                                ],
+                                      if (handle != null &&
+                                          handle.trim().isNotEmpty) ...[
+                                        if (!isDmCompactPill)
+                                          const SizedBox(width: 8),
+                                        if (dmPresenceUid.isNotEmpty) ...[
+                                          _PresenceDotByUid(
+                                            uid: dmPresenceUid,
+                                            size: 9,
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        ConstrainedBox(
+                                          constraints: BoxConstraints(
+                                            maxWidth: handleMaxWidth,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0x1A58A6FF),
+                                              borderRadius: BorderRadius.circular(
+                                                999,
+                                              ),
+                                              border: Border.all(
+                                                color: const Color(0x4458A6FF),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              handle,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Color(0xFF8DC4FF),
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                      if (isPillClickable && !isDmCompactPill) ...[
+                                        const SizedBox(width: 6),
+                                        Icon(
+                                          Icons.open_in_new,
+                                          size: 14,
+                                          color: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.color
+                                              ?.withValues(alpha: 0.75),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -5448,6 +5499,53 @@ class _AvatarWithPresenceDot extends StatelessWidget {
                 ),
               ),
           ],
+        );
+      },
+    );
+  }
+}
+
+class _PresenceDotByUid extends StatelessWidget {
+  const _PresenceDotByUid({required this.uid, this.size = 9});
+
+  final String uid;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final presenceRef = rtdb().ref('presence/$uid');
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: presenceRef.onValue,
+      builder: (context, snap) {
+        final v = snap.data?.snapshot.value;
+        final m = (v is Map) ? v : null;
+        final enabled = m?['enabled'] != false;
+        final status = (m?['status'] ?? 'online').toString();
+        final online = enabled && (m?['online'] == true);
+
+        final Color dotColor;
+        if (!enabled || status == 'hidden') {
+          dotColor = const Color(0xFF94A3B8);
+        } else if (status == 'dnd') {
+          dotColor = const Color(0xFFEF4444);
+        } else {
+          dotColor = online
+              ? const Color(0xFF22C55E)
+              : const Color(0xFF94A3B8);
+        }
+
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: dotColor,
+            border: Border.all(
+              color: Theme.of(context).colorScheme.surface,
+              width: 1.2,
+            ),
+          ),
         );
       },
     );
@@ -10945,6 +11043,8 @@ class _ChatsTabState extends State<_ChatsTab>
   String? _activeAvatarUrl;
   String? _activeOtherUid;
   String? _activeOtherUidLoginLower;
+  final Map<String, String> _dmPresenceUidCache = <String, String>{};
+  final Set<String> _dmPresenceLookupInFlight = <String>{};
   String? _activeGroupId;
   String? _activeVerifiedUid;
   String? _activeVerifiedGithub;
@@ -10995,6 +11095,11 @@ class _ChatsTabState extends State<_ChatsTab>
   final Map<String, List<Map<String, dynamic>>> _localOnlyChatNotes =
       <String, List<Map<String, dynamic>>>{};
   String? _lastAutoScrolledChatViewKey;
+    final Map<String, String> _lastObservedBottomMsgKeyByChat =
+      <String, String>{};
+    final Map<String, int> _lastObservedMsgCountByChat = <String, int>{};
+    final Map<String, int> _pendingNewCountByChat = <String, int>{};
+    String? _activeDmScrollChatViewKey;
   StreamSubscription<DatabaseEvent>? _incomingCallInviteSub;
   StreamSubscription<DatabaseEvent>? _callResponseSub;
   Timer? _outgoingCallTimeout;
@@ -11009,6 +11114,9 @@ class _ChatsTabState extends State<_ChatsTab>
   int _callElapsedSeconds = 0;
   rtc.RTCPeerConnection? _dmPeerConnection;
   rtc.MediaStream? _localAudioStream;
+  final List<rtc.RTCIceCandidate> _dmPendingIceCandidates =
+      <rtc.RTCIceCandidate>[];
+  bool _dmHasRemoteDescription = false;
   bool _dmMicEnabled = true;
   bool _dmSpeakerEnabled = true;
   bool _dmIsCaller = false;
@@ -11317,6 +11425,8 @@ class _ChatsTabState extends State<_ChatsTab>
   Future<bool> _prepareDmWebRtc({required bool isCaller}) async {
     _dmIsCaller = isCaller;
     _dmReconnectAttempts = 0;
+    _dmHasRemoteDescription = false;
+    _dmPendingIceCandidates.clear();
 
     await _disposeDmWebRtc();
 
@@ -11368,6 +11478,12 @@ class _ChatsTabState extends State<_ChatsTab>
     for (final track in _localAudioStream!.getAudioTracks()) {
       track.enabled = _dmMicEnabled;
       await _dmPeerConnection!.addTrack(track, _localAudioStream!);
+    }
+
+    try {
+      await rtc.Helper.setSpeakerphoneOn(_dmSpeakerEnabled);
+    } catch (_) {
+      // unsupported platform route toggle
     }
 
     _dmPeerConnection!.onIceCandidate = (candidate) {
@@ -11427,10 +11543,35 @@ class _ChatsTabState extends State<_ChatsTab>
       }
     };
 
-    // Remote audio is played automatically by platform audio route.
-    _dmPeerConnection!.onTrack = (_) {};
+    _dmPeerConnection!.onTrack = (event) {
+      // Ensure incoming audio tracks are enabled when attached by remote peer.
+      if (event.track.kind == 'audio') {
+        event.track.enabled = true;
+      }
+      for (final stream in event.streams) {
+        for (final track in stream.getAudioTracks()) {
+          track.enabled = true;
+        }
+      }
+    };
 
     return true;
+  }
+
+  Future<void> _drainPendingDmIceCandidates() async {
+    final pc = _dmPeerConnection;
+    if (pc == null || !_dmHasRemoteDescription) return;
+    if (_dmPendingIceCandidates.isEmpty) return;
+
+    final queued = List<rtc.RTCIceCandidate>.from(_dmPendingIceCandidates);
+    _dmPendingIceCandidates.clear();
+    for (final cand in queued) {
+      try {
+        await pc.addCandidate(cand);
+      } catch (_) {
+        // Keep going so one malformed candidate does not block the rest.
+      }
+    }
   }
 
   Future<void> _startDmOfferFlow() async {
@@ -11471,6 +11612,8 @@ class _ChatsTabState extends State<_ChatsTab>
         await _dmPeerConnection!.setRemoteDescription(
           rtc.RTCSessionDescription(sdp, 'offer'),
         );
+        _dmHasRemoteDescription = true;
+        await _drainPendingDmIceCandidates();
         final answer = await _dmPeerConnection!.createAnswer(<String, dynamic>{
           'offerToReceiveAudio': true,
         });
@@ -11496,6 +11639,8 @@ class _ChatsTabState extends State<_ChatsTab>
         await _dmPeerConnection!.setRemoteDescription(
           rtc.RTCSessionDescription(sdp, 'answer'),
         );
+        _dmHasRemoteDescription = true;
+        await _drainPendingDmIceCandidates();
       } catch (_) {
         // ignore
       }
@@ -11515,9 +11660,16 @@ class _ChatsTabState extends State<_ChatsTab>
         sdpMLineIndex = int.tryParse((rawLine ?? '').toString());
       }
       try {
-        await _dmPeerConnection!.addCandidate(
-          rtc.RTCIceCandidate(candidate, sdpMid.isEmpty ? null : sdpMid, sdpMLineIndex),
+        final ice = rtc.RTCIceCandidate(
+          candidate,
+          sdpMid.isEmpty ? null : sdpMid,
+          sdpMLineIndex,
         );
+        if (!_dmHasRemoteDescription) {
+          _dmPendingIceCandidates.add(ice);
+          return;
+        }
+        await _dmPeerConnection!.addCandidate(ice);
       } catch (_) {
         // ignore
       }
@@ -11527,6 +11679,8 @@ class _ChatsTabState extends State<_ChatsTab>
   Future<void> _disposeDmWebRtc() async {
     final pc = _dmPeerConnection;
     _dmPeerConnection = null;
+    _dmHasRemoteDescription = false;
+    _dmPendingIceCandidates.clear();
     if (pc != null) {
       try {
         await pc.close();
@@ -11655,6 +11809,14 @@ class _ChatsTabState extends State<_ChatsTab>
     final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
     if (myLogin.isEmpty) return;
 
+    // Low-touch flow: auto-create DM request if chat is not accepted yet.
+    await _ensureDmAutoRequestForCall(
+      myUid: current.uid,
+      myLogin: myLogin,
+      otherUid: peerUid,
+      otherLogin: login,
+    );
+
     final callId = rtdb().ref().push().key;
     if (callId == null || callId.isEmpty) return;
 
@@ -11766,8 +11928,22 @@ class _ChatsTabState extends State<_ChatsTab>
 
       final fromLogin = (payload['fromLogin'] ?? '').toString();
       if (fromLogin.trim().isEmpty) return;
+      final fromAvatarUrl =
+          (packet['fromAvatarUrl'] ?? payload['fromAvatarUrl'] ?? '')
+              .toString();
       final groupId = (payload['groupId'] ?? '').toString();
       final groupTitle = (payload['groupTitle'] ?? '').toString();
+
+      final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+      if (myLogin.isNotEmpty) {
+        await _ensureDmAutoAcceptForIncomingCall(
+          myUid: current.uid,
+          myLogin: myLogin,
+          fromUid: fromUid,
+          fromLogin: fromLogin,
+          fromAvatarUrl: fromAvatarUrl,
+        );
+      }
 
       // Busy: auto-decline incoming call.
       if (_callConnected || _outgoingCallRinging || _outgoingGroupCallRinging) {
@@ -11868,7 +12044,6 @@ class _ChatsTabState extends State<_ChatsTab>
           }
         });
 
-        final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
         await _sendCallResponse(
           toUid: fromUid,
           callId: callId,
@@ -13970,6 +14145,92 @@ class _ChatsTabState extends State<_ChatsTab>
     await rtdb().ref().update(updates);
   }
 
+  Future<void> _ensureDmAutoRequestForCall({
+    required String myUid,
+    required String myLogin,
+    required String otherUid,
+    required String otherLogin,
+  }) async {
+    final otherLower = otherLogin.trim().toLowerCase();
+    if (otherLower.isEmpty) return;
+    final accepted = await _isDmAccepted(
+      myUid: myUid,
+      otherLoginLower: otherLower,
+    );
+    if (accepted) return;
+    try {
+      await _sendDmRequest(
+        myUid: myUid,
+        myLogin: myLogin,
+        otherUid: otherUid,
+        otherLogin: otherLogin,
+        messageText: '📞 Auto call request',
+      );
+    } catch (_) {
+      // best effort
+    }
+  }
+
+  Future<void> _ensureDmAutoAcceptForIncomingCall({
+    required String myUid,
+    required String myLogin,
+    required String fromUid,
+    required String fromLogin,
+    String? fromAvatarUrl,
+  }) async {
+    final fromLower = fromLogin.trim().toLowerCase();
+    if (fromUid.trim().isEmpty || fromLower.isEmpty) return;
+
+    final accepted = await _isDmAccepted(
+      myUid: myUid,
+      otherLoginLower: fromLower,
+    );
+    if (accepted) return;
+
+    final reqSnap = await _dmRequestRef(
+      myUid: myUid,
+      fromLoginLower: fromLower,
+    ).get();
+    if (reqSnap.value is Map) {
+      try {
+        await _acceptDmRequest(myUid: myUid, otherLogin: fromLogin);
+        return;
+      } catch (_) {
+        // fallback below
+      }
+    }
+
+    final myAvatar = await _myAvatarUrl(myUid);
+    final updates = <String, Object?>{
+      'dmContacts/$myUid/$fromLower': true,
+      'dmContacts/$fromUid/${myLogin.trim().toLowerCase()}': true,
+      'savedChats/$myUid/$fromLogin': {
+        'login': fromLogin,
+        if ((fromAvatarUrl ?? '').trim().isNotEmpty)
+          'avatarUrl': fromAvatarUrl!.trim(),
+        'status': 'accepted',
+        'lastMessageText': '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+      'savedChats/$fromUid/$myLogin': {
+        'login': myLogin,
+        if ((myAvatar ?? '').trim().isNotEmpty) 'avatarUrl': myAvatar,
+        'status': 'accepted',
+        'lastMessageText': '🔒',
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+      'dmRequests/$myUid/$fromLower': null,
+    };
+
+    try {
+      await rtdb().ref().update(updates);
+    } catch (_) {
+      // best effort
+    }
+  }
+
   bool handleBack() {
     if (_activeLogin != null) {
       setState(() {
@@ -14030,6 +14291,7 @@ class _ChatsTabState extends State<_ChatsTab>
     )..repeat();
     _activeLogin = widget.initialOpenLogin;
     _activeAvatarUrl = widget.initialOpenAvatarUrl;
+    _dmScrollController.addListener(_handleDmScrollPositionChanged);
     _syncShellChatMeta();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prewarmDmDecryptAfterJoin();
@@ -14107,6 +14369,7 @@ class _ChatsTabState extends State<_ChatsTab>
   @override
   void dispose() {
     _messageController.dispose();
+    _dmScrollController.removeListener(_handleDmScrollPositionChanged);
     _dmScrollController.dispose();
     _verifiedScrollController.dispose();
     _groupScrollController.dispose();
@@ -14184,6 +14447,50 @@ class _ChatsTabState extends State<_ChatsTab>
 
   bool get hasActiveDm =>
       _activeLogin != null && _activeLogin!.trim().isNotEmpty;
+
+  String? get activeDmPresenceUid {
+    final loginLower = (_activeLogin ?? '').trim().toLowerCase();
+    if (loginLower.isEmpty) return null;
+
+    final activeUid = (_activeOtherUid ?? '').trim();
+    if (activeUid.isNotEmpty && _activeOtherUidLoginLower == loginLower) {
+      return activeUid;
+    }
+
+    final cached = (_dmPresenceUidCache[loginLower] ?? '').trim();
+    if (cached.isNotEmpty) {
+      return cached;
+    }
+
+    if (_dmPresenceLookupInFlight.add(loginLower)) {
+      _lookupUidForLoginLower(loginLower)
+          .then((uid) {
+            _dmPresenceLookupInFlight.remove(loginLower);
+            final resolved = (uid ?? '').trim();
+            if (resolved.isEmpty || !mounted) return;
+            final sameActiveLogin =
+                (_activeLogin ?? '').trim().toLowerCase() == loginLower;
+            final sameCached =
+                (_dmPresenceUidCache[loginLower] ?? '').trim() == resolved;
+            final sameActiveUid =
+                ((_activeOtherUid ?? '').trim() == resolved) &&
+                (_activeOtherUidLoginLower == loginLower);
+            if (sameCached && sameActiveUid) return;
+            setState(() {
+              _dmPresenceUidCache[loginLower] = resolved;
+              if (sameActiveLogin) {
+                _activeOtherUid = resolved;
+                _activeOtherUidLoginLower = loginLower;
+              }
+            });
+          })
+          .catchError((_) {
+            _dmPresenceLookupInFlight.remove(loginLower);
+          });
+    }
+
+    return null;
+  }
 
   bool get hasActiveDmCall {
     if (!_callConnected) return false;
@@ -15915,6 +16222,63 @@ class _ChatsTabState extends State<_ChatsTab>
     _maybeAutoScrollToBottom(controller);
   }
 
+  bool _isNearBottom(ScrollController controller, {double threshold = 72}) {
+    if (!controller.hasClients) return true;
+    final position = controller.position;
+    final distance = position.maxScrollExtent - position.pixels;
+    return distance <= threshold;
+  }
+
+  void _handleDmScrollPositionChanged() {
+    final chatKey = _activeDmScrollChatViewKey;
+    if (chatKey == null || chatKey.isEmpty) return;
+    if (!_isNearBottom(_dmScrollController)) return;
+    if ((_pendingNewCountByChat[chatKey] ?? 0) == 0) return;
+    if (!mounted) return;
+    setState(() {
+      _pendingNewCountByChat[chatKey] = 0;
+    });
+  }
+
+  void _trackChatIncomingForScrollHint({
+    required String chatViewKey,
+    required int totalCount,
+    required String? latestMessageKey,
+    required ScrollController controller,
+  }) {
+    final latest = (latestMessageKey ?? '').trim();
+    if (latest.isEmpty) return;
+
+    final prevKey = _lastObservedBottomMsgKeyByChat[chatViewKey];
+    final prevCount = _lastObservedMsgCountByChat[chatViewKey] ?? totalCount;
+    _lastObservedBottomMsgKeyByChat[chatViewKey] = latest;
+    _lastObservedMsgCountByChat[chatViewKey] = totalCount;
+
+    if (prevKey == null || prevKey.isEmpty || prevKey == latest) return;
+    if (_isNearBottom(controller)) return;
+
+    final delta = (totalCount > prevCount) ? (totalCount - prevCount) : 1;
+    final next = (_pendingNewCountByChat[chatViewKey] ?? 0) + delta;
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _pendingNewCountByChat[chatViewKey] = next;
+      });
+    });
+  }
+
+  void _scrollToBottomAndClear({
+    required ScrollController controller,
+    required String chatViewKey,
+  }) {
+    _forceScrollToBottom(controller);
+    if (!mounted) return;
+    setState(() {
+      _pendingNewCountByChat[chatViewKey] = 0;
+    });
+  }
+
   bool _isSameCalendarDay(int? aMs, int? bMs) {
     if (aMs == null || bMs == null) return false;
     final a = DateTime.fromMillisecondsSinceEpoch(aMs).toLocal();
@@ -16265,9 +16629,23 @@ class _ChatsTabState extends State<_ChatsTab>
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) return;
 
-    // Enforce: one reaction per user per message.
-    final basePath = 'messages/${current.uid}/$login/$messageKey/reactions';
-    final reactionsSnap = await rtdb().ref(basePath).get();
+    final loginLower = login.trim().toLowerCase();
+    if (loginLower.isEmpty) return;
+
+    final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+    final peerUid =
+        ((_activeLogin ?? '').trim().toLowerCase() == loginLower)
+        ? await _ensureActiveOtherUid()
+        : await _lookupUidForLoginLower(loginLower);
+
+    // Enforce one reaction per user per message and mirror to both DM paths.
+    final myPath = 'messages/${current.uid}/$login/$messageKey/reactions';
+    final peerPath =
+        (peerUid != null && peerUid.isNotEmpty && myLogin.isNotEmpty)
+        ? 'messages/$peerUid/$myLogin/$messageKey/reactions'
+        : null;
+
+    final reactionsSnap = await rtdb().ref(myPath).get();
     final v = reactionsSnap.value;
     final updates = <String, Object?>{};
     if (v is Map) {
@@ -16275,11 +16653,17 @@ class _ChatsTabState extends State<_ChatsTab>
         final existingEmoji = e.key.toString();
         final voters = e.value;
         if (voters is Map && voters.containsKey(current.uid)) {
-          updates['$basePath/$existingEmoji/${current.uid}'] = null;
+          updates['$myPath/$existingEmoji/${current.uid}'] = null;
+          if (peerPath != null) {
+            updates['$peerPath/$existingEmoji/${current.uid}'] = null;
+          }
         }
       }
     }
-    updates['$basePath/$emoji/${current.uid}'] = true;
+    updates['$myPath/$emoji/${current.uid}'] = true;
+    if (peerPath != null) {
+      updates['$peerPath/$emoji/${current.uid}'] = true;
+    }
     await rtdb().ref().update(updates);
   }
 
@@ -20470,6 +20854,8 @@ class _ChatsTabState extends State<_ChatsTab>
     final login = _activeLogin!;
     final messagesRef = rtdb().ref('messages/${current.uid}/$login');
     final loginLower = login.trim().toLowerCase();
+    final dmChatViewKey = 'dm:$loginLower';
+    _activeDmScrollChatViewKey = dmChatViewKey;
     _ensureFindScope(isGroup: false, chatId: loginLower);
     if (_activeOtherUidLoginLower != loginLower) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -20842,11 +21228,14 @@ class _ChatsTabState extends State<_ChatsTab>
                               ),
                             ),
                           Expanded(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: bgColor,
-                              ),
-                              child: StreamBuilder<DatabaseEvent>(
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: bgColor,
+                                    ),
+                                    child: StreamBuilder<DatabaseEvent>(
                                 stream: messagesRef.onValue,
                                 builder: (context, snapshot) {
                                   final value = snapshot.data?.snapshot.value;
@@ -20959,6 +21348,16 @@ class _ChatsTabState extends State<_ChatsTab>
                                         ),
                                       )
                                       .toList(growable: false);
+
+                                  final latestMessageKey = items.isNotEmpty
+                                      ? (items.last['__key'] ?? '').toString()
+                                      : null;
+                                  _trackChatIncomingForScrollHint(
+                                    chatViewKey: dmChatViewKey,
+                                    totalCount: items.length,
+                                    latestMessageKey: latestMessageKey,
+                                    controller: _dmScrollController,
+                                  );
 
                                   // After the list rebuilds, scroll to bottom so newest message is visible.
                                   WidgetsBinding.instance.addPostFrameCallback((
@@ -21625,6 +22024,80 @@ class _ChatsTabState extends State<_ChatsTab>
                                   );
                                 },
                               ),
+                                  ),
+                                ),
+                                if ((_pendingNewCountByChat[dmChatViewKey] ??
+                                        0) >
+                                    0)
+                                  Positioned(
+                                    right: 14,
+                                    bottom: 10,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        onTap: () => _scrollToBottomAndClear(
+                                          controller: _dmScrollController,
+                                          chatViewKey: dmChatViewKey,
+                                        ),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 8,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF1F6FEB),
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                            border: Border.all(
+                                              color: const Color(0xFF388BFD),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.keyboard_arrow_down,
+                                                size: 18,
+                                                color: Colors.white,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0xFFDA3633,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(999),
+                                                ),
+                                                child: Text(
+                                                  ((_pendingNewCountByChat[dmChatViewKey] ??
+                                                              0) >
+                                                          99)
+                                                      ? '99+'
+                                                      : '${_pendingNewCountByChat[dmChatViewKey] ?? 0}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                           if (!blocked &&

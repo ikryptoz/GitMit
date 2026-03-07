@@ -115,3 +115,9 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+dependency_overrides:
+  image_picker_android: 0.8.12+24
+  url_launcher_android: 6.3.20
+  app_links: 6.4.0
+  flutter_secure_storage: 9.2.4

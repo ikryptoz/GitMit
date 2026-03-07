@@ -66,21 +66,51 @@ class E2ee {
     return '$baseKey::$scope';
   }
 
+  static bool _looksLikeStorageCryptoCorruption(Object error) {
+    final s = error.toString().toLowerCase();
+    return s.contains('illegalblocksizeexception') ||
+        s.contains('badpaddingexception') ||
+        s.contains('wrong_final_block_length') ||
+        s.contains('keystore') ||
+        s.contains('decryption error');
+  }
+
   static Future<String?> _readKey(String baseKey) async {
     final scoped = _scopedKey(baseKey);
-    final v = await _storage.read(key: scoped);
-    if (v != null) return v;
+    try {
+      final v = await _storage.read(key: scoped);
+      if (v != null) return v;
 
-    // Legacy fallback (pre-scoping). If activeUid is set, migrate forward.
-    final legacy = await _storage.read(key: baseKey);
-    if (legacy != null && legacy.isNotEmpty && _activeUid != null && _activeUid!.isNotEmpty) {
-      try {
-        await _storage.write(key: scoped, value: legacy);
-      } catch (_) {
-        // ignore
+      // Legacy fallback (pre-scoping). If activeUid is set, migrate forward.
+      final legacy = await _storage.read(key: baseKey);
+      if (legacy != null &&
+          legacy.isNotEmpty &&
+          _activeUid != null &&
+          _activeUid!.isNotEmpty) {
+        try {
+          await _storage.write(key: scoped, value: legacy);
+        } catch (_) {
+          // ignore
+        }
       }
+      return legacy;
+    } catch (e) {
+      if (_looksLikeStorageCryptoCorruption(e)) {
+        // Self-heal corrupted secure-storage entries (seen on some older Android devices).
+        try {
+          await _storage.delete(key: scoped);
+        } catch (_) {
+          // ignore
+        }
+        try {
+          await _storage.delete(key: baseKey);
+        } catch (_) {
+          // ignore
+        }
+        return null;
+      }
+      rethrow;
     }
-    return legacy;
   }
 
   static Future<void> _writeKey(String baseKey, String value) async {
@@ -89,6 +119,35 @@ class E2ee {
 
   static Future<void> _deleteKey(String baseKey) async {
     await _storage.delete(key: _scopedKey(baseKey));
+  }
+
+  static Future<void> _deleteScopedKeysByBasePrefix(String basePrefix) async {
+    final scope =
+        (_activeUid == null || _activeUid!.isEmpty) ? 'no_uid' : _activeUid!;
+    final suffix = '::$scope';
+    final all = await _storage.readAll();
+    for (final rawKey in all.keys) {
+      String baseKey;
+      if (rawKey.endsWith(suffix)) {
+        baseKey = rawKey.substring(0, rawKey.length - suffix.length);
+      } else if (!rawKey.contains('::')) {
+        // Legacy unscoped key.
+        baseKey = rawKey;
+      } else {
+        // Key scoped to a different user.
+        continue;
+      }
+      if (!baseKey.startsWith(basePrefix)) continue;
+      try {
+        await _storage.delete(key: rawKey);
+      } catch (_) {
+        // ignore best-effort cleanup
+      }
+    }
+  }
+
+  static Future<void> _resetDmRatchetSessions() async {
+    await _deleteScopedKeysByBasePrefix(_kDrPrefix);
   }
 
   static bool _isExportableBaseKey(String baseKey) {
@@ -344,6 +403,9 @@ class E2ee {
       await _writeKey(_kPrivKey, _b64(privBytes));
       await _writeKey(_kPubKey, _b64(pubKey.bytes));
 
+      // New identity means previous peer sessions are stale; force fresh init.
+      await _resetDmRatchetSessions();
+
       return SimpleKeyPairData(
         privBytes,
         publicKey: SimplePublicKey(pubKey.bytes, type: KeyPairType.x25519),
@@ -426,6 +488,9 @@ class E2ee {
       await _writeKey(_kSpkPubKey, _b64(spkPubKey.bytes));
       await _writeKey(_kSpkIdKey, spkId.toString());
       await _writeKey(_kSpkSigKey, _b64(sig.bytes));
+
+      // Prekey rollover should also start new sessions with peers.
+      await _resetDmRatchetSessions();
 
       return (
         spkId: spkId,
