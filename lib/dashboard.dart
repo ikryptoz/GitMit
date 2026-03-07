@@ -555,11 +555,134 @@ class _RichMessageText extends StatelessWidget {
     required this.text,
     required this.fontSize,
     required this.textColor,
+    this.highlightQuery = '',
   });
 
   final String text;
   final double fontSize;
   final Color textColor;
+  final String highlightQuery;
+
+  static const Map<String, String> _searchCharMap = <String, String>{
+    'á': 'a',
+    'ä': 'a',
+    'à': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'å': 'a',
+    'č': 'c',
+    'ď': 'd',
+    'é': 'e',
+    'ě': 'e',
+    'ë': 'e',
+    'è': 'e',
+    'ê': 'e',
+    'í': 'i',
+    'ï': 'i',
+    'ì': 'i',
+    'î': 'i',
+    'ľ': 'l',
+    'ĺ': 'l',
+    'ň': 'n',
+    'ń': 'n',
+    'ó': 'o',
+    'ö': 'o',
+    'ò': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ř': 'r',
+    'ŕ': 'r',
+    'š': 's',
+    'ť': 't',
+    'ú': 'u',
+    'ů': 'u',
+    'ü': 'u',
+    'ù': 'u',
+    'û': 'u',
+    'ý': 'y',
+    'ÿ': 'y',
+    'ž': 'z',
+  };
+
+  String _normalizeForSearch(String input) {
+    var out = input.toLowerCase();
+    for (final e in _searchCharMap.entries) {
+      out = out.replaceAll(e.key, e.value);
+    }
+    return out;
+  }
+
+  List<TextSpan> _buildHighlightedSpans({
+    required String source,
+    required String query,
+    required TextStyle base,
+  }) {
+    final normalizedQuery = _normalizeForSearch(query.trim());
+    if (normalizedQuery.isEmpty || source.isEmpty) {
+      return <TextSpan>[TextSpan(text: source, style: base)];
+    }
+
+    final lowerChars = source.toLowerCase().split('');
+    final normalized = StringBuffer();
+    final normIndexToSource = <int>[];
+    for (var i = 0; i < lowerChars.length; i++) {
+      final c = lowerChars[i];
+      final mapped = _searchCharMap[c] ?? c;
+      for (var j = 0; j < mapped.length; j++) {
+        normalized.write(mapped[j]);
+        normIndexToSource.add(i);
+      }
+    }
+
+    final haystack = normalized.toString();
+    if (haystack.isEmpty) {
+      return <TextSpan>[TextSpan(text: source, style: base)];
+    }
+
+    final ranges = <({int start, int end})>[];
+    var start = 0;
+    while (true) {
+      final idx = haystack.indexOf(normalizedQuery, start);
+      if (idx < 0) break;
+      final srcStart = normIndexToSource[idx];
+      final srcEnd =
+          normIndexToSource[idx + normalizedQuery.length - 1] + 1;
+      if (ranges.isEmpty || srcStart > ranges.last.end) {
+        ranges.add((start: srcStart, end: srcEnd));
+      } else if (srcEnd > ranges.last.end) {
+        final last = ranges.removeLast();
+        ranges.add((start: last.start, end: srcEnd));
+      }
+      start = idx + normalizedQuery.length;
+    }
+
+    if (ranges.isEmpty) {
+      return <TextSpan>[TextSpan(text: source, style: base)];
+    }
+
+    final spans = <TextSpan>[];
+    var cursor = 0;
+    for (final r in ranges) {
+      if (r.start > cursor) {
+        spans.add(TextSpan(text: source.substring(cursor, r.start), style: base));
+      }
+      spans.add(
+        TextSpan(
+          text: source.substring(r.start, r.end),
+          style: base.copyWith(
+            backgroundColor: const Color(0xFF3FB950),
+            color: const Color(0xFF0D1117),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+      cursor = r.end;
+    }
+    if (cursor < source.length) {
+      spans.add(TextSpan(text: source.substring(cursor), style: base));
+    }
+    return spans;
+  }
 
   Future<void> _openExternal(String rawUrl) async {
     final uri = Uri.tryParse(rawUrl.trim());
@@ -570,6 +693,18 @@ class _RichMessageText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = TextStyle(fontSize: fontSize, color: textColor);
+    final q = highlightQuery.trim();
+    if (q.isNotEmpty) {
+      return SelectableText.rich(
+        TextSpan(
+          children: _buildHighlightedSpans(
+            source: text,
+            query: q,
+            base: base,
+          ),
+        ),
+      );
+    }
     return MarkdownBody(
       data: text,
       selectable: true,
@@ -3513,6 +3648,10 @@ Future<void> checkGroupAchievements(String uid) async {
           final showChatBack = _index == 1 && canStepBack;
           final chatsState = _chatsKey.currentState;
           final showDmActions = _index == 1 && (chatsState?.hasActiveDm ?? false);
+          final showChatSearchAction =
+              _index == 1 &&
+              ((chatsState?.hasActiveDm ?? false) ||
+                  (chatsState?.hasActiveGroup ?? false));
           return ValueListenableBuilder<bool>(
             valueListenable: _chatsHasVerificationAlert,
             builder: (context, hasVerificationAlert, _) {
@@ -3536,7 +3675,7 @@ Future<void> checkGroupAchievements(String uid) async {
                         },
                       )
                     : null,
-                actions: (showVerificationAction || showDmActions)
+                actions: (showVerificationAction || showDmActions || showChatSearchAction)
                     ? [
                         if (showVerificationAction)
                           IconButton(
@@ -3558,6 +3697,16 @@ Future<void> checkGroupAchievements(String uid) async {
                             ),
                             icon: const Icon(Icons.fingerprint),
                             onPressed: () => chatsState?.openActiveDmFingerprint(),
+                          ),
+                        if (showChatSearchAction)
+                          IconButton(
+                            tooltip: AppLanguage.tr(
+                              context,
+                              'Najít v chatu',
+                              'Find in chat',
+                            ),
+                            icon: const Icon(Icons.search),
+                            onPressed: () => chatsState?.openActiveChatFind(),
                           ),
                       ]
                     : null,
@@ -10784,6 +10933,8 @@ class _ChatsTabState extends State<_ChatsTab>
   List<String> _groupMentionSuggestions = const <String>[];
   Timer? _groupMentionDebounce;
   List<String> _slashSuggestions = const <String>[];
+  String _chatFindQuery = '';
+  String? _chatFindScopeKey;
   int? _oneShotTtlSeconds;
   bool _oneShotBurnAfterRead = false;
   Timer? _ttlUiTicker;
@@ -10850,9 +11001,141 @@ class _ChatsTabState extends State<_ChatsTab>
     'text',
   };
 
+  static const Map<String, String> _searchCharMap = <String, String>{
+    'á': 'a',
+    'ä': 'a',
+    'à': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'å': 'a',
+    'č': 'c',
+    'ď': 'd',
+    'é': 'e',
+    'ě': 'e',
+    'ë': 'e',
+    'è': 'e',
+    'ê': 'e',
+    'í': 'i',
+    'ï': 'i',
+    'ì': 'i',
+    'î': 'i',
+    'ľ': 'l',
+    'ĺ': 'l',
+    'ň': 'n',
+    'ń': 'n',
+    'ó': 'o',
+    'ö': 'o',
+    'ò': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ř': 'r',
+    'ŕ': 'r',
+    'š': 's',
+    'ť': 't',
+    'ú': 'u',
+    'ů': 'u',
+    'ü': 'u',
+    'ù': 'u',
+    'û': 'u',
+    'ý': 'y',
+    'ÿ': 'y',
+    'ž': 'z',
+  };
+
   String _chatScopeKey({required bool isGroup, required String chatId}) {
     final normalized = chatId.trim().toLowerCase();
     return '${isGroup ? 'g' : 'dm'}:$normalized';
+  }
+
+  void _ensureFindScope({required bool isGroup, required String chatId}) {
+    final scope = _chatScopeKey(isGroup: isGroup, chatId: chatId);
+    if (_chatFindScopeKey == scope) return;
+    _chatFindScopeKey = scope;
+    _chatFindQuery = '';
+  }
+
+  String _normalizeSearchText(String input) {
+    var out = input.toLowerCase();
+    for (final e in _searchCharMap.entries) {
+      out = out.replaceAll(e.key, e.value);
+    }
+    return out;
+  }
+
+  bool _messageMatchesFind({
+    required Map<String, dynamic> message,
+    required bool isGroup,
+    required String chatId,
+    required String dmLoginLower,
+  }) {
+    final needle = _normalizeSearchText(_chatFindQuery.trim());
+    if (needle.isEmpty) return true;
+
+    final key = (message['__key'] ?? '').toString();
+    var text = (message['text'] ?? '').toString();
+    if (text.trim().isEmpty && key.isNotEmpty) {
+      if (isGroup) {
+        final cacheKey = 'g:$chatId:$key';
+        text =
+            PlaintextCache.tryGetGroup(groupId: chatId, messageKey: key) ??
+            (_decryptedCache[cacheKey] ?? '');
+      } else {
+        text =
+            PlaintextCache.tryGetDm(
+              otherLoginLower: dmLoginLower,
+              messageKey: key,
+            ) ??
+            (_decryptedCache[key] ?? '');
+      }
+    }
+
+    final replyPreview = (message['replyToPreview'] ?? '').toString();
+    final fromGithub = (message['fromGithub'] ?? '').toString();
+    final fromUid = (message['fromUid'] ?? '').toString();
+    final haystack = _normalizeSearchText(
+      '$text $replyPreview $fromGithub $fromUid',
+    );
+    return haystack.contains(needle);
+  }
+
+  Future<void> _showInChatFindDialog(BuildContext context) async {
+    final ctrl = TextEditingController(text: _chatFindQuery);
+    final next = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(AppLanguage.tr(context, 'Najít v chatu', 'Find in chat')),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: AppLanguage.tr(
+              context,
+              'Hledat zprávy (bez diakritiky)',
+              'Search messages (accent-insensitive)',
+            ),
+          ),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_chatFindQuery),
+            child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(''),
+            child: Text(AppLanguage.tr(context, 'Vyčistit', 'Clear')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+            child: Text(AppLanguage.tr(context, 'Najít', 'Find')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || next == null) return;
+    setState(() {
+      _chatFindQuery = next.trim();
+    });
   }
 
   void _pushLocalOnlyChatNote({
@@ -12960,6 +13243,21 @@ class _ChatsTabState extends State<_ChatsTab>
     await _showPeerFingerprintDialog(peerUid: peerUid, peerLogin: login);
   }
 
+  Future<void> openActiveChatFind() async {
+    if (!mounted) return;
+    final groupId = _activeGroupId?.trim() ?? '';
+    if (groupId.isNotEmpty) {
+      setState(() => _ensureFindScope(isGroup: true, chatId: groupId));
+      await _showInChatFindDialog(context);
+      return;
+    }
+    final loginLower = (_activeLogin ?? '').trim().toLowerCase();
+    if (loginLower.isNotEmpty) {
+      setState(() => _ensureFindScope(isGroup: false, chatId: loginLower));
+      await _showInChatFindDialog(context);
+    }
+  }
+
   Future<void> openActiveDmProfile() async {
     final login = _activeLogin;
     if (login == null || login.trim().isEmpty) return;
@@ -14986,13 +15284,13 @@ class _ChatsTabState extends State<_ChatsTab>
 
                                   if (lastText.trim().isEmpty &&
                                       lastKey != null &&
-                                      lastKey!.isNotEmpty) {
+                                      lastKey.isNotEmpty) {
                                     final cached =
                                         PlaintextCache.tryGetDm(
                                           otherLoginLower: lower,
-                                          messageKey: lastKey!,
+                                          messageKey: lastKey,
                                         ) ??
-                                        _decryptedCache[lastKey!];
+                                        _decryptedCache[lastKey];
                                     if (cached != null &&
                                         cached.trim().isNotEmpty) {
                                       lastText = cached;
@@ -17637,6 +17935,7 @@ class _ChatsTabState extends State<_ChatsTab>
     // Group chat view
     if (_activeGroupId != null) {
       final groupId = _activeGroupId!;
+      _ensureFindScope(isGroup: true, chatId: groupId);
       final groupRef = rtdb().ref('groups/$groupId');
       final memberRef = rtdb().ref('groupMembers/$groupId/${current.uid}');
       final msgsRef = rtdb().ref('groupMessages/$groupId');
@@ -17908,6 +18207,46 @@ class _ChatsTabState extends State<_ChatsTab>
 
                   return Column(
                     children: [
+                      if (_chatFindQuery.isNotEmpty)
+                        Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.search, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${AppLanguage.tr(context, 'Filtr', 'Filter')}: $_chatFindQuery',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: AppLanguage.tr(
+                                  context,
+                                  'Vyčistit filtr',
+                                  'Clear filter',
+                                ),
+                                onPressed: () {
+                                  setState(() => _chatFindQuery = '');
+                                },
+                                icon: const Icon(Icons.close, size: 18),
+                              ),
+                            ],
+                          ),
+                        ),
                       Expanded(
                         child: StreamBuilder<DatabaseEvent>(
                           stream: msgsRef.onValue,
@@ -18008,6 +18347,17 @@ class _ChatsTabState extends State<_ChatsTab>
                               return at.compareTo(bt);
                             });
 
+                            final filteredItems = displayItems
+                                .where(
+                                  (m) => _messageMatchesFind(
+                                    message: m,
+                                    isGroup: true,
+                                    chatId: groupId,
+                                    dmLoginLower: '',
+                                  ),
+                                )
+                                .toList(growable: false);
+
                             // After the list rebuilds, scroll to bottom so newest message is visible.
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               _autoScrollForChatView(
@@ -18082,10 +18432,10 @@ class _ChatsTabState extends State<_ChatsTab>
                             return ListView.builder(
                               controller: _groupScrollController,
                               padding: const EdgeInsets.all(12),
-                              itemCount: displayItems.length,
+                              itemCount: filteredItems.length,
                               itemBuilder: (context, i) {
-                                final m = displayItems[i];
-                                final prev = i > 0 ? displayItems[i - 1] : null;
+                                final m = filteredItems[i];
+                                final prev = i > 0 ? filteredItems[i - 1] : null;
                                 final isLocalSystem = m['__localSystem'] == true;
                                 final key = (m['__key'] ?? '').toString();
                                 final messageScopedKey = _scopedMessageKey(
@@ -18536,6 +18886,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                                         .settings
                                                         .chatTextSize,
                                                     textColor: effectiveTextColor,
+                                                    highlightQuery:
+                                                        _chatFindQuery,
                                                   ),
                                               ],
                                             ),
@@ -18800,6 +19152,7 @@ class _ChatsTabState extends State<_ChatsTab>
     final login = _activeLogin!;
     final messagesRef = rtdb().ref('messages/${current.uid}/$login');
     final loginLower = login.trim().toLowerCase();
+    _ensureFindScope(isGroup: false, chatId: loginLower);
     if (_activeOtherUidLoginLower != loginLower) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _ensureActiveOtherUid();
@@ -18997,6 +19350,48 @@ class _ChatsTabState extends State<_ChatsTab>
                     return Expanded(
                       child: Column(
                         children: [
+                          if (_chatFindQuery.isNotEmpty)
+                            Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.search, size: 16),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      '${AppLanguage.tr(context, 'Filtr', 'Filter')}: $_chatFindQuery',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: AppLanguage.tr(
+                                      context,
+                                      'Vyčistit filtr',
+                                      'Clear filter',
+                                    ),
+                                    onPressed: () {
+                                      setState(() => _chatFindQuery = '');
+                                    },
+                                    icon: const Icon(Icons.close, size: 18),
+                                  ),
+                                ],
+                              ),
+                            ),
                           if (blocked)
                             Container(
                               width: double.infinity,
@@ -19121,6 +19516,17 @@ class _ChatsTabState extends State<_ChatsTab>
                                     return at.compareTo(bt);
                                   });
 
+                                  final filteredItems = displayItems
+                                      .where(
+                                        (m) => _messageMatchesFind(
+                                          message: m,
+                                          isGroup: false,
+                                          chatId: '',
+                                          dmLoginLower: loginLower,
+                                        ),
+                                      )
+                                      .toList(growable: false);
+
                                   // After the list rebuilds, scroll to bottom so newest message is visible.
                                   WidgetsBinding.instance.addPostFrameCallback((
                                     _,
@@ -19201,11 +19607,11 @@ class _ChatsTabState extends State<_ChatsTab>
                                   return ListView.builder(
                                     controller: _dmScrollController,
                                     padding: const EdgeInsets.all(12),
-                                    itemCount: displayItems.length,
+                                    itemCount: filteredItems.length,
                                     itemBuilder: (context, i) {
-                                      final m = displayItems[i];
+                                      final m = filteredItems[i];
                                       final prev = i > 0
-                                          ? displayItems[i - 1]
+                                          ? filteredItems[i - 1]
                                           : null;
                                       final isLocalSystem =
                                         m['__localSystem'] == true;
@@ -19712,6 +20118,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                                               .chatTextSize,
                                                           textColor:
                                                               effectiveTextColor,
+                                                          highlightQuery:
+                                                            _chatFindQuery,
                                                         ),
                                                     ],
                                                   ),
