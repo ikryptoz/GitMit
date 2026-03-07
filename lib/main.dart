@@ -95,11 +95,19 @@ class MyApp extends StatelessWidget {
               filled: true,
               fillColor: ghCard,
               labelStyle: TextStyle(color: Color(0xFF8B949E)),
-              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 14,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(uiRadius)),
+              ),
               enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(uiRadius)),
                 borderSide: BorderSide(color: ghBorder),
               ),
               focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(uiRadius)),
                 borderSide: BorderSide(color: ghBlue, width: 2),
               ),
             ),

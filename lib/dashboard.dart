@@ -2310,7 +2310,6 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
                 children: _membersSuggestions
                     .map((u) {
                       return ListTile(
-                        dense: true,
                         leading: CircleAvatar(
                           radius: 14,
                           backgroundImage: u.avatarUrl.isNotEmpty
@@ -10697,8 +10696,7 @@ Widget _recommendedTile(
   VoidCallback? onTap,
 }) {
   return ListTile(
-    dense: true,
-    contentPadding: EdgeInsets.zero,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     leading: CircleAvatar(
       radius: 16,
       backgroundImage: u.avatarUrl.isNotEmpty
@@ -11117,7 +11115,6 @@ class _ChatsTabState extends State<_ChatsTab>
                   children: options
                       .map(
                         (mode) => RadioListTile<int>(
-                          dense: true,
                           value: mode,
                           groupValue: selected,
                           onChanged: (v) {
@@ -14006,8 +14003,10 @@ class _ChatsTabState extends State<_ChatsTab>
                               final avatarUrl = (u['avatarUrl'] ?? '').trim();
                               final isSelected = selectedLogin == login;
                               return ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
                                 leading: CircleAvatar(
                                   backgroundImage: avatarUrl.isNotEmpty
                                       ? NetworkImage(avatarUrl)
@@ -18646,7 +18645,6 @@ class _ChatsTabState extends State<_ChatsTab>
                                 children: _groupMentionSuggestions
                                     .map(
                                       (login) => ListTile(
-                                        dense: true,
                                         leading: const Icon(
                                           Icons.alternate_email,
                                           size: 16,
@@ -18682,7 +18680,6 @@ class _ChatsTabState extends State<_ChatsTab>
                                 children: _slashSuggestions
                                     .map(
                                       (command) => ListTile(
-                                        dense: true,
                                         leading: const Icon(
                                           Icons.terminal,
                                           size: 16,
@@ -20001,7 +19998,6 @@ class _ChatsTabState extends State<_ChatsTab>
                                     children: _slashSuggestions
                                         .map(
                                           (command) => ListTile(
-                                            dense: true,
                                             leading: const Icon(
                                               Icons.terminal,
                                               size: 16,
