@@ -10767,6 +10767,10 @@ class _ChatsTabState extends State<_ChatsTab>
   String? _replyToKey;
   String? _replyToFrom;
   String? _replyToPreview;
+  String? _replyToUid;
+  final Map<String, GlobalKey> _messageItemKeys = <String, GlobalKey>{};
+  String? _flashMessageScopedKey;
+  Timer? _flashMessageTimer;
   Timer? _typingTimeout;
   bool _typingOn = false;
   bool _groupTypingOn = false;
@@ -12673,6 +12677,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToKey = null;
         _replyToFrom = null;
         _replyToPreview = null;
+        _replyToUid = null;
       });
       _syncShellChatMeta();
       return true;
@@ -12686,6 +12691,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToKey = null;
         _replyToFrom = null;
         _replyToPreview = null;
+        _replyToUid = null;
       });
       _syncShellChatMeta();
       return true;
@@ -12752,6 +12758,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToKey = null;
         _replyToFrom = null;
         _replyToPreview = null;
+        _replyToUid = null;
       });
       _syncShellChatMeta();
       return;
@@ -12768,6 +12775,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToKey = null;
         _replyToFrom = null;
         _replyToPreview = null;
+        _replyToUid = null;
       });
       _syncShellChatMeta();
       return;
@@ -12784,6 +12792,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _replyToKey = null;
         _replyToFrom = null;
         _replyToPreview = null;
+        _replyToUid = null;
       });
       _syncShellChatMeta();
     }
@@ -12797,6 +12806,7 @@ class _ChatsTabState extends State<_ChatsTab>
     _groupScrollController.dispose();
     _groupMentionDebounce?.cancel();
     _ttlUiTicker?.cancel();
+    _flashMessageTimer?.cancel();
     _typingTimeout?.cancel();
     _setTyping(false);
     if (_activeGroupId != null) {
@@ -13227,22 +13237,96 @@ class _ChatsTabState extends State<_ChatsTab>
     required String key,
     required String from,
     required String preview,
+    String? fromUid,
   }) {
     setState(() {
       _replyToKey = key;
       _replyToFrom = from;
       _replyToPreview = preview;
+      _replyToUid = (fromUid ?? '').trim().isEmpty
+          ? null
+          : (fromUid ?? '').trim();
     });
   }
 
   void _clearReplyTarget() {
-    if (_replyToKey == null && _replyToFrom == null && _replyToPreview == null)
+    if (_replyToKey == null &&
+        _replyToFrom == null &&
+        _replyToPreview == null &&
+        _replyToUid == null)
       return;
     setState(() {
       _replyToKey = null;
       _replyToFrom = null;
       _replyToPreview = null;
+      _replyToUid = null;
     });
+  }
+
+  String _scopedMessageKey({
+    required bool isGroup,
+    required String chatScope,
+    required String messageKey,
+  }) {
+    final scope = chatScope.trim().toLowerCase();
+    return '${isGroup ? 'g' : 'dm'}:$scope:$messageKey';
+  }
+
+  GlobalKey _messageItemGlobalKey({
+    required bool isGroup,
+    required String chatScope,
+    required String messageKey,
+  }) {
+    final scoped = _scopedMessageKey(
+      isGroup: isGroup,
+      chatScope: chatScope,
+      messageKey: messageKey,
+    );
+    return _messageItemKeys.putIfAbsent(scoped, () => GlobalKey());
+  }
+
+  Future<void> _jumpToMessageAndFlash({
+    required bool isGroup,
+    required String chatScope,
+    required String messageKey,
+  }) async {
+    if (messageKey.trim().isEmpty) return;
+    final scoped = _scopedMessageKey(
+      isGroup: isGroup,
+      chatScope: chatScope,
+      messageKey: messageKey,
+    );
+
+    if (mounted) {
+      setState(() => _flashMessageScopedKey = scoped);
+    }
+    _flashMessageTimer?.cancel();
+    _flashMessageTimer = Timer(const Duration(milliseconds: 1800), () {
+      if (!mounted) return;
+      if (_flashMessageScopedKey == scoped) {
+        setState(() => _flashMessageScopedKey = null);
+      }
+    });
+
+    // Wait a few frames for lazy list items to materialize when needed.
+    for (var i = 0; i < 12; i++) {
+      final key = _messageItemKeys[scoped];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        try {
+          await Scrollable.ensureVisible(
+            ctx,
+            alignment: 0.2,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOut,
+          );
+        } catch (_) {
+          // ignore
+        }
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 32));
+    }
   }
 
   String? _firstUrlInText(String text) {
@@ -13679,7 +13763,13 @@ class _ChatsTabState extends State<_ChatsTab>
         final limited = preview.length > 120
             ? '${preview.substring(0, 120)}…'
             : preview;
-        _setReplyTarget(key: messageKey, from: fromLabel, preview: limited);
+        final fromUid = (rawMessage?['fromUid'] ?? '').toString().trim();
+        _setReplyTarget(
+          key: messageKey,
+          from: fromLabel,
+          preview: limited,
+          fromUid: fromUid,
+        );
         return;
       case 'copy':
         final copied = codePayload?.code ?? text;
@@ -14500,13 +14590,6 @@ class _ChatsTabState extends State<_ChatsTab>
       outgoingText = text;
     }
 
-    if (replyToFrom != null &&
-        replyToFrom.trim().isNotEmpty &&
-        !outgoingText.trim().startsWith('@')) {
-      final cleanFrom = replyToFrom.trim().replaceFirst(RegExp(r'^@+'), '');
-      outgoingText = '@$cleanFrom $outgoingText';
-    }
-
     final otherUid = await _ensureActiveOtherUid();
     if (otherUid == null || otherUid.isEmpty) {
       var sentFallback = false;
@@ -14618,6 +14701,8 @@ class _ChatsTabState extends State<_ChatsTab>
         'replyToKey': replyToKey,
       if (replyToFrom != null && replyToFrom.trim().isNotEmpty)
         'replyToFrom': replyToFrom,
+      if (_replyToUid != null && _replyToUid!.trim().isNotEmpty)
+        'replyToUid': _replyToUid,
       if (replyToPreview != null && replyToPreview.trim().isNotEmpty)
         'replyToPreview': replyToPreview,
       if (expiresAt != null) 'expiresAt': expiresAt,
@@ -17648,16 +17733,6 @@ class _ChatsTabState extends State<_ChatsTab>
                       outgoingText = text;
                     }
 
-                    if (replyToFrom != null &&
-                        replyToFrom.trim().isNotEmpty &&
-                        !outgoingText.trim().startsWith('@')) {
-                      final cleanFrom = replyToFrom.trim().replaceFirst(
-                        RegExp(r'^@+'),
-                        '',
-                      );
-                      outgoingText = '@$cleanFrom $outgoingText';
-                    }
-
                     _messageController.clear();
                     if (_slashSuggestions.isNotEmpty && mounted) {
                       setState(() => _slashSuggestions = const <String>[]);
@@ -17802,6 +17877,8 @@ class _ChatsTabState extends State<_ChatsTab>
                         'replyToKey': replyToKey,
                       if (replyToFrom != null && replyToFrom.trim().isNotEmpty)
                         'replyToFrom': replyToFrom,
+                      if (_replyToUid != null && _replyToUid!.trim().isNotEmpty)
+                        'replyToUid': _replyToUid,
                       if (replyToPreview != null &&
                           replyToPreview.trim().isNotEmpty)
                         'replyToPreview': replyToPreview,
@@ -18012,6 +18089,18 @@ class _ChatsTabState extends State<_ChatsTab>
                                 final prev = i > 0 ? displayItems[i - 1] : null;
                                 final isLocalSystem = m['__localSystem'] == true;
                                 final key = (m['__key'] ?? '').toString();
+                                final messageScopedKey = _scopedMessageKey(
+                                  isGroup: true,
+                                  chatScope: groupId,
+                                  messageKey: key,
+                                );
+                                final messageItemKey = _messageItemGlobalKey(
+                                  isGroup: true,
+                                  chatScope: groupId,
+                                  messageKey: key,
+                                );
+                                final isFlashTarget =
+                                    _flashMessageScopedKey == messageScopedKey;
                                 final plaintext = (m['text'] ?? '').toString();
                                 final fromUid = (m['fromUid'] ?? '').toString();
                                 final fromGh = (m['fromGithub'] ?? '')
@@ -18158,12 +18247,15 @@ class _ChatsTabState extends State<_ChatsTab>
                                 final replyToFrom = (m['replyToFrom'] ?? '')
                                     .toString()
                                     .trim();
+                                final replyToKey = (m['replyToKey'] ?? '')
+                                  .toString()
+                                  .trim();
                                 final replyToPreview =
                                     (m['replyToPreview'] ?? '')
                                         .toString()
                                         .trim();
                                 final hasReply =
-                                    replyToFrom.isNotEmpty &&
+                                  replyToKey.isNotEmpty &&
                                     replyToPreview.isNotEmpty;
 
                                 final reactions = (m['reactions'] is Map)
@@ -18228,11 +18320,13 @@ class _ChatsTabState extends State<_ChatsTab>
                                       ? const Color(0xFFFFF5CC)
                                       : tcolor);
 
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 6,
-                                  ),
-                                  child: Column(
+                                return KeyedSubtree(
+                                  key: messageItemKey,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 6,
+                                    ),
+                                    child: Column(
                                     children: [
                                       if (showDayDivider)
                                         _dayDivider(context, createdAt),
@@ -18302,7 +18396,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     14,
                                                   ),
                                               border: Border.all(
-                                                color: mentioned
+                                                color: isFlashTarget
+                                                    ? const Color(0xFF58A6FF)
+                                                    : mentioned
                                                     ? Colors.amber
                                                     : (isLocalSystem
                                                           ? const Color(
@@ -18311,7 +18407,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                                           : const Color(
                                                               0x5530363D,
                                                             )),
-                                                width: mentioned ? 2 : 1,
+                                                width: (isFlashTarget || mentioned)
+                                                    ? 2
+                                                    : 1,
                                               ),
                                             ),
                                             child: Column(
@@ -18344,61 +18442,74 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     ),
                                                   ),
                                                 if (hasReply)
-                                                  Container(
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                          bottom: 8,
+                                                  InkWell(
+                                                    onTap: () =>
+                                                        _jumpToMessageAndFlash(
+                                                          isGroup: true,
+                                                          chatScope: groupId,
+                                                          messageKey: replyToKey,
                                                         ),
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 6,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
                                                         ),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.black26,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            8,
+                                                    child: Container(
+                                                      margin:
+                                                          const EdgeInsets.only(
+                                                            bottom: 8,
                                                           ),
-                                                      border: Border.all(
-                                                        color: Colors.white24,
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                            vertical: 6,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black26,
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              8,
+                                                            ),
+                                                        border: Border.all(
+                                                          color: Colors.white24,
+                                                        ),
                                                       ),
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        const Icon(
-                                                          Icons
-                                                              .subdirectory_arrow_right,
-                                                          size: 14,
-                                                          color: Colors.white70,
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 6,
-                                                        ),
-                                                        Flexible(
-                                                          child: Text(
-                                                            '@$replyToFrom • $replyToPreview',
-                                                            maxLines: 2,
-                                                            overflow:
-                                                                TextOverflow
-                                                                    .ellipsis,
-                                                            style: TextStyle(
-                                                              fontSize:
-                                                                  widget
-                                                                      .settings
-                                                                      .chatTextSize -
-                                                                  2,
-                                                              color: mentionHighlight
-                                                                  ? const Color(
-                                                                      0xFFFFF1B8,
-                                                                    )
-                                                                  : Colors.white70,
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          const Icon(
+                                                            Icons
+                                                                .subdirectory_arrow_right,
+                                                            size: 14,
+                                                            color:
+                                                                Colors.white70,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 6,
+                                                          ),
+                                                          Flexible(
+                                                            child: Text(
+                                                              '${replyToFrom.isNotEmpty ? '@$replyToFrom' : 'Reply'} • $replyToPreview',
+                                                              maxLines: 2,
+                                                              overflow:
+                                                                  TextOverflow
+                                                                      .ellipsis,
+                                                              style: TextStyle(
+                                                                fontSize:
+                                                                    widget
+                                                                        .settings
+                                                                        .chatTextSize -
+                                                                    2,
+                                                                color: mentionHighlight
+                                                                    ? const Color(
+                                                                        0xFFFFF1B8,
+                                                                      )
+                                                                    : Colors.white70,
+                                                              ),
                                                             ),
                                                           ),
-                                                        ),
-                                                      ],
+                                                        ],
+                                                      ),
                                                     ),
                                                   ),
                                                 if (attachment != null)
@@ -18459,7 +18570,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                   ),
                                     ],
                                   ),
-                                );
+                                ));
                               },
                             );
                           },
@@ -19102,6 +19213,21 @@ class _ChatsTabState extends State<_ChatsTab>
                                       final isLocalSystem =
                                         m['__localSystem'] == true;
                                       final key = (m['__key'] ?? '').toString();
+                                      final messageScopedKey =
+                                          _scopedMessageKey(
+                                            isGroup: false,
+                                            chatScope: loginLower,
+                                            messageKey: key,
+                                          );
+                                      final messageItemKey =
+                                          _messageItemGlobalKey(
+                                            isGroup: false,
+                                            chatScope: loginLower,
+                                            messageKey: key,
+                                          );
+                                      final isFlashTarget =
+                                          _flashMessageScopedKey ==
+                                          messageScopedKey;
                                       final plaintext = (m['text'] ?? '')
                                           .toString();
                                       final fromUid = (m['fromUid'] ?? '')
@@ -19267,12 +19393,15 @@ class _ChatsTabState extends State<_ChatsTab>
                                           (m['replyToFrom'] ?? '')
                                               .toString()
                                               .trim();
+                                        final replyToKey = (m['replyToKey'] ?? '')
+                                          .toString()
+                                          .trim();
                                       final replyToPreview =
                                           (m['replyToPreview'] ?? '')
                                               .toString()
                                               .trim();
                                       final hasReply =
-                                          replyToFrom.isNotEmpty &&
+                                          replyToKey.isNotEmpty &&
                                           replyToPreview.isNotEmpty;
 
                                         final bubbleKey = isMe
@@ -19341,11 +19470,13 @@ class _ChatsTabState extends State<_ChatsTab>
                                         }
                                       }
 
-                                      return Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 6,
-                                        ),
-                                        child: Column(
+                                      return KeyedSubtree(
+                                        key: messageItemKey,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 6,
+                                          ),
+                                          child: Column(
                                           children: [
                                           if (showDayDivider)
                                               _dayDivider(context, createdAt),
@@ -19434,13 +19565,20 @@ class _ChatsTabState extends State<_ChatsTab>
                                                           14,
                                                         ),
                                                     border: Border.all(
-                                                      color: isLocalSystem
+                                                      color: isFlashTarget
+                                                          ? const Color(
+                                                              0xFF58A6FF,
+                                                            )
+                                                          : isLocalSystem
                                                           ? const Color(
                                                               0xFFB8C0CC,
                                                             )
                                                           : const Color(
                                                               0x5530363D,
                                                             ),
+                                                      width: isFlashTarget
+                                                          ? 2
+                                                          : 1,
                                                     ),
                                                   ),
                                                   child: Column(
@@ -19476,62 +19614,77 @@ class _ChatsTabState extends State<_ChatsTab>
                                                           ),
                                                         ),
                                                       if (hasReply)
-                                                        Container(
-                                                          margin:
-                                                              const EdgeInsets.only(
-                                                                bottom: 8,
+                                                        InkWell(
+                                                          onTap: () =>
+                                                              _jumpToMessageAndFlash(
+                                                                isGroup: false,
+                                                                chatScope:
+                                                                    loginLower,
+                                                                messageKey:
+                                                                    replyToKey,
                                                               ),
-                                                          padding:
-                                                              const EdgeInsets.symmetric(
-                                                                horizontal: 8,
-                                                                vertical: 6,
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                8,
                                                               ),
-                                                          decoration: BoxDecoration(
-                                                            color:
-                                                                Colors.black26,
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                  8,
+                                                          child: Container(
+                                                            margin:
+                                                                const EdgeInsets.only(
+                                                                  bottom: 8,
                                                                 ),
-                                                            border: Border.all(
+                                                            padding:
+                                                                const EdgeInsets.symmetric(
+                                                                  horizontal:
+                                                                      8,
+                                                                  vertical: 6,
+                                                                ),
+                                                            decoration: BoxDecoration(
                                                               color: Colors
-                                                                  .white24,
-                                                            ),
-                                                          ),
-                                                          child: Row(
-                                                            mainAxisSize:
-                                                                MainAxisSize
-                                                                    .min,
-                                                            children: [
-                                                              const Icon(
-                                                                Icons
-                                                                    .subdirectory_arrow_right,
-                                                                size: 14,
+                                                                  .black26,
+                                                              borderRadius:
+                                                                  BorderRadius.circular(
+                                                                    8,
+                                                                  ),
+                                                              border: Border.all(
                                                                 color: Colors
-                                                                    .white70,
+                                                                    .white24,
                                                               ),
-                                                              const SizedBox(
-                                                                width: 6,
-                                                              ),
-                                                              Flexible(
-                                                                child: Text(
-                                                                  '@$replyToFrom • $replyToPreview',
-                                                                  maxLines: 2,
-                                                                  overflow:
-                                                                      TextOverflow
-                                                                          .ellipsis,
-                                                                  style: TextStyle(
-                                                                    fontSize:
-                                                                        widget
-                                                                            .settings
-                                                                            .chatTextSize -
-                                                                        2,
-                                                                    color: Colors
-                                                                        .white70,
+                                                            ),
+                                                            child: Row(
+                                                              mainAxisSize:
+                                                                  MainAxisSize
+                                                                      .min,
+                                                              children: [
+                                                                const Icon(
+                                                                  Icons
+                                                                      .subdirectory_arrow_right,
+                                                                  size: 14,
+                                                                  color: Colors
+                                                                      .white70,
+                                                                ),
+                                                                const SizedBox(
+                                                                  width: 6,
+                                                                ),
+                                                                Flexible(
+                                                                  child: Text(
+                                                                    '${replyToFrom.isNotEmpty ? '@$replyToFrom' : 'Reply'} • $replyToPreview',
+                                                                    maxLines: 2,
+                                                                    overflow:
+                                                                        TextOverflow
+                                                                            .ellipsis,
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          widget
+                                                                              .settings
+                                                                              .chatTextSize -
+                                                                          2,
+                                                                      color: Colors
+                                                                          .white70,
+                                                                    ),
                                                                   ),
                                                                 ),
-                                                              ),
-                                                            ],
+                                                              ],
+                                                            ),
                                                           ),
                                                         ),
                                                       if (attachment != null)
@@ -19628,7 +19781,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                         ),
                                           ],
                                         ),
-                                      );
+                                      ),
+                                    );
                                     },
                                   );
                                 },
