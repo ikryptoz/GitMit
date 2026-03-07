@@ -35,6 +35,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:highlight/highlight.dart' as highlight;
 import 'package:http/http.dart' as http;
+import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 
 
 // Group achievement logic (top-level, accessible everywhere)
@@ -90,6 +91,18 @@ const String _githubDmFallbackTokenPrimary = String.fromEnvironment(
 );
 const String _githubDmFallbackTokenCompat = String.fromEnvironment(
   'GITMIT_NOTIFY_BACKEND_TOKEN',
+  defaultValue: '',
+);
+const String _gitmitTurnUrl = String.fromEnvironment(
+  'GITMIT_TURN_URL',
+  defaultValue: '',
+);
+const String _gitmitTurnUsername = String.fromEnvironment(
+  'GITMIT_TURN_USERNAME',
+  defaultValue: '',
+);
+const String _gitmitTurnCredential = String.fromEnvironment(
+  'GITMIT_TURN_CREDENTIAL',
   defaultValue: '',
 );
 String get _githubDmFallbackToken =>
@@ -3645,6 +3658,8 @@ Future<void> checkGroupAchievements(String uid) async {
           final showChatBack = _index == 1 && canStepBack;
           final chatsState = _chatsKey.currentState;
           final showDmActions = _index == 1 && (chatsState?.hasActiveDm ?? false);
+          final showGroupCallAction =
+              _index == 1 && (chatsState?.hasActiveGroup ?? false);
           final showChatSearchAction =
               _index == 1 &&
               ((chatsState?.hasActiveDm ?? false) ||
@@ -3672,7 +3687,10 @@ Future<void> checkGroupAchievements(String uid) async {
                         },
                       )
                     : null,
-                actions: (showVerificationAction || showDmActions || showChatSearchAction)
+                actions: (showVerificationAction ||
+                  showDmActions ||
+                  showGroupCallAction ||
+                  showChatSearchAction)
                     ? [
                         if (showVerificationAction)
                           IconButton(
@@ -3716,78 +3734,116 @@ Future<void> checkGroupAchievements(String uid) async {
                     _index == 1 && (currentChatsState?.hasActiveGroup ?? false);
                 final canOpenDmProfile =
                     _index == 1 && (currentChatsState?.hasActiveDm ?? false);
+                final canCallDm =
+                    _index == 1 && (currentChatsState?.hasActiveDm ?? false);
+                final canCallGroup =
+                    _index == 1 && (currentChatsState?.hasActiveGroup ?? false);
+                final showCallLeft = canCallDm || canCallGroup;
+                final isCallActive =
+                    (currentChatsState?.hasActiveDmCall ?? false) ||
+                    (currentChatsState?.hasActiveGroupCall ?? false);
                 final isPillClickable = canOpenGroup || canOpenDmProfile;
-                    return Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: isPillClickable
-                            ? () {
-                                final liveState = _chatsKey.currentState;
-                                if (liveState == null) return;
-                                if (liveState.hasActiveGroup) {
-                                  liveState.openActiveGroupInfo();
-                                  return;
-                                }
-                                if (liveState.hasActiveDm) {
-                                  liveState.openActiveDmProfile();
-                                }
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (showCallLeft)
+                          IconButton(
+                            tooltip: AppLanguage.tr(
+                              context,
+                              canCallGroup ? 'Skupinový hovor' : 'Volat',
+                              canCallGroup ? 'Group call' : 'Call',
+                            ),
+                            icon: Icon(
+                              canCallGroup
+                                  ? (isCallActive ? Icons.call_end : Icons.groups)
+                                  : (isCallActive ? Icons.call_end : Icons.call),
+                              color: isCallActive ? Colors.redAccent : null,
+                            ),
+                            onPressed: () {
+                              final liveState = _chatsKey.currentState;
+                              if (liveState == null) return;
+                              if (liveState.hasActiveGroup) {
+                                liveState.openActiveGroupCallAction();
+                                return;
                               }
-                            : null,
-                        borderRadius: BorderRadius.circular(999),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: cs.surface,
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: cs.outlineVariant),
+                              if (liveState.hasActiveDm) {
+                                liveState.openActiveDmCallAction();
+                              }
+                            },
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                title,
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: isPillClickable
+                                ? () {
+                                    final liveState = _chatsKey.currentState;
+                                    if (liveState == null) return;
+                                    if (liveState.hasActiveGroup) {
+                                      liveState.openActiveGroupInfo();
+                                      return;
+                                    }
+                                    if (liveState.hasActiveDm) {
+                                      liveState.openActiveDmProfile();
+                                    }
+                                  }
+                                : null,
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: cs.surface,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: cs.outlineVariant),
                               ),
-                              if (handle != null && handle.trim().isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 3,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                   ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0x1A58A6FF),
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(color: const Color(0x4458A6FF)),
-                                  ),
-                                  child: Text(
-                                    handle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Color(0xFF8DC4FF),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
+                                  if (handle != null && handle.trim().isNotEmpty) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0x1A58A6FF),
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(color: const Color(0x4458A6FF)),
+                                      ),
+                                      child: Text(
+                                        handle,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Color(0xFF8DC4FF),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                              ],
-                              if (isPillClickable) ...[
-                                const SizedBox(width: 6),
-                                Icon(
-                                  Icons.open_in_new,
-                                  size: 14,
-                                  color: Theme.of(
-                                    context,
-                                  ).textTheme.bodySmall?.color?.withValues(alpha: 0.75),
-                                ),
-                              ],
-                            ],
+                                  ],
+                                  if (isPillClickable) ...[
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      Icons.open_in_new,
+                                      size: 14,
+                                      color: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall?.color?.withValues(alpha: 0.75),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     );
                   },
                 ),
@@ -10939,6 +10995,29 @@ class _ChatsTabState extends State<_ChatsTab>
   final Map<String, List<Map<String, dynamic>>> _localOnlyChatNotes =
       <String, List<Map<String, dynamic>>>{};
   String? _lastAutoScrolledChatViewKey;
+  StreamSubscription<DatabaseEvent>? _incomingCallInviteSub;
+  StreamSubscription<DatabaseEvent>? _callResponseSub;
+  Timer? _outgoingCallTimeout;
+  Timer? _callElapsedTicker;
+  bool _incomingCallDialogOpen = false;
+  String? _outgoingCallId;
+  bool _outgoingCallRinging = false;
+  String? _callPeerUid;
+  String? _callPeerLogin;
+  bool _callConnected = false;
+  String? _activeCallId;
+  int _callElapsedSeconds = 0;
+  rtc.RTCPeerConnection? _dmPeerConnection;
+  rtc.MediaStream? _localAudioStream;
+  bool _dmMicEnabled = true;
+  bool _dmSpeakerEnabled = true;
+  bool _dmIsCaller = false;
+  int _dmReconnectAttempts = 0;
+  bool _outgoingGroupCallRinging = false;
+  String? _outgoingGroupCallId;
+  String? _outgoingGroupId;
+  String? _outgoingGroupTitle;
+  final Set<String> _outgoingGroupInviteUids = <String>{};
 
   static const double _uiRadiusCard = 12;
   static const double _uiRadiusSheet = 18;
@@ -11132,6 +11211,954 @@ class _ChatsTabState extends State<_ChatsTab>
     if (!mounted || next == null) return;
     setState(() {
       _chatFindQuery = next.trim();
+    });
+  }
+
+  String _callDurationLabel(int totalSeconds) {
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    final s = totalSeconds % 60;
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _sendDmEncryptedSystemText({
+    required String myUid,
+    required String myLogin,
+    required String peerUid,
+    required String peerLogin,
+    required String text,
+  }) async {
+    if (text.trim().isEmpty) return;
+    Map<String, Object?> encrypted;
+    try {
+      encrypted = await E2ee.encryptForUser(otherUid: peerUid, plaintext: text);
+    } catch (_) {
+      return;
+    }
+
+    final key = rtdb().ref().push().key;
+    if (key == null || key.isEmpty) return;
+    final msg = <String, Object?>{
+      ...encrypted,
+      'fromUid': myUid,
+      'createdAt': ServerValue.timestamp,
+    };
+    final updates = <String, Object?>{
+      'messages/$myUid/$peerLogin/$key': msg,
+      'messages/$peerUid/$myLogin/$key': msg,
+      'savedChats/$myUid/$peerLogin/lastMessageText': '🔒',
+      'savedChats/$myUid/$peerLogin/lastMessageAt': ServerValue.timestamp,
+      'savedChats/$peerUid/$myLogin/lastMessageText': '🔒',
+      'savedChats/$peerUid/$myLogin/lastMessageAt': ServerValue.timestamp,
+    };
+    try {
+      await rtdb().ref().update(updates);
+    } catch (_) {
+      // best effort
+    }
+  }
+
+  Future<void> _sendCallResponse({
+    required String toUid,
+    required String callId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    Map<String, Object?> encrypted;
+    try {
+      encrypted = await E2ee.encryptForUser(
+        otherUid: toUid,
+        plaintext: jsonEncode(payload),
+      );
+    } catch (_) {
+      return;
+    }
+    final packet = <String, Object?>{
+      ...encrypted,
+      'fromUid': current.uid,
+      'createdAt': ServerValue.timestamp,
+    };
+    try {
+      final resRef = rtdb().ref('callResponses/$toUid').push();
+      await resRef.set(packet);
+    } catch (_) {
+      // best effort
+    }
+  }
+
+  Future<void> _sendDmWebRtcSignal({
+    required String action,
+    Map<String, dynamic>? data,
+  }) async {
+    final toUid = _callPeerUid;
+    final callId = _activeCallId ?? _outgoingCallId;
+    if (toUid == null || toUid.isEmpty || callId == null || callId.isEmpty) {
+      return;
+    }
+    await _sendCallResponse(
+      toUid: toUid,
+      callId: callId,
+      payload: <String, dynamic>{
+        'type': 'dm_call_response',
+        'action': action,
+        'callId': callId,
+        if ((_outgoingGroupId ?? '').trim().isNotEmpty) 'mode': 'group',
+        if ((_outgoingGroupId ?? '').trim().isNotEmpty)
+          'groupId': _outgoingGroupId,
+        if (data != null) ...data,
+      },
+    );
+  }
+
+  Future<bool> _prepareDmWebRtc({required bool isCaller}) async {
+    _dmIsCaller = isCaller;
+    _dmReconnectAttempts = 0;
+
+    await _disposeDmWebRtc();
+
+    final iceServers = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'urls': <String>[
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+        ],
+      },
+    ];
+    if (_gitmitTurnUrl.trim().isNotEmpty) {
+      iceServers.add(<String, dynamic>{
+        'urls': <String>[_gitmitTurnUrl.trim()],
+        if (_gitmitTurnUsername.trim().isNotEmpty)
+          'username': _gitmitTurnUsername.trim(),
+        if (_gitmitTurnCredential.trim().isNotEmpty)
+          'credential': _gitmitTurnCredential.trim(),
+      });
+    }
+    final config = <String, dynamic>{
+      'iceServers': iceServers,
+      'sdpSemantics': 'unified-plan',
+    };
+
+    try {
+      _dmPeerConnection = await rtc.createPeerConnection(config);
+    } catch (_) {
+      _dmPeerConnection = null;
+      return false;
+    }
+
+    try {
+      _localAudioStream = await rtc.navigator.mediaDevices.getUserMedia(
+        <String, dynamic>{
+          'audio': <String, dynamic>{
+            'echoCancellation': true,
+            'noiseSuppression': true,
+            'autoGainControl': true,
+          },
+          'video': false,
+        },
+      );
+    } catch (_) {
+      await _disposeDmWebRtc();
+      return false;
+    }
+
+    for (final track in _localAudioStream!.getAudioTracks()) {
+      track.enabled = _dmMicEnabled;
+      await _dmPeerConnection!.addTrack(track, _localAudioStream!);
+    }
+
+    _dmPeerConnection!.onIceCandidate = (candidate) {
+      if (candidate.candidate == null || candidate.candidate!.isEmpty) return;
+      _sendDmWebRtcSignal(
+        action: 'webrtc_ice',
+        data: <String, dynamic>{
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex,
+        },
+      );
+    };
+
+    _dmPeerConnection!.onConnectionState = (state) async {
+      if (!mounted) return;
+      if (state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        if (!_callConnected) {
+          setState(() {
+            _callConnected = true;
+            _callElapsedSeconds = 0;
+          });
+          _startCallElapsedTicker();
+        }
+        _dmReconnectAttempts = 0;
+        return;
+      }
+
+      if (state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+          state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        if (_dmIsCaller && _dmReconnectAttempts < 3) {
+          _dmReconnectAttempts++;
+          try {
+            final offer = await _dmPeerConnection!.createOffer(<String, dynamic>{
+              'iceRestart': true,
+              'offerToReceiveAudio': true,
+            });
+            await _dmPeerConnection!.setLocalDescription(offer);
+            await _sendDmWebRtcSignal(
+              action: 'webrtc_offer',
+              data: <String, dynamic>{
+                'sdp': offer.sdp ?? '',
+                'type': offer.type ?? 'offer',
+                'restart': true,
+              },
+            );
+          } catch (_) {
+            // best effort reconnect
+          }
+        }
+      }
+
+      if (state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        if (_callConnected) {
+          setState(() => _callConnected = false);
+        }
+      }
+    };
+
+    // Remote audio is played automatically by platform audio route.
+    _dmPeerConnection!.onTrack = (_) {};
+
+    return true;
+  }
+
+  Future<void> _startDmOfferFlow() async {
+    final pc = _dmPeerConnection;
+    if (pc == null) return;
+    try {
+      final offer = await pc.createOffer(<String, dynamic>{
+        'offerToReceiveAudio': true,
+      });
+      await pc.setLocalDescription(offer);
+      await _sendDmWebRtcSignal(
+        action: 'webrtc_offer',
+        data: <String, dynamic>{
+          'sdp': offer.sdp ?? '',
+          'type': offer.type ?? 'offer',
+        },
+      );
+    } catch (_) {
+      // signaling failure handled by timeout/cancel
+    }
+  }
+
+  Future<void> _handleDmWebRtcSignal(Map<String, dynamic> payload) async {
+    final action = (payload['action'] ?? '').toString();
+    final callId = (payload['callId'] ?? '').toString();
+    if (callId.isEmpty) return;
+    final currentCall = _activeCallId ?? _outgoingCallId;
+    if (currentCall == null || currentCall != callId) return;
+
+    if (action == 'webrtc_offer') {
+      if (_dmPeerConnection == null) {
+        final ok = await _prepareDmWebRtc(isCaller: false);
+        if (!ok) return;
+      }
+      final sdp = (payload['sdp'] ?? '').toString();
+      if (sdp.isEmpty) return;
+      try {
+        await _dmPeerConnection!.setRemoteDescription(
+          rtc.RTCSessionDescription(sdp, 'offer'),
+        );
+        final answer = await _dmPeerConnection!.createAnswer(<String, dynamic>{
+          'offerToReceiveAudio': true,
+        });
+        await _dmPeerConnection!.setLocalDescription(answer);
+        await _sendDmWebRtcSignal(
+          action: 'webrtc_answer',
+          data: <String, dynamic>{
+            'sdp': answer.sdp ?? '',
+            'type': answer.type ?? 'answer',
+          },
+        );
+      } catch (_) {
+        // ignore malformed renegotiation
+      }
+      return;
+    }
+
+    if (action == 'webrtc_answer') {
+      if (_dmPeerConnection == null) return;
+      final sdp = (payload['sdp'] ?? '').toString();
+      if (sdp.isEmpty) return;
+      try {
+        await _dmPeerConnection!.setRemoteDescription(
+          rtc.RTCSessionDescription(sdp, 'answer'),
+        );
+      } catch (_) {
+        // ignore
+      }
+      return;
+    }
+
+    if (action == 'webrtc_ice') {
+      if (_dmPeerConnection == null) return;
+      final candidate = (payload['candidate'] ?? '').toString();
+      if (candidate.isEmpty) return;
+      final sdpMid = (payload['sdpMid'] ?? '').toString();
+      final rawLine = payload['sdpMLineIndex'];
+      int? sdpMLineIndex;
+      if (rawLine is int) {
+        sdpMLineIndex = rawLine;
+      } else {
+        sdpMLineIndex = int.tryParse((rawLine ?? '').toString());
+      }
+      try {
+        await _dmPeerConnection!.addCandidate(
+          rtc.RTCIceCandidate(candidate, sdpMid.isEmpty ? null : sdpMid, sdpMLineIndex),
+        );
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
+
+  Future<void> _disposeDmWebRtc() async {
+    final pc = _dmPeerConnection;
+    _dmPeerConnection = null;
+    if (pc != null) {
+      try {
+        await pc.close();
+      } catch (_) {}
+      try {
+        await pc.dispose();
+      } catch (_) {}
+    }
+    final stream = _localAudioStream;
+    _localAudioStream = null;
+    if (stream != null) {
+      try {
+        for (final t in stream.getTracks()) {
+          t.stop();
+        }
+      } catch (_) {}
+      try {
+        await stream.dispose();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _toggleDmMic() async {
+    _dmMicEnabled = !_dmMicEnabled;
+    final stream = _localAudioStream;
+    if (stream != null) {
+      for (final t in stream.getAudioTracks()) {
+        t.enabled = _dmMicEnabled;
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _toggleDmSpeaker() async {
+    _dmSpeakerEnabled = !_dmSpeakerEnabled;
+    try {
+      await rtc.Helper.setSpeakerphoneOn(_dmSpeakerEnabled);
+    } catch (_) {
+      // unsupported platform route toggle
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _startCallElapsedTicker() {
+    _callElapsedTicker?.cancel();
+    _callElapsedTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_callConnected) return;
+      setState(() => _callElapsedSeconds++);
+    });
+  }
+
+  Future<void> _endActiveCall({bool sendRemoteEnd = true}) async {
+    final current = FirebaseAuth.instance.currentUser;
+    final peerUid = _callPeerUid;
+    final peerLogin = _callPeerLogin;
+    final callId = _activeCallId;
+    final duration = _callElapsedSeconds;
+
+    if (sendRemoteEnd &&
+        current != null &&
+        peerUid != null &&
+        peerUid.isNotEmpty &&
+        callId != null &&
+        callId.isNotEmpty) {
+      await _sendCallResponse(
+        toUid: peerUid,
+        callId: callId,
+        payload: <String, dynamic>{
+          'type': 'dm_call_response',
+          'action': 'ended',
+          'callId': callId,
+          'durationSec': duration,
+        },
+      );
+    }
+
+    if (current != null && peerUid != null && peerLogin != null) {
+      final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+      if (myLogin.isNotEmpty) {
+        await _sendDmEncryptedSystemText(
+          myUid: current.uid,
+          myLogin: myLogin,
+          peerUid: peerUid,
+          peerLogin: peerLogin,
+          text: '📞 Hovor ukončen (${_callDurationLabel(duration)})',
+        );
+      }
+    }
+
+    await _disposeDmWebRtc();
+
+    _outgoingCallTimeout?.cancel();
+    _outgoingCallTimeout = null;
+    _callElapsedTicker?.cancel();
+    _callElapsedTicker = null;
+    if (!mounted) return;
+    setState(() {
+      _outgoingCallRinging = false;
+      _outgoingCallId = null;
+      _callConnected = false;
+      _activeCallId = null;
+      _callElapsedSeconds = 0;
+      _callPeerUid = null;
+      _callPeerLogin = null;
+      _dmMicEnabled = true;
+      _dmSpeakerEnabled = true;
+      _dmIsCaller = false;
+      _dmReconnectAttempts = 0;
+      if (!_outgoingGroupCallRinging) {
+        _outgoingGroupCallId = null;
+        _outgoingGroupId = null;
+        _outgoingGroupTitle = null;
+      }
+    });
+  }
+
+  Future<void> _startEncryptedDmCall() async {
+    final current = FirebaseAuth.instance.currentUser;
+    final login = _activeLogin?.trim();
+    if (current == null || login == null || login.isEmpty) return;
+    if (_callConnected) return;
+    if (_outgoingCallRinging || _outgoingGroupCallRinging) return;
+
+    final peerUid = await _ensureActiveOtherUid();
+    if (peerUid == null || peerUid.isEmpty) return;
+    final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+    if (myLogin.isEmpty) return;
+
+    final callId = rtdb().ref().push().key;
+    if (callId == null || callId.isEmpty) return;
+
+    final payload = <String, dynamic>{
+      'type': 'dm_call_offer',
+      'callId': callId,
+      'fromUid': current.uid,
+      'fromLogin': myLogin,
+      'toUid': peerUid,
+      'toLogin': login,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    Map<String, Object?> encrypted;
+    try {
+      encrypted = await E2ee.encryptForUser(
+        otherUid: peerUid,
+        plaintext: jsonEncode(payload),
+      );
+    } catch (_) {
+      return;
+    }
+
+    final offerPacket = <String, Object?>{
+      ...encrypted,
+      'fromUid': current.uid,
+      'fromLogin': myLogin,
+      'createdAt': ServerValue.timestamp,
+    };
+
+    try {
+      await rtdb().ref('callInvites/$peerUid/$callId').set(offerPacket);
+    } catch (_) {
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _outgoingCallId = callId;
+      _outgoingCallRinging = true;
+      _callPeerUid = peerUid;
+      _callPeerLogin = login;
+    });
+
+    _outgoingCallTimeout?.cancel();
+    _outgoingCallTimeout = Timer(const Duration(seconds: 35), () async {
+      if (!mounted) return;
+      if (!_outgoingCallRinging || _outgoingCallId != callId) return;
+
+      try {
+        await rtdb().ref('callInvites/$peerUid/$callId').remove();
+      } catch (_) {}
+
+      final myLoginNow = (await _myGithubUsername(current.uid) ?? '').trim();
+      if (myLoginNow.isNotEmpty) {
+        await _sendDmEncryptedSystemText(
+          myUid: current.uid,
+          myLogin: myLoginNow,
+          peerUid: peerUid,
+          peerLogin: login,
+          text: '📞 Nezvednuto',
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _outgoingCallRinging = false;
+        _outgoingCallId = null;
+      });
+    });
+  }
+
+  Future<void> _listenIncomingCallInvites() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    _incomingCallInviteSub?.cancel();
+    _incomingCallInviteSub = rtdb()
+        .ref('callInvites/${current.uid}')
+        .onChildAdded
+        .listen((event) async {
+      final callId = event.snapshot.key?.toString() ?? '';
+      final raw = event.snapshot.value;
+      if (callId.isEmpty || raw is! Map) return;
+      final packet = Map<String, dynamic>.from(raw);
+      packet['__key'] = callId;
+      final fromUid = (packet['fromUid'] ?? '').toString();
+      if (fromUid.isEmpty) return;
+
+      String clear;
+      try {
+        clear = await E2ee.decryptFromUser(otherUid: fromUid, message: packet);
+      } catch (_) {
+        return;
+      }
+
+      Map<String, dynamic> payload;
+      try {
+        final decoded = jsonDecode(clear);
+        if (decoded is! Map) return;
+        payload = Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return;
+      }
+
+      final offerType = (payload['type'] ?? '').toString();
+      final isDmOffer = offerType == 'dm_call_offer';
+      final isGroupOffer = offerType == 'group_call_offer';
+      if (!isDmOffer && !isGroupOffer) return;
+
+      final fromLogin = (payload['fromLogin'] ?? '').toString();
+      if (fromLogin.trim().isEmpty) return;
+      final groupId = (payload['groupId'] ?? '').toString();
+      final groupTitle = (payload['groupTitle'] ?? '').toString();
+
+      // Busy: auto-decline incoming call.
+      if (_callConnected || _outgoingCallRinging || _outgoingGroupCallRinging) {
+        await _sendCallResponse(
+          toUid: fromUid,
+          callId: callId,
+          payload: <String, dynamic>{
+            'type': 'dm_call_response',
+            'action': 'declined',
+            'callId': callId,
+          },
+        );
+        await rtdb().ref('callInvites/${current.uid}/$callId').remove();
+        return;
+      }
+
+      if (_incomingCallDialogOpen || !mounted) return;
+      _incomingCallDialogOpen = true;
+
+      final action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          return AlertDialog(
+            title: Text(
+              isGroupOffer
+                  ? AppLanguage.tr(context, 'Příchozí skupinový hovor', 'Incoming group call')
+                  : AppLanguage.tr(context, 'Příchozí hovor', 'Incoming call'),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedBuilder(
+                  animation: _typingAnim,
+                  builder: (_, child) {
+                    final scale = 1.0 + (_typingAnim.value * 0.12);
+                    return Transform.scale(scale: scale, child: child);
+                  },
+                  child: const Icon(Icons.call, size: 42, color: Color(0xFF3FB950)),
+                ),
+                const SizedBox(height: 10),
+                Text('@$fromLogin'),
+                if (isGroupOffer && groupTitle.trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text('#$groupTitle', style: const TextStyle(color: Colors.white70)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop('message'),
+                child: Text(AppLanguage.tr(context, 'Napsat zprávu', 'Send message')),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop('decline'),
+                child: Text(AppLanguage.tr(context, 'Odmítnout', 'Decline')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop('accept'),
+                child: Text(AppLanguage.tr(context, 'Přijmout', 'Accept')),
+              ),
+            ],
+          );
+        },
+      );
+
+      _incomingCallDialogOpen = false;
+      if (!mounted) return;
+
+      if (action == 'accept') {
+        final ok = await _prepareDmWebRtc(isCaller: false);
+        if (!ok) {
+          await _sendCallResponse(
+            toUid: fromUid,
+            callId: callId,
+            payload: <String, dynamic>{
+              'type': 'dm_call_response',
+              'action': 'declined',
+              'callId': callId,
+            },
+          );
+          await rtdb().ref('callInvites/${current.uid}/$callId').remove();
+          return;
+        }
+
+        setState(() {
+          _activeCallId = callId;
+          _callPeerUid = fromUid;
+          _callPeerLogin = fromLogin;
+          _callConnected = false;
+          _callElapsedSeconds = 0;
+          _outgoingCallRinging = false;
+          _outgoingCallId = null;
+          if (isGroupOffer && groupId.trim().isNotEmpty) {
+            _outgoingGroupId = groupId;
+            _outgoingGroupTitle = groupTitle;
+          }
+        });
+
+        final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+        await _sendCallResponse(
+          toUid: fromUid,
+          callId: callId,
+          payload: <String, dynamic>{
+            'type': 'dm_call_response',
+            'action': 'accepted',
+            'callId': callId,
+            'mode': isGroupOffer ? 'group' : 'dm',
+            if (groupId.trim().isNotEmpty) 'groupId': groupId,
+            if (myLogin.isNotEmpty) 'fromLogin': myLogin,
+          },
+        );
+        if (myLogin.isNotEmpty) {
+          await _sendDmEncryptedSystemText(
+            myUid: current.uid,
+            myLogin: myLogin,
+            peerUid: fromUid,
+            peerLogin: fromLogin,
+            text: isGroupOffer
+                ? '📞 Přijal(a) jsi skupinový hovor${groupTitle.trim().isNotEmpty ? ' #$groupTitle' : ''}'
+                : '📞 Hovor přijat',
+          );
+        }
+      } else if (action == 'message') {
+        final ctrl = TextEditingController();
+        final msg = await showDialog<String>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(AppLanguage.tr(context, 'Rychlá zpráva', 'Quick message')),
+            content: TextField(
+              controller: ctrl,
+              autofocus: true,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: AppLanguage.tr(
+                  context,
+                  'Napiš krátkou odpověď',
+                  'Write a short response',
+                ),
+              ),
+              onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(''),
+                child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+                child: Text(AppLanguage.tr(context, 'Odeslat', 'Send')),
+              ),
+            ],
+          ),
+        );
+
+        final quick = (msg ?? '').trim();
+        if (quick.isNotEmpty) {
+          await _sendCallResponse(
+            toUid: fromUid,
+            callId: callId,
+            payload: <String, dynamic>{
+              'type': 'dm_call_response',
+              'action': 'message',
+              'callId': callId,
+              'message': quick,
+              'mode': isGroupOffer ? 'group' : 'dm',
+              if (groupId.trim().isNotEmpty) 'groupId': groupId,
+            },
+          );
+        }
+        final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+        if (myLogin.isNotEmpty) {
+          await _sendDmEncryptedSystemText(
+            myUid: current.uid,
+            myLogin: myLogin,
+            peerUid: fromUid,
+            peerLogin: fromLogin,
+            text: quick.isNotEmpty
+                ? (isGroupOffer
+                    ? '📞 Skupinový hovor odmítnut • $quick'
+                    : '📞 Hovor odmítnut • $quick')
+                : (isGroupOffer
+                    ? '📞 Skupinový hovor odmítnut'
+                    : '📞 Hovor odmítnut'),
+          );
+        }
+        await _sendCallResponse(
+          toUid: fromUid,
+          callId: callId,
+          payload: <String, dynamic>{
+            'type': 'dm_call_response',
+            'action': 'declined',
+            'callId': callId,
+            'mode': isGroupOffer ? 'group' : 'dm',
+            if (groupId.trim().isNotEmpty) 'groupId': groupId,
+          },
+        );
+      } else {
+        final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+        if (myLogin.isNotEmpty) {
+          await _sendDmEncryptedSystemText(
+            myUid: current.uid,
+            myLogin: myLogin,
+            peerUid: fromUid,
+            peerLogin: fromLogin,
+            text: isGroupOffer
+                ? '📞 Skupinový hovor odmítnut'
+                : '📞 Hovor odmítnut',
+          );
+        }
+        await _sendCallResponse(
+          toUid: fromUid,
+          callId: callId,
+          payload: <String, dynamic>{
+            'type': 'dm_call_response',
+            'action': 'declined',
+            'callId': callId,
+            'mode': isGroupOffer ? 'group' : 'dm',
+            if (groupId.trim().isNotEmpty) 'groupId': groupId,
+          },
+        );
+      }
+
+      try {
+        await rtdb().ref('callInvites/${current.uid}/$callId').remove();
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _listenCallResponses() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    _callResponseSub?.cancel();
+    _callResponseSub = rtdb()
+        .ref('callResponses/${current.uid}')
+        .onChildAdded
+        .listen((event) async {
+      final callId = event.snapshot.key?.toString() ?? '';
+      final raw = event.snapshot.value;
+      if (callId.isEmpty || raw is! Map) return;
+      final packet = Map<String, dynamic>.from(raw);
+      packet['__key'] = callId;
+      final fromUid = (packet['fromUid'] ?? '').toString();
+      if (fromUid.isEmpty) return;
+
+      String clear;
+      try {
+        clear = await E2ee.decryptFromUser(otherUid: fromUid, message: packet);
+      } catch (_) {
+        return;
+      }
+
+      Map<String, dynamic> payload;
+      try {
+        final decoded = jsonDecode(clear);
+        if (decoded is! Map) return;
+        payload = Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return;
+      }
+
+      if ((payload['type'] ?? '').toString() != 'dm_call_response') {
+        return;
+      }
+
+      final action = (payload['action'] ?? '').toString();
+      final respCallId = (payload['callId'] ?? callId).toString();
+      final mode = (payload['mode'] ?? 'dm').toString();
+      final fromLogin = (payload['fromLogin'] ?? '').toString();
+      final isGroupResp = mode == 'group';
+
+      if (action == 'webrtc_offer' ||
+          action == 'webrtc_answer' ||
+          action == 'webrtc_ice') {
+        await _handleDmWebRtcSignal(payload);
+        try {
+          await rtdb().ref('callResponses/${current.uid}/$callId').remove();
+        } catch (_) {}
+        return;
+      }
+
+      if (action == 'accepted' && _outgoingCallId == respCallId) {
+        _outgoingCallTimeout?.cancel();
+        _outgoingCallTimeout = null;
+        final peerLogin = _callPeerLogin;
+        final ok = await _prepareDmWebRtc(isCaller: true);
+        if (!ok) {
+          if (mounted) {
+            setState(() {
+              _outgoingCallRinging = false;
+              _outgoingCallId = null;
+            });
+          }
+        } else {
+          if (!mounted) return;
+          setState(() {
+            _outgoingCallRinging = false;
+            _callConnected = false;
+            _activeCallId = respCallId;
+            _callElapsedSeconds = 0;
+            _callPeerUid = fromUid;
+            if (peerLogin != null && peerLogin.trim().isNotEmpty) {
+              _callPeerLogin = peerLogin;
+            }
+          });
+          await _startDmOfferFlow();
+        }
+      } else if (action == 'accepted' &&
+          _outgoingGroupCallRinging &&
+          _outgoingGroupCallId == respCallId) {
+        _outgoingCallTimeout?.cancel();
+        _outgoingCallTimeout = null;
+        // First accepted participant wins the current media channel.
+        await _cancelOutgoingGroupInvites();
+        final ok = await _prepareDmWebRtc(isCaller: true);
+        if (!ok) {
+          if (mounted) {
+            setState(() {
+              _outgoingGroupCallRinging = false;
+              _outgoingGroupCallId = null;
+            });
+          }
+        } else {
+          if (!mounted) return;
+          setState(() {
+            _outgoingGroupCallRinging = false;
+            _callConnected = false;
+            _activeCallId = respCallId;
+            _callElapsedSeconds = 0;
+            _callPeerUid = fromUid;
+            if (fromLogin.trim().isNotEmpty) {
+              _callPeerLogin = fromLogin;
+            }
+          });
+          await _startDmOfferFlow();
+        }
+      } else if (action == 'declined' && _outgoingCallId == respCallId) {
+        _outgoingCallTimeout?.cancel();
+        _outgoingCallTimeout = null;
+        await _disposeDmWebRtc();
+        if (mounted) {
+          setState(() {
+            _outgoingCallRinging = false;
+            _outgoingCallId = null;
+          });
+        }
+      } else if (action == 'message' && _outgoingCallId == respCallId) {
+        final msg = (payload['message'] ?? '').toString().trim();
+        if (msg.isNotEmpty && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('📩 $msg')),
+          );
+        }
+      } else if (action == 'message' &&
+          isGroupResp &&
+          _outgoingGroupCallRinging &&
+          _outgoingGroupCallId == respCallId) {
+        final msg = (payload['message'] ?? '').toString().trim();
+        if (msg.isNotEmpty && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('📩 $msg')),
+          );
+        }
+      } else if (action == 'declined' &&
+          isGroupResp &&
+          _outgoingGroupCallRinging &&
+          _outgoingGroupCallId == respCallId) {
+        // Keep waiting for other participants until timeout.
+      } else if (action == 'ended' && _activeCallId == respCallId) {
+        await _disposeDmWebRtc();
+        _callElapsedTicker?.cancel();
+        _callElapsedTicker = null;
+        if (mounted) {
+          setState(() {
+            _callConnected = false;
+            _activeCallId = null;
+            _callElapsedSeconds = 0;
+            _callPeerUid = null;
+            _callPeerLogin = null;
+            _dmMicEnabled = true;
+            _dmSpeakerEnabled = true;
+            _dmIsCaller = false;
+            _dmReconnectAttempts = 0;
+          });
+        }
+      }
+
+      try {
+        await rtdb().ref('callResponses/${current.uid}/$callId').remove();
+      } catch (_) {}
     });
   }
 
@@ -13007,6 +14034,8 @@ class _ChatsTabState extends State<_ChatsTab>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prewarmDmDecryptAfterJoin();
       _prewarmGroupDecryptAfterJoin();
+      _listenIncomingCallInvites();
+      _listenCallResponses();
     });
     _ttlUiTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -13083,6 +14112,11 @@ class _ChatsTabState extends State<_ChatsTab>
     _groupScrollController.dispose();
     _groupMentionDebounce?.cancel();
     _ttlUiTicker?.cancel();
+    _incomingCallInviteSub?.cancel();
+    _callResponseSub?.cancel();
+    _outgoingCallTimeout?.cancel();
+    _callElapsedTicker?.cancel();
+    _disposeDmWebRtc();
     _flashMessageTimer?.cancel();
     _typingTimeout?.cancel();
     _setTyping(false);
@@ -13151,8 +14185,23 @@ class _ChatsTabState extends State<_ChatsTab>
   bool get hasActiveDm =>
       _activeLogin != null && _activeLogin!.trim().isNotEmpty;
 
+  bool get hasActiveDmCall {
+    if (!_callConnected) return false;
+    final login = _activeLogin?.trim().toLowerCase() ?? '';
+    final peer = _callPeerLogin?.trim().toLowerCase() ?? '';
+    return login.isNotEmpty && login == peer;
+  }
+
   bool get hasActiveGroup =>
       _activeGroupId != null && _activeGroupId!.trim().isNotEmpty;
+
+  bool get hasActiveGroupCall {
+    final gid = _activeGroupId?.trim() ?? '';
+    if (gid.isEmpty) return false;
+    if (_outgoingGroupCallRinging && _outgoingGroupId == gid) return true;
+    if (_callConnected && _outgoingGroupId == gid) return true;
+    return false;
+  }
 
   void _syncVerificationAlertBadge(bool value) {
     if (_chatsHasVerificationAlert.value != value) {
@@ -13240,6 +14289,40 @@ class _ChatsTabState extends State<_ChatsTab>
     await _showPeerFingerprintDialog(peerUid: peerUid, peerLogin: login);
   }
 
+  Future<void> openActiveDmCallAction() async {
+    final login = _activeLogin?.trim();
+    if (login == null || login.isEmpty) return;
+    if (_outgoingGroupCallRinging) return;
+
+    if (_callConnected && hasActiveDmCall) {
+      await _endActiveCall(sendRemoteEnd: true);
+      return;
+    }
+
+    if (_outgoingCallRinging &&
+        _callPeerLogin?.trim().toLowerCase() == login.toLowerCase()) {
+      final current = FirebaseAuth.instance.currentUser;
+      final peerUid = _callPeerUid;
+      final callId = _outgoingCallId;
+      if (current != null && peerUid != null && callId != null) {
+        try {
+          await rtdb().ref('callInvites/$peerUid/$callId').remove();
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() {
+          _outgoingCallRinging = false;
+          _outgoingCallId = null;
+        });
+      }
+      _outgoingCallTimeout?.cancel();
+      _outgoingCallTimeout = null;
+      return;
+    }
+
+    await _startEncryptedDmCall();
+  }
+
   Future<void> openActiveChatFind() async {
     if (!mounted) return;
     final groupId = _activeGroupId?.trim() ?? '';
@@ -13278,6 +14361,129 @@ class _ChatsTabState extends State<_ChatsTab>
       setState(() => _activeGroupId = null);
       _syncShellChatMeta();
     }
+  }
+
+  Future<void> _cancelOutgoingGroupInvites() async {
+    final current = FirebaseAuth.instance.currentUser;
+    final callId = _outgoingGroupCallId;
+    if (current != null && callId != null && callId.isNotEmpty) {
+      final futures = <Future<void>>[];
+      for (final uid in _outgoingGroupInviteUids) {
+        futures.add(
+          rtdb().ref('callInvites/$uid/$callId').remove().catchError((_) {}),
+        );
+      }
+      await Future.wait(futures);
+    }
+    _outgoingGroupInviteUids.clear();
+  }
+
+  Future<void> _startEncryptedGroupCallInvite() async {
+    final current = FirebaseAuth.instance.currentUser;
+    final groupId = _activeGroupId?.trim();
+    if (current == null || groupId == null || groupId.isEmpty) return;
+    if (_outgoingGroupCallRinging || _callConnected || _outgoingCallRinging) {
+      return;
+    }
+
+    final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+    if (myLogin.isEmpty) return;
+
+    final membersSnap = await rtdb().ref('groupMembers/$groupId').get();
+    final membersRaw = membersSnap.value;
+    if (membersRaw is! Map) return;
+
+    final groupSnap = await rtdb().ref('groups/$groupId').get();
+    final groupRaw = groupSnap.value;
+    final groupMap = (groupRaw is Map) ? groupRaw : null;
+    final groupTitle = (groupMap?['title'] ?? '#group').toString();
+
+    final peerUids = <String>[];
+    for (final e in membersRaw.entries) {
+      final uid = e.key.toString();
+      if (uid == current.uid) continue;
+      peerUids.add(uid);
+    }
+    if (peerUids.isEmpty) return;
+
+    final callId = rtdb().ref().push().key;
+    if (callId == null || callId.isEmpty) return;
+
+    var sent = 0;
+    for (final uid in peerUids) {
+      final payload = <String, dynamic>{
+        'type': 'group_call_offer',
+        'callId': callId,
+        'groupId': groupId,
+        'groupTitle': groupTitle,
+        'fromUid': current.uid,
+        'fromLogin': myLogin,
+        'createdAt': DateTime.now().millisecondsSinceEpoch,
+      };
+      try {
+        final encrypted = await E2ee.encryptForUser(
+          otherUid: uid,
+          plaintext: jsonEncode(payload),
+        );
+        await rtdb().ref('callInvites/$uid/$callId').set(<String, Object?>{
+          ...encrypted,
+          'fromUid': current.uid,
+          'fromLogin': myLogin,
+          'createdAt': ServerValue.timestamp,
+        });
+        _outgoingGroupInviteUids.add(uid);
+        sent++;
+      } catch (_) {
+        // continue with others
+      }
+    }
+
+    if (sent == 0) return;
+
+    if (!mounted) return;
+    setState(() {
+      _outgoingGroupCallRinging = true;
+      _outgoingGroupCallId = callId;
+      _outgoingGroupId = groupId;
+      _outgoingGroupTitle = groupTitle;
+    });
+
+    _outgoingCallTimeout?.cancel();
+    _outgoingCallTimeout = Timer(const Duration(seconds: 35), () async {
+      if (!mounted) return;
+      if (!_outgoingGroupCallRinging || _outgoingGroupCallId != callId) return;
+      await _cancelOutgoingGroupInvites();
+      if (!mounted) return;
+      setState(() {
+        _outgoingGroupCallRinging = false;
+        _outgoingGroupCallId = null;
+      });
+    });
+  }
+
+  Future<void> openActiveGroupCallAction() async {
+    final gid = _activeGroupId?.trim();
+    if (gid == null || gid.isEmpty) return;
+
+    if (_outgoingGroupCallRinging && _outgoingGroupId == gid) {
+      await _cancelOutgoingGroupInvites();
+      _outgoingCallTimeout?.cancel();
+      _outgoingCallTimeout = null;
+      if (mounted) {
+        setState(() {
+          _outgoingGroupCallRinging = false;
+          _outgoingGroupCallId = null;
+        });
+      }
+      return;
+    }
+
+    if (_callConnected && _outgoingGroupId == gid) {
+      await _endActiveCall(sendRemoteEnd: true);
+      return;
+    }
+
+    await _startEncryptedGroupCallInvite();
   }
 
   Future<String?> _lookupUidForLoginLower(String loginLower) async {
@@ -18204,6 +19410,121 @@ class _ChatsTabState extends State<_ChatsTab>
 
                   return Column(
                     children: [
+                      if (_outgoingGroupCallRinging && _outgoingGroupId == groupId)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF132A1C),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFF2EA043)),
+                            ),
+                            child: Row(
+                              children: [
+                                AnimatedBuilder(
+                                  animation: _typingAnim,
+                                  builder: (_, child) {
+                                    final scale = 1.0 + (_typingAnim.value * 0.12);
+                                    return Transform.scale(scale: scale, child: child);
+                                  },
+                                  child: const Icon(
+                                    Icons.groups,
+                                    color: Color(0xFF3FB950),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    (_outgoingGroupTitle ?? '').trim().isNotEmpty
+                                      ? '${AppLanguage.tr(context, 'Volám skupinu', 'Calling group')} ${_outgoingGroupTitle!.trim()}...'
+                                        : AppLanguage.tr(
+                                            context,
+                                            'Calling group... čeká na přijetí',
+                                            'Calling group... waiting for answer',
+                                          ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () => openActiveGroupCallAction(),
+                                  child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (_callConnected && _outgoingGroupId == groupId)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0E4429),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFF3FB950)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.call, color: Color(0xFF3FB950)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        AppLanguage.tr(
+                                          context,
+                                          'Skupinový hovor probíhá',
+                                          'Group call in progress',
+                                        ),
+                                        style: const TextStyle(fontWeight: FontWeight.w700),
+                                      ),
+                                      Text(_callDurationLabel(_callElapsedSeconds)),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: AppLanguage.tr(
+                                    context,
+                                    'Mikrofon',
+                                    'Microphone',
+                                  ),
+                                  onPressed: () => _toggleDmMic(),
+                                  icon: Icon(
+                                    _dmMicEnabled ? Icons.mic : Icons.mic_off,
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: AppLanguage.tr(
+                                    context,
+                                    'Reproduktor',
+                                    'Speaker',
+                                  ),
+                                  onPressed: () => _toggleDmSpeaker(),
+                                  icon: Icon(
+                                    _dmSpeakerEnabled
+                                        ? Icons.volume_up
+                                        : Icons.hearing_disabled,
+                                  ),
+                                ),
+                                FilledButton.tonalIcon(
+                                  onPressed: () => openActiveGroupCallAction(),
+                                  icon: const Icon(Icons.call_end),
+                                  label: Text(AppLanguage.tr(context, 'Ukončit', 'End')),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       if (_chatFindQuery.isNotEmpty)
                         Container(
                           width: double.infinity,
@@ -19190,6 +20511,121 @@ class _ChatsTabState extends State<_ChatsTab>
             return Column(
               children: [
                 const SizedBox(height: 4),
+                if (_outgoingCallRinging &&
+                    (_callPeerLogin ?? '').trim().toLowerCase() ==
+                        loginLower)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF132A1C),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF2EA043)),
+                      ),
+                      child: Row(
+                        children: [
+                          AnimatedBuilder(
+                            animation: _typingAnim,
+                            builder: (_, child) {
+                              final scale = 1.0 + (_typingAnim.value * 0.12);
+                              return Transform.scale(scale: scale, child: child);
+                            },
+                            child: const Icon(
+                              Icons.call,
+                              color: Color(0xFF3FB950),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              AppLanguage.tr(
+                                context,
+                                'Calling... čeká na přijetí',
+                                'Calling... waiting for answer',
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => openActiveDmCallAction(),
+                            child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (_callConnected && hasActiveDmCall)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0E4429),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3FB950)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.call, color: Color(0xFF3FB950)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  AppLanguage.tr(
+                                    context,
+                                    'Hovor probíhá',
+                                    'Call in progress',
+                                  ),
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                                Text(_callDurationLabel(_callElapsedSeconds)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: AppLanguage.tr(
+                              context,
+                              'Mikrofon',
+                              'Microphone',
+                            ),
+                            onPressed: () => _toggleDmMic(),
+                            icon: Icon(
+                              _dmMicEnabled ? Icons.mic : Icons.mic_off,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: AppLanguage.tr(
+                              context,
+                              'Reproduktor',
+                              'Speaker',
+                            ),
+                            onPressed: () => _toggleDmSpeaker(),
+                            icon: Icon(
+                              _dmSpeakerEnabled
+                                  ? Icons.volume_up
+                                  : Icons.hearing_disabled,
+                            ),
+                          ),
+                          FilledButton.tonalIcon(
+                            onPressed: () => openActiveDmCallAction(),
+                            icon: const Icon(Icons.call_end),
+                            label: Text(AppLanguage.tr(context, 'Ukončit', 'End')),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 // DM žádosti – zobrazené i během chatu
                 StreamBuilder<DatabaseEvent>(
                   stream: rtdb().ref('dmRequests/${current.uid}').onValue,

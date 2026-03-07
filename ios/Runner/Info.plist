@@ -58,6 +58,8 @@
 	<string>Camera access is needed to scan group invite QR codes.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photo access is needed to pick a group logo.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is needed for encrypted voice calls.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 </dict>
