@@ -12742,6 +12742,11 @@ class _ChatsTabState extends State<_ChatsTab>
     _dmPeerConnection = null;
     _dmHasRemoteDescription = false;
     _dmPendingIceCandidates.clear();
+    try {
+      await rtc.Helper.setSpeakerphoneOn(false);
+    } catch (_) {
+      // unsupported platform route toggle
+    }
     if (pc != null) {
       try {
         await pc.close();
@@ -12857,7 +12862,7 @@ class _ChatsTabState extends State<_ChatsTab>
       _callPeerUid = null;
       _callPeerLogin = null;
       _dmMicEnabled = true;
-      _dmSpeakerEnabled = true;
+      _dmSpeakerEnabled = false;
       _dmIsCaller = false;
       _dmReconnectAttempts = 0;
       if (!_outgoingGroupCallRinging) {
@@ -13469,7 +13474,7 @@ class _ChatsTabState extends State<_ChatsTab>
             _callPeerUid = null;
             _callPeerLogin = null;
             _dmMicEnabled = true;
-            _dmSpeakerEnabled = true;
+            _dmSpeakerEnabled = false;
             _dmIsCaller = false;
             _dmReconnectAttempts = 0;
           });
