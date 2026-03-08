@@ -4002,6 +4002,39 @@ class _DashboardPageState extends State<DashboardPage> {
                                 ),
                               ),
                             ),
+                            if (_index == 1) ...[
+                              const SizedBox(width: 8),
+                              IconButton(
+                                tooltip: AppLanguage.tr(
+                                  context,
+                                  'Notifikace',
+                                  'Notifications',
+                                ),
+                                onPressed: () => currentChatsState
+                                    ?.openOverviewNotificationsPanelFromShell(),
+                                icon: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    const Icon(
+                                      Icons.notifications_none_rounded,
+                                    ),
+                                    if (hasVerificationAlert)
+                                      Positioned(
+                                        right: -1,
+                                        top: -1,
+                                        child: Container(
+                                          width: 9,
+                                          height: 9,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.redAccent,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ],
                         );
                       },
@@ -15381,6 +15414,8 @@ class _ChatsTabState extends State<_ChatsTab>
 
   int _overviewMode = 0; // 0=priváty, 1=skupiny, 2=složky
   String? _activeFolderId; // when _overviewMode==2
+  bool _showLegacyInlineNotifications = false;
+  bool _showListNotificationLauncher = false;
   double _overviewSwipeDx = 0;
   double _overviewSwipeDy = 0;
 
@@ -16239,6 +16274,58 @@ class _ChatsTabState extends State<_ChatsTab>
       });
       _syncShellChatMeta();
     }
+  }
+
+  Future<void> openOverviewNotificationsPanelFromShell() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null || !mounted) return;
+
+    final userSnap = await rtdb().ref('users/${current.uid}').get();
+    final uval = userSnap.value;
+    final umap = (uval is Map) ? uval : null;
+    final myGithub = (umap?['githubUsername'] ?? '').toString();
+    final isModerator = _isModeratorFromUserMap(umap);
+
+    final myReqSnap = await _verifiedRequestRef(current.uid).get();
+    final rv = myReqSnap.value;
+    final myReq = (rv is Map) ? rv : null;
+    final myStatus = myReq?['status']?.toString();
+    final hasNew = myReq?['hasNewModeratorMessage'] == true;
+
+    final pendingReqs = <Map<String, dynamic>>[];
+    if (isModerator) {
+      final allReqSnap = await rtdb().ref('verifiedRequests').get();
+      final allVal = allReqSnap.value;
+      final allMap = (allVal is Map) ? allVal : null;
+      if (allMap != null) {
+        for (final entry in allMap.entries) {
+          final uid = entry.key.toString();
+          final v = entry.value;
+          if (v is! Map) continue;
+          final m = Map<String, dynamic>.from(v);
+          if ((m['status'] ?? '').toString() == 'pending') {
+            m['uid'] = uid;
+            pendingReqs.add(m);
+          }
+        }
+        pendingReqs.sort((a, b) {
+          final at = (a['createdAt'] is int) ? a['createdAt'] as int : 0;
+          final bt = (b['createdAt'] is int) ? b['createdAt'] as int : 0;
+          return bt.compareTo(at);
+        });
+      }
+    }
+
+    await _openOverviewNotificationsPanel(
+      context: context,
+      myUid: current.uid,
+      myGithub: myGithub,
+      isModerator: isModerator,
+      myStatus: myStatus,
+      hasNew: hasNew,
+      myVerifyReqRef: _verifiedRequestRef(current.uid),
+      pendingReqs: pendingReqs,
+    );
   }
 
   Future<void> openActiveDmFingerprint() async {
@@ -18693,6 +18780,286 @@ class _ChatsTabState extends State<_ChatsTab>
     }
   }
 
+  int _countPendingItems(Object? value) {
+    if (value is Map) return value.length;
+    return 0;
+  }
+
+  Future<void> _openOverviewNotificationsPanel({
+    required BuildContext context,
+    required String myUid,
+    required String myGithub,
+    required bool isModerator,
+    required String? myStatus,
+    required bool hasNew,
+    required DatabaseReference myVerifyReqRef,
+    required List<Map<String, dynamic>> pendingReqs,
+  }) async {
+    final invitesRef = rtdb().ref('groupInvites/$myUid');
+    final dmReqRef = rtdb().ref('dmRequests/$myUid');
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        final t = AppLanguage.tr;
+        return SafeArea(
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                sheetCtx,
+              ).colorScheme.surface.withValues(alpha: 0.94),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: Theme.of(sheetCtx).colorScheme.outlineVariant,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.notifications_active_outlined,
+                        color: Theme.of(sheetCtx).colorScheme.secondary,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          t(sheetCtx, 'Notifikace', 'Notifications'),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(sheetCtx).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      if (myStatus != null)
+                        ListTile(
+                          leading: const Icon(Icons.verified_user),
+                          title: Text(
+                            t(sheetCtx, 'Ověření účtu', 'Account verification'),
+                          ),
+                          subtitle: Text(_statusText(sheetCtx, myStatus)),
+                          trailing: hasNew
+                              ? const Icon(
+                                  Icons.circle,
+                                  size: 10,
+                                  color: Colors.redAccent,
+                                )
+                              : null,
+                          onTap: () async {
+                            setState(() {
+                              _activeVerifiedUid = myUid;
+                              _activeVerifiedGithub = myGithub;
+                            });
+                            await myVerifyReqRef.update({
+                              'hasNewModeratorMessage': false,
+                            });
+                            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                          },
+                        ),
+                      StreamBuilder<DatabaseEvent>(
+                        stream: invitesRef.onValue,
+                        builder: (context, invSnap) {
+                          final iv = invSnap.data?.snapshot.value;
+                          final imap = (iv is Map) ? iv : null;
+                          final invites = <Map<String, dynamic>>[];
+                          if (imap != null) {
+                            for (final e in imap.entries) {
+                              if (e.value is! Map) continue;
+                              final m = Map<String, dynamic>.from(
+                                e.value as Map,
+                              );
+                              m['__key'] = e.key.toString();
+                              invites.add(m);
+                            }
+                          }
+                          if (invites.isEmpty) return const SizedBox.shrink();
+                          return Column(
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.group_add),
+                                title: Text(
+                                  t(
+                                    sheetCtx,
+                                    'Pozvánky do skupin',
+                                    'Group invites',
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${t(sheetCtx, 'Čeká', 'Pending')}: ${invites.length}',
+                                ),
+                              ),
+                              ...invites.map((inv) {
+                                final key = (inv['__key'] ?? '').toString();
+                                final groupId = (inv['groupId'] ?? '')
+                                    .toString();
+                                final groupTitle =
+                                    (inv['groupTitle'] ??
+                                            t(sheetCtx, 'Skupina', 'Group'))
+                                        .toString();
+                                return ListTile(
+                                  title: Text(groupTitle),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.close),
+                                        onPressed: () =>
+                                            invitesRef.child(key).remove(),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.check),
+                                        onPressed: () async {
+                                          if (groupId.isEmpty) return;
+                                          await rtdb()
+                                              .ref(
+                                                'groupMembers/$groupId/$myUid',
+                                              )
+                                              .set({
+                                                'role': 'member',
+                                                'joinedAt':
+                                                    ServerValue.timestamp,
+                                                'joinedVia': 'invite',
+                                              });
+                                          await rtdb()
+                                              .ref('userGroups/$myUid/$groupId')
+                                              .set(true);
+                                          await invitesRef.child(key).remove();
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          );
+                        },
+                      ),
+                      StreamBuilder<DatabaseEvent>(
+                        stream: dmReqRef.onValue,
+                        builder: (context, reqSnap) {
+                          final v = reqSnap.data?.snapshot.value;
+                          final m = (v is Map) ? v : null;
+                          final items = <Map<String, dynamic>>[];
+                          if (m != null) {
+                            for (final e in m.entries) {
+                              if (e.value is! Map) continue;
+                              final mm = Map<String, dynamic>.from(
+                                e.value as Map,
+                              );
+                              mm['__key'] = e.key.toString();
+                              items.add(mm);
+                            }
+                          }
+                          if (items.isEmpty) return const SizedBox.shrink();
+                          return Column(
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.mail_lock_outlined),
+                                title: Text(
+                                  t(
+                                    sheetCtx,
+                                    'Žádosti o chat',
+                                    'Chat requests',
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${t(sheetCtx, 'Čeká', 'Pending')}: ${items.length}',
+                                ),
+                              ),
+                              ...items.map((req) {
+                                final fromLogin = (req['fromLogin'] ?? '')
+                                    .toString();
+                                return ListTile(
+                                  title: Text('@$fromLogin'),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.close),
+                                        onPressed: () => _rejectDmRequest(
+                                          myUid: myUid,
+                                          otherLogin: fromLogin,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.check),
+                                        onPressed: () => _acceptDmRequest(
+                                          myUid: myUid,
+                                          otherLogin: fromLogin,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          );
+                        },
+                      ),
+                      if (isModerator && pendingReqs.isNotEmpty)
+                        Column(
+                          children: [
+                            ListTile(
+                              leading: const Icon(
+                                Icons.admin_panel_settings_outlined,
+                              ),
+                              title: Text(
+                                t(
+                                  sheetCtx,
+                                  'Žádosti o ověření',
+                                  'Verification requests',
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${t(sheetCtx, 'Čeká', 'Pending')}: ${pendingReqs.length}',
+                              ),
+                            ),
+                            ...pendingReqs.map((r) {
+                              final uid = (r['uid'] ?? '').toString();
+                              final gh = (r['githubUsername'] ?? '').toString();
+                              return ListTile(
+                                title: Text('@$gh'),
+                                onTap: () {
+                                  setState(() {
+                                    _activeVerifiedUid = uid;
+                                    _activeVerifiedGithub = gh;
+                                    _moderatorAnonymous = true;
+                                  });
+                                  Navigator.of(sheetCtx).pop();
+                                },
+                              );
+                            }),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     _syncShellChatMeta();
@@ -18970,371 +19337,598 @@ class _ChatsTabState extends State<_ChatsTab>
                                       physics:
                                           const AlwaysScrollableScrollPhysics(),
                                       children: [
-                                        if (myStatus != null) ...[
-                                          ListTile(
-                                            leading: const Icon(
-                                              Icons.verified_user,
-                                            ),
-                                            title: Text(
-                                              AppLanguage.tr(
-                                                context,
-                                                'Ověření účtu',
-                                                'Account verification',
-                                              ),
-                                            ),
-                                            subtitle: Text(
-                                              _statusText(context, myStatus),
-                                            ),
-                                            trailing: hasNew
-                                                ? const Icon(
-                                                    Icons.circle,
-                                                    size: 10,
-                                                    color: Colors.redAccent,
-                                                  )
-                                                : null,
-                                            onTap: () async {
-                                              setState(() {
-                                                _activeVerifiedUid =
-                                                    current.uid;
-                                                _activeVerifiedGithub =
-                                                    myGithub;
-                                              });
-                                              await myVerifyReqRef.update({
-                                                'hasNewModeratorMessage': false,
-                                              });
+                                        if (_showListNotificationLauncher)
+                                          StreamBuilder<DatabaseEvent>(
+                                            stream: invitesRef.onValue,
+                                            builder: (context, invCountSnap) {
+                                              final invitesCount =
+                                                  _countPendingItems(
+                                                    invCountSnap
+                                                        .data
+                                                        ?.snapshot
+                                                        .value,
+                                                  );
+                                              return StreamBuilder<
+                                                DatabaseEvent
+                                              >(
+                                                stream: rtdb()
+                                                    .ref(
+                                                      'groupAdminInbox/${current.uid}',
+                                                    )
+                                                    .onValue,
+                                                builder: (context, adminCountSnap) {
+                                                  final adminCount =
+                                                      _countPendingItems(
+                                                        adminCountSnap
+                                                            .data
+                                                            ?.snapshot
+                                                            .value,
+                                                      );
+                                                  return StreamBuilder<
+                                                    DatabaseEvent
+                                                  >(
+                                                    stream: rtdb()
+                                                        .ref(
+                                                          'dmRequests/${current.uid}',
+                                                        )
+                                                        .onValue,
+                                                    builder: (context, dmCountSnap) {
+                                                      final dmCount =
+                                                          _countPendingItems(
+                                                            dmCountSnap
+                                                                .data
+                                                                ?.snapshot
+                                                                .value,
+                                                          );
+                                                      final verificationCount =
+                                                          (hasNew &&
+                                                              myStatus != null)
+                                                          ? 1
+                                                          : 0;
+                                                      final modVerificationCount =
+                                                          isModerator
+                                                          ? pendingReqs.length
+                                                          : 0;
+                                                      final totalCount =
+                                                          invitesCount +
+                                                          adminCount +
+                                                          dmCount +
+                                                          verificationCount +
+                                                          modVerificationCount;
+                                                      return Padding(
+                                                        padding:
+                                                            const EdgeInsets.fromLTRB(
+                                                              16,
+                                                              8,
+                                                              16,
+                                                              6,
+                                                            ),
+                                                        child: Row(
+                                                          children: [
+                                                            const Spacer(),
+                                                            FilledButton.tonalIcon(
+                                                              onPressed: () => _openOverviewNotificationsPanel(
+                                                                context:
+                                                                    context,
+                                                                myUid:
+                                                                    current.uid,
+                                                                myGithub:
+                                                                    myGithub,
+                                                                isModerator:
+                                                                    isModerator,
+                                                                myStatus:
+                                                                    myStatus,
+                                                                hasNew: hasNew,
+                                                                myVerifyReqRef:
+                                                                    myVerifyReqRef,
+                                                                pendingReqs:
+                                                                    pendingReqs,
+                                                              ),
+                                                              icon: Stack(
+                                                                clipBehavior:
+                                                                    Clip.none,
+                                                                children: [
+                                                                  const Icon(
+                                                                    Icons
+                                                                        .notifications_none_rounded,
+                                                                  ),
+                                                                  if (totalCount >
+                                                                      0)
+                                                                    Positioned(
+                                                                      right: -8,
+                                                                      top: -8,
+                                                                      child: Container(
+                                                                        padding: const EdgeInsets.symmetric(
+                                                                          horizontal:
+                                                                              6,
+                                                                          vertical:
+                                                                              1,
+                                                                        ),
+                                                                        decoration: BoxDecoration(
+                                                                          color:
+                                                                              Colors.redAccent,
+                                                                          borderRadius: BorderRadius.circular(
+                                                                            999,
+                                                                          ),
+                                                                        ),
+                                                                        child: Text(
+                                                                          totalCount >
+                                                                                  99
+                                                                              ? '99+'
+                                                                              : '$totalCount',
+                                                                          style: const TextStyle(
+                                                                            color:
+                                                                                Colors.white,
+                                                                            fontSize:
+                                                                                11,
+                                                                            fontWeight:
+                                                                                FontWeight.w700,
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                ],
+                                                              ),
+                                                              label: Text(
+                                                                AppLanguage.tr(
+                                                                  context,
+                                                                  'Notifikace',
+                                                                  'Notifications',
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      );
+                                                    },
+                                                  );
+                                                },
+                                              );
                                             },
                                           ),
-                                          const Divider(height: 1),
-                                        ],
-
-                                        // Pozvánky do skupin (pod ověřením účtu)
-                                        StreamBuilder<DatabaseEvent>(
-                                          stream: invitesRef.onValue,
-                                          builder: (context, invSnap) {
-                                            final iv =
-                                                invSnap.data?.snapshot.value;
-                                            final imap = (iv is Map)
-                                                ? iv
-                                                : null;
-                                            final invites =
-                                                <Map<String, dynamic>>[];
-                                            if (imap != null) {
-                                              for (final e in imap.entries) {
-                                                if (e.value is! Map) continue;
-                                                final m =
-                                                    Map<String, dynamic>.from(
-                                                      e.value as Map,
-                                                    );
-                                                m['__key'] = e.key.toString();
-                                                invites.add(m);
-                                              }
-                                              invites.sort((a, b) {
-                                                final at =
-                                                    (a['createdAt'] is int)
-                                                    ? a['createdAt'] as int
-                                                    : 0;
-                                                final bt =
-                                                    (b['createdAt'] is int)
-                                                    ? b['createdAt'] as int
-                                                    : 0;
-                                                return bt.compareTo(at);
-                                              });
-                                            }
-
-                                            Future<void> acceptInvite(
-                                              String key,
-                                              Map<String, dynamic> inv,
-                                            ) async {
-                                              final groupId =
-                                                  (inv['groupId'] ?? '')
-                                                      .toString();
-                                              if (groupId.isEmpty) return;
-                                              await rtdb()
-                                                  .ref(
-                                                    'groupMembers/$groupId/${current.uid}',
-                                                  )
-                                                  .set({
-                                                    'role': 'member',
-                                                    'joinedAt':
-                                                        ServerValue.timestamp,
-                                                    'joinedVia': 'invite',
-                                                  });
-                                              await rtdb()
-                                                  .ref(
-                                                    'userGroups/${current.uid}/$groupId',
-                                                  )
-                                                  .set(true);
-                                              await invitesRef
-                                                  .child(key)
-                                                  .remove();
-                                            }
-
-                                            Future<void> declineInvite(
-                                              String key,
-                                            ) async {
-                                              await invitesRef
-                                                  .child(key)
-                                                  .remove();
-                                            }
-
-                                            Future<void> acceptAll() async {
-                                              for (final inv in invites) {
-                                                final key = (inv['__key'] ?? '')
-                                                    .toString();
-                                                if (key.isEmpty) continue;
-                                                await acceptInvite(key, inv);
-                                              }
-                                            }
-
-                                            Future<void> declineAll() async {
-                                              for (final inv in invites) {
-                                                final key = (inv['__key'] ?? '')
-                                                    .toString();
-                                                if (key.isEmpty) continue;
-                                                await declineInvite(key);
-                                              }
-                                            }
-
-                                            if (invites.isEmpty)
-                                              return const SizedBox.shrink();
-
-                                            return Column(
-                                              children: [
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.group_add,
-                                                  ),
-                                                  title: Text(
-                                                    AppLanguage.tr(
-                                                      context,
-                                                      'Pozvánky do skupin',
-                                                      'Group invites',
-                                                    ),
-                                                  ),
-                                                  subtitle: Text(
-                                                    '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${invites.length}',
-                                                  ),
+                                        if (_showLegacyInlineNotifications) ...[
+                                          if (myStatus != null) ...[
+                                            ListTile(
+                                              leading: const Icon(
+                                                Icons.verified_user,
+                                              ),
+                                              title: Text(
+                                                AppLanguage.tr(
+                                                  context,
+                                                  'Ověření účtu',
+                                                  'Account verification',
                                                 ),
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                        16,
-                                                        0,
-                                                        16,
-                                                        8,
-                                                      ),
-                                                  child: Row(
-                                                    children: [
-                                                      Expanded(
-                                                        child: OutlinedButton(
-                                                          onPressed: acceptAll,
-                                                          child: Text(
-                                                            AppLanguage.tr(
-                                                              context,
-                                                              'Přijmout všechny',
-                                                              'Accept all',
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 12),
-                                                      Expanded(
-                                                        child: OutlinedButton(
-                                                          onPressed: declineAll,
-                                                          child: Text(
-                                                            AppLanguage.tr(
-                                                              context,
-                                                              'Odmítnout všechny',
-                                                              'Decline all',
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                                ...invites.map((inv) {
-                                                  final key =
-                                                      (inv['__key'] ?? '')
-                                                          .toString();
-                                                  final groupTitle =
-                                                      (inv['groupTitle'] ??
-                                                              AppLanguage.tr(
-                                                                context,
-                                                                'Skupina',
-                                                                'Group',
-                                                              ))
-                                                          .toString();
-                                                  final groupId =
-                                                      (inv['groupId'] ?? '')
-                                                          .toString();
-                                                  final invitedBy =
-                                                      (inv['invitedByGithub'] ??
-                                                              '')
-                                                          .toString();
-                                                  final groupLogo =
-                                                      (inv['groupLogoUrl'] ??
-                                                              '')
-                                                          .toString();
-                                                  final groupLogoEmoji =
-                                                      (inv['groupLogoEmoji'] ??
-                                                              '')
-                                                          .toString()
-                                                          .trim();
-                                                  return ListTile(
-                                                    leading: CircleAvatar(
-                                                      radius: 18,
-                                                      backgroundImage:
-                                                          groupLogo.isNotEmpty
-                                                          ? NetworkImage(
-                                                              groupLogo,
-                                                            )
-                                                          : null,
-                                                      child: groupLogo.isEmpty
-                                                          ? (groupLogoEmoji
-                                                                    .isNotEmpty
-                                                                ? Text(
-                                                                    groupLogoEmoji,
-                                                                  )
-                                                                : const Icon(
-                                                                    Icons.group,
-                                                                  ))
-                                                          : null,
-                                                    ),
-                                                    title: Text(groupTitle),
-                                                    subtitle:
-                                                        invitedBy.isNotEmpty
-                                                        ? Text(
-                                                            '${AppLanguage.tr(context, 'Pozval', 'Invited by')}: @$invitedBy',
-                                                          )
-                                                        : (groupId.isNotEmpty
-                                                              ? Text(groupId)
-                                                              : null),
-                                                    trailing: Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        IconButton(
-                                                          icon: const Icon(
-                                                            Icons.close,
-                                                          ),
-                                                          onPressed: () =>
-                                                              declineInvite(
-                                                                key,
-                                                              ),
-                                                        ),
-                                                        IconButton(
-                                                          icon: const Icon(
-                                                            Icons.check,
-                                                          ),
-                                                          onPressed: () =>
-                                                              acceptInvite(
-                                                                key,
-                                                                inv,
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                }),
-                                                const Divider(height: 1),
-                                              ],
-                                            );
-                                          },
-                                        ),
+                                              ),
+                                              subtitle: Text(
+                                                _statusText(context, myStatus),
+                                              ),
+                                              trailing: hasNew
+                                                  ? const Icon(
+                                                      Icons.circle,
+                                                      size: 10,
+                                                      color: Colors.redAccent,
+                                                    )
+                                                  : null,
+                                              onTap: () async {
+                                                setState(() {
+                                                  _activeVerifiedUid =
+                                                      current.uid;
+                                                  _activeVerifiedGithub =
+                                                      myGithub;
+                                                });
+                                                await myVerifyReqRef.update({
+                                                  'hasNewModeratorMessage':
+                                                      false,
+                                                });
+                                              },
+                                            ),
+                                            const Divider(height: 1),
+                                          ],
 
-                                        // Inbox pro adminy skupin: žádosti od členů na přidání lidí
-                                        StreamBuilder<DatabaseEvent>(
-                                          stream: rtdb()
-                                              .ref(
-                                                'groupAdminInbox/${current.uid}',
-                                              )
-                                              .onValue,
-                                          builder: (context, inboxSnap) {
-                                            final iv =
-                                                inboxSnap.data?.snapshot.value;
-                                            final im = (iv is Map) ? iv : null;
-                                            final items =
-                                                <Map<String, dynamic>>[];
-                                            if (im != null) {
-                                              for (final e in im.entries) {
-                                                if (e.value is! Map) continue;
-                                                final m =
-                                                    Map<String, dynamic>.from(
-                                                      e.value as Map,
-                                                    );
-                                                m['__key'] = e.key.toString();
-                                                items.add(m);
-                                              }
-                                              items.sort((a, b) {
-                                                final at =
-                                                    (a['createdAt'] is int)
-                                                    ? a['createdAt'] as int
-                                                    : 0;
-                                                final bt =
-                                                    (b['createdAt'] is int)
-                                                    ? b['createdAt'] as int
-                                                    : 0;
-                                                return bt.compareTo(at);
-                                              });
-                                            }
-
-                                            Future<void> _cleanupAllAdmins({
-                                              required String groupId,
-                                              required String targetLower,
-                                            }) async {
-                                              final membersSnap = await rtdb()
-                                                  .ref('groupMembers/$groupId')
-                                                  .get();
-                                              final mv = membersSnap.value;
-                                              final m = (mv is Map) ? mv : null;
-                                              if (m != null) {
-                                                for (final e in m.entries) {
+                                          // Pozvánky do skupin (pod ověřením účtu)
+                                          StreamBuilder<DatabaseEvent>(
+                                            stream: invitesRef.onValue,
+                                            builder: (context, invSnap) {
+                                              final iv =
+                                                  invSnap.data?.snapshot.value;
+                                              final imap = (iv is Map)
+                                                  ? iv
+                                                  : null;
+                                              final invites =
+                                                  <Map<String, dynamic>>[];
+                                              if (imap != null) {
+                                                for (final e in imap.entries) {
                                                   if (e.value is! Map) continue;
-                                                  final mm =
+                                                  final m =
                                                       Map<String, dynamic>.from(
                                                         e.value as Map,
                                                       );
-                                                  final role =
-                                                      (mm['role'] ?? 'member')
+                                                  m['__key'] = e.key.toString();
+                                                  invites.add(m);
+                                                }
+                                                invites.sort((a, b) {
+                                                  final at =
+                                                      (a['createdAt'] is int)
+                                                      ? a['createdAt'] as int
+                                                      : 0;
+                                                  final bt =
+                                                      (b['createdAt'] is int)
+                                                      ? b['createdAt'] as int
+                                                      : 0;
+                                                  return bt.compareTo(at);
+                                                });
+                                              }
+
+                                              Future<void> acceptInvite(
+                                                String key,
+                                                Map<String, dynamic> inv,
+                                              ) async {
+                                                final groupId =
+                                                    (inv['groupId'] ?? '')
+                                                        .toString();
+                                                if (groupId.isEmpty) return;
+                                                await rtdb()
+                                                    .ref(
+                                                      'groupMembers/$groupId/${current.uid}',
+                                                    )
+                                                    .set({
+                                                      'role': 'member',
+                                                      'joinedAt':
+                                                          ServerValue.timestamp,
+                                                      'joinedVia': 'invite',
+                                                    });
+                                                await rtdb()
+                                                    .ref(
+                                                      'userGroups/${current.uid}/$groupId',
+                                                    )
+                                                    .set(true);
+                                                await invitesRef
+                                                    .child(key)
+                                                    .remove();
+                                              }
+
+                                              Future<void> declineInvite(
+                                                String key,
+                                              ) async {
+                                                await invitesRef
+                                                    .child(key)
+                                                    .remove();
+                                              }
+
+                                              Future<void> acceptAll() async {
+                                                for (final inv in invites) {
+                                                  final key =
+                                                      (inv['__key'] ?? '')
                                                           .toString();
-                                                  if (role != 'admin') continue;
-                                                  final adminUid = e.key
-                                                      .toString();
-                                                  await rtdb()
-                                                      .ref(
-                                                        'groupAdminInbox/$adminUid/${groupId}~$targetLower',
-                                                      )
-                                                      .remove();
+                                                  if (key.isEmpty) continue;
+                                                  await acceptInvite(key, inv);
                                                 }
                                               }
-                                            }
 
-                                            Future<void> _approve(
-                                              Map<String, dynamic> item,
-                                            ) async {
-                                              final key = (item['__key'] ?? '')
-                                                  .toString();
-                                              final groupId =
-                                                  (item['groupId'] ?? '')
-                                                      .toString();
-                                              final targetLower =
-                                                  (item['targetLower'] ?? '')
-                                                      .toString();
-                                              final targetLogin =
-                                                  (item['targetLogin'] ?? '')
-                                                      .toString();
-                                              if (groupId.isEmpty ||
-                                                  targetLower.isEmpty)
-                                                return;
+                                              Future<void> declineAll() async {
+                                                for (final inv in invites) {
+                                                  final key =
+                                                      (inv['__key'] ?? '')
+                                                          .toString();
+                                                  if (key.isEmpty) continue;
+                                                  await declineInvite(key);
+                                                }
+                                              }
 
-                                              final uidSnap = await rtdb()
-                                                  .ref('usernames/$targetLower')
-                                                  .get();
-                                              final targetUid = uidSnap.value
-                                                  ?.toString();
-                                              if (targetUid == null ||
-                                                  targetUid.isEmpty) {
+                                              if (invites.isEmpty)
+                                                return const SizedBox.shrink();
+
+                                              return Column(
+                                                children: [
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.group_add,
+                                                    ),
+                                                    title: Text(
+                                                      AppLanguage.tr(
+                                                        context,
+                                                        'Pozvánky do skupin',
+                                                        'Group invites',
+                                                      ),
+                                                    ),
+                                                    subtitle: Text(
+                                                      '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${invites.length}',
+                                                    ),
+                                                  ),
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.fromLTRB(
+                                                          16,
+                                                          0,
+                                                          16,
+                                                          8,
+                                                        ),
+                                                    child: Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child: OutlinedButton(
+                                                            onPressed:
+                                                                acceptAll,
+                                                            child: Text(
+                                                              AppLanguage.tr(
+                                                                context,
+                                                                'Přijmout všechny',
+                                                                'Accept all',
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 12,
+                                                        ),
+                                                        Expanded(
+                                                          child: OutlinedButton(
+                                                            onPressed:
+                                                                declineAll,
+                                                            child: Text(
+                                                              AppLanguage.tr(
+                                                                context,
+                                                                'Odmítnout všechny',
+                                                                'Decline all',
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  ...invites.map((inv) {
+                                                    final key =
+                                                        (inv['__key'] ?? '')
+                                                            .toString();
+                                                    final groupTitle =
+                                                        (inv['groupTitle'] ??
+                                                                AppLanguage.tr(
+                                                                  context,
+                                                                  'Skupina',
+                                                                  'Group',
+                                                                ))
+                                                            .toString();
+                                                    final groupId =
+                                                        (inv['groupId'] ?? '')
+                                                            .toString();
+                                                    final invitedBy =
+                                                        (inv['invitedByGithub'] ??
+                                                                '')
+                                                            .toString();
+                                                    final groupLogo =
+                                                        (inv['groupLogoUrl'] ??
+                                                                '')
+                                                            .toString();
+                                                    final groupLogoEmoji =
+                                                        (inv['groupLogoEmoji'] ??
+                                                                '')
+                                                            .toString()
+                                                            .trim();
+                                                    return ListTile(
+                                                      leading: CircleAvatar(
+                                                        radius: 18,
+                                                        backgroundImage:
+                                                            groupLogo.isNotEmpty
+                                                            ? NetworkImage(
+                                                                groupLogo,
+                                                              )
+                                                            : null,
+                                                        child: groupLogo.isEmpty
+                                                            ? (groupLogoEmoji
+                                                                      .isNotEmpty
+                                                                  ? Text(
+                                                                      groupLogoEmoji,
+                                                                    )
+                                                                  : const Icon(
+                                                                      Icons
+                                                                          .group,
+                                                                    ))
+                                                            : null,
+                                                      ),
+                                                      title: Text(groupTitle),
+                                                      subtitle:
+                                                          invitedBy.isNotEmpty
+                                                          ? Text(
+                                                              '${AppLanguage.tr(context, 'Pozval', 'Invited by')}: @$invitedBy',
+                                                            )
+                                                          : (groupId.isNotEmpty
+                                                                ? Text(groupId)
+                                                                : null),
+                                                      trailing: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          IconButton(
+                                                            icon: const Icon(
+                                                              Icons.close,
+                                                            ),
+                                                            onPressed: () =>
+                                                                declineInvite(
+                                                                  key,
+                                                                ),
+                                                          ),
+                                                          IconButton(
+                                                            icon: const Icon(
+                                                              Icons.check,
+                                                            ),
+                                                            onPressed: () =>
+                                                                acceptInvite(
+                                                                  key,
+                                                                  inv,
+                                                                ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }),
+                                                  const Divider(height: 1),
+                                                ],
+                                              );
+                                            },
+                                          ),
+
+                                          // Inbox pro adminy skupin: žádosti od členů na přidání lidí
+                                          StreamBuilder<DatabaseEvent>(
+                                            stream: rtdb()
+                                                .ref(
+                                                  'groupAdminInbox/${current.uid}',
+                                                )
+                                                .onValue,
+                                            builder: (context, inboxSnap) {
+                                              final iv = inboxSnap
+                                                  .data
+                                                  ?.snapshot
+                                                  .value;
+                                              final im = (iv is Map)
+                                                  ? iv
+                                                  : null;
+                                              final items =
+                                                  <Map<String, dynamic>>[];
+                                              if (im != null) {
+                                                for (final e in im.entries) {
+                                                  if (e.value is! Map) continue;
+                                                  final m =
+                                                      Map<String, dynamic>.from(
+                                                        e.value as Map,
+                                                      );
+                                                  m['__key'] = e.key.toString();
+                                                  items.add(m);
+                                                }
+                                                items.sort((a, b) {
+                                                  final at =
+                                                      (a['createdAt'] is int)
+                                                      ? a['createdAt'] as int
+                                                      : 0;
+                                                  final bt =
+                                                      (b['createdAt'] is int)
+                                                      ? b['createdAt'] as int
+                                                      : 0;
+                                                  return bt.compareTo(at);
+                                                });
+                                              }
+
+                                              Future<void> _cleanupAllAdmins({
+                                                required String groupId,
+                                                required String targetLower,
+                                              }) async {
+                                                final membersSnap = await rtdb()
+                                                    .ref(
+                                                      'groupMembers/$groupId',
+                                                    )
+                                                    .get();
+                                                final mv = membersSnap.value;
+                                                final m = (mv is Map)
+                                                    ? mv
+                                                    : null;
+                                                if (m != null) {
+                                                  for (final e in m.entries) {
+                                                    if (e.value is! Map)
+                                                      continue;
+                                                    final mm =
+                                                        Map<
+                                                          String,
+                                                          dynamic
+                                                        >.from(e.value as Map);
+                                                    final role =
+                                                        (mm['role'] ?? 'member')
+                                                            .toString();
+                                                    if (role != 'admin')
+                                                      continue;
+                                                    final adminUid = e.key
+                                                        .toString();
+                                                    await rtdb()
+                                                        .ref(
+                                                          'groupAdminInbox/$adminUid/${groupId}~$targetLower',
+                                                        )
+                                                        .remove();
+                                                  }
+                                                }
+                                              }
+
+                                              Future<void> _approve(
+                                                Map<String, dynamic> item,
+                                              ) async {
+                                                final key =
+                                                    (item['__key'] ?? '')
+                                                        .toString();
+                                                final groupId =
+                                                    (item['groupId'] ?? '')
+                                                        .toString();
+                                                final targetLower =
+                                                    (item['targetLower'] ?? '')
+                                                        .toString();
+                                                final targetLogin =
+                                                    (item['targetLogin'] ?? '')
+                                                        .toString();
+                                                if (groupId.isEmpty ||
+                                                    targetLower.isEmpty)
+                                                  return;
+
+                                                final uidSnap = await rtdb()
+                                                    .ref(
+                                                      'usernames/$targetLower',
+                                                    )
+                                                    .get();
+                                                final targetUid = uidSnap.value
+                                                    ?.toString();
+                                                if (targetUid == null ||
+                                                    targetUid.isEmpty) {
+                                                  await _cleanupAllAdmins(
+                                                    groupId: groupId,
+                                                    targetLower: targetLower,
+                                                  );
+                                                  await rtdb()
+                                                      .ref(
+                                                        'groupJoinRequests/$groupId/$targetLower',
+                                                      )
+                                                      .remove();
+                                                  return;
+                                                }
+
+                                                final gSnap = await rtdb()
+                                                    .ref('groups/$groupId')
+                                                    .get();
+                                                final gv = gSnap.value;
+                                                final gm = (gv is Map)
+                                                    ? gv
+                                                    : null;
+                                                final title =
+                                                    (gm?['title'] ?? '')
+                                                        .toString();
+                                                final logo =
+                                                    (gm?['logoUrl'] ?? '')
+                                                        .toString();
+                                                final logoEmoji =
+                                                    (gm?['logoEmoji'] ?? '')
+                                                        .toString()
+                                                        .trim();
+
+                                                await rtdb()
+                                                    .ref(
+                                                      'groupInvites/$targetUid/$groupId',
+                                                    )
+                                                    .set({
+                                                      'groupId': groupId,
+                                                      'groupTitle': title,
+                                                      if (logo.isNotEmpty)
+                                                        'groupLogoUrl': logo,
+                                                      if (logoEmoji.isNotEmpty)
+                                                        'groupLogoEmoji':
+                                                            logoEmoji,
+                                                      'invitedByUid':
+                                                          current.uid,
+                                                      'invitedByGithub':
+                                                          myGithub,
+                                                      'createdAt':
+                                                          ServerValue.timestamp,
+                                                      'via': 'member_request',
+                                                      if (targetLogin
+                                                          .isNotEmpty)
+                                                        'targetLogin':
+                                                            targetLogin,
+                                                    });
+
                                                 await _cleanupAllAdmins(
                                                   groupId: groupId,
                                                   targetLower: targetLower,
@@ -19344,392 +19938,353 @@ class _ChatsTabState extends State<_ChatsTab>
                                                       'groupJoinRequests/$groupId/$targetLower',
                                                     )
                                                     .remove();
-                                                return;
+                                                await rtdb()
+                                                    .ref(
+                                                      'groupAdminInbox/${current.uid}/$key',
+                                                    )
+                                                    .remove();
                                               }
 
-                                              final gSnap = await rtdb()
-                                                  .ref('groups/$groupId')
-                                                  .get();
-                                              final gv = gSnap.value;
-                                              final gm = (gv is Map)
-                                                  ? gv
-                                                  : null;
-                                              final title = (gm?['title'] ?? '')
-                                                  .toString();
-                                              final logo =
-                                                  (gm?['logoUrl'] ?? '')
-                                                      .toString();
-                                              final logoEmoji =
-                                                  (gm?['logoEmoji'] ?? '')
-                                                      .toString()
-                                                      .trim();
+                                              Future<void> _reject(
+                                                Map<String, dynamic> item,
+                                              ) async {
+                                                final key =
+                                                    (item['__key'] ?? '')
+                                                        .toString();
+                                                final groupId =
+                                                    (item['groupId'] ?? '')
+                                                        .toString();
+                                                final targetLower =
+                                                    (item['targetLower'] ?? '')
+                                                        .toString();
+                                                if (groupId.isEmpty ||
+                                                    targetLower.isEmpty)
+                                                  return;
+                                                await _cleanupAllAdmins(
+                                                  groupId: groupId,
+                                                  targetLower: targetLower,
+                                                );
+                                                await rtdb()
+                                                    .ref(
+                                                      'groupJoinRequests/$groupId/$targetLower',
+                                                    )
+                                                    .remove();
+                                                await rtdb()
+                                                    .ref(
+                                                      'groupAdminInbox/${current.uid}/$key',
+                                                    )
+                                                    .remove();
+                                              }
 
-                                              await rtdb()
-                                                  .ref(
-                                                    'groupInvites/$targetUid/$groupId',
-                                                  )
-                                                  .set({
-                                                    'groupId': groupId,
-                                                    'groupTitle': title,
-                                                    if (logo.isNotEmpty)
-                                                      'groupLogoUrl': logo,
-                                                    if (logoEmoji.isNotEmpty)
-                                                      'groupLogoEmoji':
-                                                          logoEmoji,
-                                                    'invitedByUid': current.uid,
-                                                    'invitedByGithub': myGithub,
-                                                    'createdAt':
-                                                        ServerValue.timestamp,
-                                                    'via': 'member_request',
-                                                    if (targetLogin.isNotEmpty)
-                                                      'targetLogin':
-                                                          targetLogin,
-                                                  });
+                                              if (items.isEmpty)
+                                                return const SizedBox.shrink();
 
-                                              await _cleanupAllAdmins(
-                                                groupId: groupId,
-                                                targetLower: targetLower,
-                                              );
-                                              await rtdb()
-                                                  .ref(
-                                                    'groupJoinRequests/$groupId/$targetLower',
-                                                  )
-                                                  .remove();
-                                              await rtdb()
-                                                  .ref(
-                                                    'groupAdminInbox/${current.uid}/$key',
-                                                  )
-                                                  .remove();
-                                            }
-
-                                            Future<void> _reject(
-                                              Map<String, dynamic> item,
-                                            ) async {
-                                              final key = (item['__key'] ?? '')
-                                                  .toString();
-                                              final groupId =
-                                                  (item['groupId'] ?? '')
-                                                      .toString();
-                                              final targetLower =
-                                                  (item['targetLower'] ?? '')
-                                                      .toString();
-                                              if (groupId.isEmpty ||
-                                                  targetLower.isEmpty)
-                                                return;
-                                              await _cleanupAllAdmins(
-                                                groupId: groupId,
-                                                targetLower: targetLower,
-                                              );
-                                              await rtdb()
-                                                  .ref(
-                                                    'groupJoinRequests/$groupId/$targetLower',
-                                                  )
-                                                  .remove();
-                                              await rtdb()
-                                                  .ref(
-                                                    'groupAdminInbox/${current.uid}/$key',
-                                                  )
-                                                  .remove();
-                                            }
-
-                                            if (items.isEmpty)
-                                              return const SizedBox.shrink();
-
-                                            return Column(
-                                              children: [
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons
-                                                        .admin_panel_settings_outlined,
-                                                  ),
-                                                  title: Text(
-                                                    AppLanguage.tr(
-                                                      context,
-                                                      'Žádosti do skupin',
-                                                      'Group requests',
+                                              return Column(
+                                                children: [
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons
+                                                          .admin_panel_settings_outlined,
+                                                    ),
+                                                    title: Text(
+                                                      AppLanguage.tr(
+                                                        context,
+                                                        'Žádosti do skupin',
+                                                        'Group requests',
+                                                      ),
+                                                    ),
+                                                    subtitle: Text(
+                                                      '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
                                                     ),
                                                   ),
-                                                  subtitle: Text(
-                                                    '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
-                                                  ),
-                                                ),
-                                                ...items.map((item) {
-                                                  final groupId =
-                                                      (item['groupId'] ?? '')
-                                                          .toString();
-                                                  final targetLogin =
-                                                      (item['targetLogin'] ??
-                                                              '')
-                                                          .toString();
-                                                  final requestedBy =
-                                                      (item['requestedByGithub'] ??
-                                                              '')
-                                                          .toString();
-                                                  return StreamBuilder<
-                                                    DatabaseEvent
-                                                  >(
-                                                    stream: (groupId.isEmpty)
-                                                        ? null
-                                                        : rtdb()
-                                                              .ref(
-                                                                'groups/$groupId',
-                                                              )
-                                                              .onValue,
-                                                    builder: (context, gSnap) {
-                                                      final gv = gSnap
-                                                          .data
-                                                          ?.snapshot
-                                                          .value;
-                                                      final gm = (gv is Map)
-                                                          ? gv
-                                                          : null;
-                                                      if (gm == null)
-                                                        return const SizedBox.shrink();
-                                                      final title =
-                                                          (gm['title'] ?? '')
-                                                              .toString();
-                                                      return ListTile(
-                                                        leading: const Icon(
-                                                          Icons.group,
-                                                        ),
-                                                        title: Text(title),
-                                                        subtitle: Text(
-                                                          '${AppLanguage.tr(context, 'Přidat', 'Add')}: @${targetLogin.isEmpty ? AppLanguage.tr(context, 'uživatel', 'user') : targetLogin}${requestedBy.isNotEmpty ? ' • ${AppLanguage.tr(context, 'od', 'by')} @$requestedBy' : ''}',
-                                                          maxLines: 1,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                        ),
-                                                        trailing: Row(
-                                                          mainAxisSize:
-                                                              MainAxisSize.min,
-                                                          children: [
-                                                            IconButton(
-                                                              icon: const Icon(
-                                                                Icons.close,
+                                                  ...items.map((item) {
+                                                    final groupId =
+                                                        (item['groupId'] ?? '')
+                                                            .toString();
+                                                    final targetLogin =
+                                                        (item['targetLogin'] ??
+                                                                '')
+                                                            .toString();
+                                                    final requestedBy =
+                                                        (item['requestedByGithub'] ??
+                                                                '')
+                                                            .toString();
+                                                    return StreamBuilder<
+                                                      DatabaseEvent
+                                                    >(
+                                                      stream: (groupId.isEmpty)
+                                                          ? null
+                                                          : rtdb()
+                                                                .ref(
+                                                                  'groups/$groupId',
+                                                                )
+                                                                .onValue,
+                                                      builder: (context, gSnap) {
+                                                        final gv = gSnap
+                                                            .data
+                                                            ?.snapshot
+                                                            .value;
+                                                        final gm = (gv is Map)
+                                                            ? gv
+                                                            : null;
+                                                        if (gm == null)
+                                                          return const SizedBox.shrink();
+                                                        final title =
+                                                            (gm['title'] ?? '')
+                                                                .toString();
+                                                        return ListTile(
+                                                          leading: const Icon(
+                                                            Icons.group,
+                                                          ),
+                                                          title: Text(title),
+                                                          subtitle: Text(
+                                                            '${AppLanguage.tr(context, 'Přidat', 'Add')}: @${targetLogin.isEmpty ? AppLanguage.tr(context, 'uživatel', 'user') : targetLogin}${requestedBy.isNotEmpty ? ' • ${AppLanguage.tr(context, 'od', 'by')} @$requestedBy' : ''}',
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
+                                                          trailing: Row(
+                                                            mainAxisSize:
+                                                                MainAxisSize
+                                                                    .min,
+                                                            children: [
+                                                              IconButton(
+                                                                icon: const Icon(
+                                                                  Icons.close,
+                                                                ),
+                                                                onPressed: () =>
+                                                                    _reject(
+                                                                      item,
+                                                                    ),
                                                               ),
-                                                              onPressed: () =>
-                                                                  _reject(item),
-                                                            ),
-                                                            IconButton(
-                                                              icon: const Icon(
-                                                                Icons.check,
+                                                              IconButton(
+                                                                icon: const Icon(
+                                                                  Icons.check,
+                                                                ),
+                                                                onPressed: () =>
+                                                                    _approve(
+                                                                      item,
+                                                                    ),
                                                               ),
-                                                              onPressed: () =>
-                                                                  _approve(
-                                                                    item,
-                                                                  ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      );
-                                                    },
-                                                  );
-                                                }),
-                                                const Divider(height: 1),
-                                              ],
-                                            );
-                                          },
-                                        ),
-
-                                        // DM žádosti (priváty) – notifikace nahoře v přehledu Chaty
-                                        StreamBuilder<DatabaseEvent>(
-                                          stream: rtdb()
-                                              .ref('dmRequests/${current.uid}')
-                                              .onValue,
-                                          builder: (context, reqSnap) {
-                                            final v =
-                                                reqSnap.data?.snapshot.value;
-                                            final m = (v is Map) ? v : null;
-
-                                            final items =
-                                                <Map<String, dynamic>>[];
-                                            if (m != null) {
-                                              for (final e in m.entries) {
-                                                if (e.value is! Map) continue;
-                                                final mm =
-                                                    Map<String, dynamic>.from(
-                                                      e.value as Map,
+                                                            ],
+                                                          ),
+                                                        );
+                                                      },
                                                     );
-                                                mm['__key'] = e.key.toString();
-                                                items.add(mm);
-                                              }
-                                              items.sort((a, b) {
-                                                final at =
-                                                    (a['createdAt'] is int)
-                                                    ? a['createdAt'] as int
-                                                    : 0;
-                                                final bt =
-                                                    (b['createdAt'] is int)
-                                                    ? b['createdAt'] as int
-                                                    : 0;
-                                                return bt.compareTo(at);
-                                              });
-                                            }
+                                                  }),
+                                                  const Divider(height: 1),
+                                                ],
+                                              );
+                                            },
+                                          ),
 
-                                            if (items.isEmpty)
-                                              return const SizedBox.shrink();
+                                          // DM žádosti (priváty) – notifikace nahoře v přehledu Chaty
+                                          StreamBuilder<DatabaseEvent>(
+                                            stream: rtdb()
+                                                .ref(
+                                                  'dmRequests/${current.uid}',
+                                                )
+                                                .onValue,
+                                            builder: (context, reqSnap) {
+                                              final v =
+                                                  reqSnap.data?.snapshot.value;
+                                              final m = (v is Map) ? v : null;
 
-                                            Future<void> accept(
-                                              Map<String, dynamic> req,
-                                            ) async {
-                                              final fromLogin =
-                                                  (req['fromLogin'] ?? '')
+                                              final items =
+                                                  <Map<String, dynamic>>[];
+                                              if (m != null) {
+                                                for (final e in m.entries) {
+                                                  if (e.value is! Map) continue;
+                                                  final mm =
+                                                      Map<String, dynamic>.from(
+                                                        e.value as Map,
+                                                      );
+                                                  mm['__key'] = e.key
                                                       .toString();
-                                              if (fromLogin.trim().isEmpty)
-                                                return;
-                                              try {
-                                                await _acceptDmRequest(
-                                                  myUid: current.uid,
-                                                  otherLogin: fromLogin,
-                                                );
-                                              } catch (e) {
-                                                if (mounted) {
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
-                                                      ),
-                                                    ),
-                                                  );
+                                                  items.add(mm);
                                                 }
+                                                items.sort((a, b) {
+                                                  final at =
+                                                      (a['createdAt'] is int)
+                                                      ? a['createdAt'] as int
+                                                      : 0;
+                                                  final bt =
+                                                      (b['createdAt'] is int)
+                                                      ? b['createdAt'] as int
+                                                      : 0;
+                                                  return bt.compareTo(at);
+                                                });
                                               }
-                                            }
 
-                                            Future<void> reject(
-                                              Map<String, dynamic> req,
-                                            ) async {
-                                              final fromLogin =
-                                                  (req['fromLogin'] ?? '')
-                                                      .toString();
-                                              if (fromLogin.trim().isEmpty)
-                                                return;
-                                              try {
-                                                await _rejectDmRequest(
-                                                  myUid: current.uid,
-                                                  otherLogin: fromLogin,
-                                                );
-                                              } catch (e) {
-                                                if (mounted) {
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
-                                                      ),
-                                                    ),
+                                              if (items.isEmpty)
+                                                return const SizedBox.shrink();
+
+                                              Future<void> accept(
+                                                Map<String, dynamic> req,
+                                              ) async {
+                                                final fromLogin =
+                                                    (req['fromLogin'] ?? '')
+                                                        .toString();
+                                                if (fromLogin.trim().isEmpty)
+                                                  return;
+                                                try {
+                                                  await _acceptDmRequest(
+                                                    myUid: current.uid,
+                                                    otherLogin: fromLogin,
                                                   );
-                                                }
-                                              }
-                                            }
-
-                                            return Column(
-                                              children: [
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.mail_lock_outlined,
-                                                  ),
-                                                  title: Text(
-                                                    AppLanguage.tr(
+                                                } catch (e) {
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(
                                                       context,
-                                                      'Žádosti o chat',
-                                                      'Chat requests',
-                                                    ),
-                                                  ),
-                                                  subtitle: Text(
-                                                    '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
-                                                  ),
-                                                ),
-                                                ...items.map((req) {
-                                                  final fromLogin =
-                                                      (req['fromLogin'] ?? '')
-                                                          .toString();
-                                                  final fromUid =
-                                                      (req['fromUid'] ?? '')
-                                                          .toString();
-                                                  final fromAvatar =
-                                                      (req['fromAvatarUrl'] ??
-                                                              '')
-                                                          .toString();
-                                                  final hasEncryptedText =
-                                                      ((req['ciphertext'] ??
-                                                              req['ct'] ??
-                                                              req['cipher'])
-                                                          ?.toString()
-                                                          .isNotEmpty ??
-                                                      false);
-                                                  return ListTile(
-                                                    leading: fromUid.isNotEmpty
-                                                        ? _AvatarWithPresenceDot(
-                                                            uid: fromUid,
-                                                            avatarUrl:
-                                                                fromAvatar,
-                                                            radius: 18,
-                                                          )
-                                                        : CircleAvatar(
-                                                            radius: 18,
-                                                            backgroundImage:
-                                                                fromAvatar
-                                                                    .isNotEmpty
-                                                                ? NetworkImage(
-                                                                    fromAvatar,
-                                                                  )
-                                                                : null,
-                                                            child:
-                                                                fromAvatar
-                                                                    .isEmpty
-                                                                ? const Icon(
-                                                                    Icons
-                                                                        .person,
-                                                                    size: 18,
-                                                                  )
-                                                                : null,
-                                                          ),
-                                                    title: Text('@$fromLogin'),
-                                                    subtitle: hasEncryptedText
-                                                        ? Text(
-                                                            AppLanguage.tr(
-                                                              context,
-                                                              'Zpráva: 🔒 (šifrovaně)',
-                                                              'Message: 🔒 (encrypted)',
-                                                            ),
-                                                          )
-                                                        : Text(
-                                                            AppLanguage.tr(
-                                                              context,
-                                                              'Invajt do privátu',
-                                                              'Private chat invite',
-                                                            ),
-                                                          ),
-                                                    trailing: Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        IconButton(
-                                                          icon: const Icon(
-                                                            Icons.close,
-                                                          ),
-                                                          onPressed: () =>
-                                                              reject(req),
+                                                    ).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text(
+                                                          '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
                                                         ),
-                                                        IconButton(
-                                                          icon: const Icon(
-                                                            Icons.check,
-                                                          ),
-                                                          onPressed: () =>
-                                                              accept(req),
-                                                        ),
-                                                      ],
-                                                    ),
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              }
+
+                                              Future<void> reject(
+                                                Map<String, dynamic> req,
+                                              ) async {
+                                                final fromLogin =
+                                                    (req['fromLogin'] ?? '')
+                                                        .toString();
+                                                if (fromLogin.trim().isEmpty)
+                                                  return;
+                                                try {
+                                                  await _rejectDmRequest(
+                                                    myUid: current.uid,
+                                                    otherLogin: fromLogin,
                                                   );
-                                                }),
-                                                const Divider(height: 1),
-                                              ],
-                                            );
-                                          },
-                                        ),
+                                                } catch (e) {
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(
+                                                      context,
+                                                    ).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text(
+                                                          '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              }
+
+                                              return Column(
+                                                children: [
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.mail_lock_outlined,
+                                                    ),
+                                                    title: Text(
+                                                      AppLanguage.tr(
+                                                        context,
+                                                        'Žádosti o chat',
+                                                        'Chat requests',
+                                                      ),
+                                                    ),
+                                                    subtitle: Text(
+                                                      '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
+                                                    ),
+                                                  ),
+                                                  ...items.map((req) {
+                                                    final fromLogin =
+                                                        (req['fromLogin'] ?? '')
+                                                            .toString();
+                                                    final fromUid =
+                                                        (req['fromUid'] ?? '')
+                                                            .toString();
+                                                    final fromAvatar =
+                                                        (req['fromAvatarUrl'] ??
+                                                                '')
+                                                            .toString();
+                                                    final hasEncryptedText =
+                                                        ((req['ciphertext'] ??
+                                                                req['ct'] ??
+                                                                req['cipher'])
+                                                            ?.toString()
+                                                            .isNotEmpty ??
+                                                        false);
+                                                    return ListTile(
+                                                      leading:
+                                                          fromUid.isNotEmpty
+                                                          ? _AvatarWithPresenceDot(
+                                                              uid: fromUid,
+                                                              avatarUrl:
+                                                                  fromAvatar,
+                                                              radius: 18,
+                                                            )
+                                                          : CircleAvatar(
+                                                              radius: 18,
+                                                              backgroundImage:
+                                                                  fromAvatar
+                                                                      .isNotEmpty
+                                                                  ? NetworkImage(
+                                                                      fromAvatar,
+                                                                    )
+                                                                  : null,
+                                                              child:
+                                                                  fromAvatar
+                                                                      .isEmpty
+                                                                  ? const Icon(
+                                                                      Icons
+                                                                          .person,
+                                                                      size: 18,
+                                                                    )
+                                                                  : null,
+                                                            ),
+                                                      title: Text(
+                                                        '@$fromLogin',
+                                                      ),
+                                                      subtitle: hasEncryptedText
+                                                          ? Text(
+                                                              AppLanguage.tr(
+                                                                context,
+                                                                'Zpráva: 🔒 (šifrovaně)',
+                                                                'Message: 🔒 (encrypted)',
+                                                              ),
+                                                            )
+                                                          : Text(
+                                                              AppLanguage.tr(
+                                                                context,
+                                                                'Invajt do privátu',
+                                                                'Private chat invite',
+                                                              ),
+                                                            ),
+                                                      trailing: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          IconButton(
+                                                            icon: const Icon(
+                                                              Icons.close,
+                                                            ),
+                                                            onPressed: () =>
+                                                                reject(req),
+                                                          ),
+                                                          IconButton(
+                                                            icon: const Icon(
+                                                              Icons.check,
+                                                            ),
+                                                            onPressed: () =>
+                                                                accept(req),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }),
+                                                  const Divider(height: 1),
+                                                ],
+                                              );
+                                            },
+                                          ),
+                                        ],
 
                                         // Přepínače: Priváty / Skupiny / Složky
                                         Padding(
