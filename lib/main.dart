@@ -35,15 +35,16 @@ class MyApp extends StatelessWidget {
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    const ghBg = Color(0xFF0D1117);
-    const ghCanvas = Color(0xFF010409);
-    const ghCard = Color(0xFF161B22);
-    const ghBorder = Color(0xFF30363D);
-    const ghText = Color(0xFFC9D1D9);
-    const ghGreen = Color(0xFF238636);
-    const ghBlue = Color(0xFF316DCA);
-    const uiRadius = 12.0;
-    const uiSheetRadius = 18.0;
+    const ghBg = Color(0xFF081019);
+    const ghCanvas = Color(0xFF040A12);
+    const ghCard = Color(0xB31A2736);
+    const ghBorder = Color(0x66A6C4E8);
+    const ghText = Color(0xFFD9E7F7);
+    const ghGreen = Color(0xFF32B57A);
+    const ghBlue = Color(0xFF4EA3FF);
+    const ghSurfaceSoft = Color(0x99203246);
+    const uiRadius = 16.0;
+    const uiSheetRadius = 24.0;
     const uiMinTapHeight = 52.0;
 
     return ValueListenableBuilder<String>(
@@ -63,17 +64,20 @@ class MyApp extends StatelessWidget {
             GlobalCupertinoLocalizations.delegate,
           ],
           theme: ThemeData(
+            useMaterial3: true,
             brightness: Brightness.dark,
             scaffoldBackgroundColor: ghBg,
             canvasColor: ghCanvas,
             dividerColor: ghBorder,
+            fontFamilyFallback: const ['SF Pro Text', 'Segoe UI', 'Roboto'],
             appBarTheme: const AppBarTheme(
-              backgroundColor: ghBg,
+              backgroundColor: Color(0xAA0A1522),
               foregroundColor: ghText,
               elevation: 0,
+              surfaceTintColor: Colors.transparent,
               iconTheme: IconThemeData(color: ghText),
               titleTextStyle: TextStyle(
-                color: Colors.white,
+                color: ghText,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
@@ -90,11 +94,16 @@ class MyApp extends StatelessWidget {
               onBackground: ghText,
               surface: ghCard,
               onSurface: ghText,
+              tertiary: Color(0xFF8DC4FF),
+              onTertiary: Color(0xFF06111E),
+              surfaceContainerHighest: ghSurfaceSoft,
+              outline: ghBorder,
+              outlineVariant: Color(0x4488A4C5),
             ),
             inputDecorationTheme: const InputDecorationTheme(
               filled: true,
-              fillColor: ghCard,
-              labelStyle: TextStyle(color: Color(0xFF8B949E)),
+              fillColor: Color(0x7323364A),
+              labelStyle: TextStyle(color: Color(0xFF9FB5CF)),
               contentPadding: EdgeInsets.symmetric(
                 horizontal: 14,
                 vertical: 14,
@@ -115,8 +124,8 @@ class MyApp extends StatelessWidget {
               color: ghCard,
               elevation: 0,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: const BorderSide(color: ghBorder),
+                borderRadius: BorderRadius.circular(18),
+                side: const BorderSide(color: ghBorder, width: 1.1),
               ),
             ),
             dividerTheme: const DividerThemeData(
@@ -132,8 +141,8 @@ class MyApp extends StatelessWidget {
               ),
             ),
             bottomSheetTheme: const BottomSheetThemeData(
-              backgroundColor: ghCard,
-              modalBackgroundColor: ghCard,
+              backgroundColor: Color(0xD9192A3D),
+              modalBackgroundColor: Color(0xE51A2C40),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.vertical(
                   top: Radius.circular(uiSheetRadius),
@@ -141,14 +150,14 @@ class MyApp extends StatelessWidget {
               ),
             ),
             listTileTheme: ListTileThemeData(
-              iconColor: Color(0xFF8B949E),
+              iconColor: Color(0xFFAFC2D9),
               textColor: ghText,
-              tileColor: ghCard,
+              tileColor: const Color(0x6B213348),
               minTileHeight: uiMinTapHeight,
               minVerticalPadding: 8,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(uiRadius),
-                side: const BorderSide(color: ghBorder),
+                side: const BorderSide(color: ghBorder, width: 1.1),
               ),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14,
@@ -156,10 +165,10 @@ class MyApp extends StatelessWidget {
               ),
             ),
             snackBarTheme: SnackBarThemeData(
-              backgroundColor: const Color(0xFF161B22),
+              backgroundColor: const Color(0xE31A2B40),
               contentTextStyle: const TextStyle(color: ghText),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(14),
                 side: const BorderSide(color: ghBorder),
               ),
               behavior: SnackBarBehavior.floating,
@@ -178,7 +187,7 @@ class MyApp extends StatelessWidget {
             ),
             elevatedButtonTheme: ElevatedButtonThemeData(
               style: ButtonStyle(
-                backgroundColor: const MaterialStatePropertyAll(Color(0xFF238636)),
+                backgroundColor: const MaterialStatePropertyAll(Color(0xFF2F9AEE)),
                 foregroundColor: const MaterialStatePropertyAll(Colors.white),
                 textStyle: MaterialStatePropertyAll(TextStyle(fontWeight: FontWeight.bold)),
                 minimumSize: const MaterialStatePropertyAll(
@@ -188,7 +197,7 @@ class MyApp extends StatelessWidget {
                   borderRadius: BorderRadius.all(Radius.circular(uiRadius)),
                 )),
                 side: const MaterialStatePropertyAll(
-                  BorderSide(color: Color(0x22F0F6FC)),
+                  BorderSide(color: Color(0x66D6E9FF)),
                 ),
                 padding: MaterialStatePropertyAll(
                   EdgeInsets.symmetric(horizontal: 24, vertical: 14),
@@ -198,8 +207,8 @@ class MyApp extends StatelessWidget {
             outlinedButtonTheme: OutlinedButtonThemeData(
               style: ButtonStyle(
                 foregroundColor: const MaterialStatePropertyAll(ghText),
-                backgroundColor: const MaterialStatePropertyAll(Color(0xFF21262D)),
-                side: MaterialStatePropertyAll(BorderSide(color: ghBorder)),
+                backgroundColor: const MaterialStatePropertyAll(Color(0x6B223449)),
+                side: MaterialStatePropertyAll(BorderSide(color: ghBorder, width: 1.1)),
                 minimumSize: const MaterialStatePropertyAll(
                   Size.fromHeight(uiMinTapHeight),
                 ),
@@ -213,7 +222,7 @@ class MyApp extends StatelessWidget {
             ),
             textButtonTheme: TextButtonThemeData(
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF58A6FF),
+                foregroundColor: const Color(0xFF8BC7FF),
                 minimumSize: const Size(0, uiMinTapHeight),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(uiRadius),
@@ -231,17 +240,17 @@ class MyApp extends StatelessWidget {
               ),
             ),
             chipTheme: ChipThemeData(
-              backgroundColor: const Color(0xFF0D1117),
-              selectedColor: const Color(0xFF1B2230),
+              backgroundColor: const Color(0x66223449),
+              selectedColor: const Color(0x99305272),
               labelStyle: const TextStyle(color: ghText),
               side: const BorderSide(color: ghBorder),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
             ),
             navigationBarTheme: NavigationBarThemeData(
-              backgroundColor: ghCard,
-              indicatorColor: const Color(0x22316DCA),
+              backgroundColor: const Color(0xC0142232),
+              indicatorColor: const Color(0x444EA3FF),
               iconTheme: const WidgetStatePropertyAll(
-                IconThemeData(color: Color(0xFF8B949E)),
+                IconThemeData(color: Color(0xFFAFC2D9)),
               ),
               labelTextStyle: const WidgetStatePropertyAll(
                 TextStyle(color: ghText, fontWeight: FontWeight.w600),

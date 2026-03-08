@@ -3667,9 +3667,9 @@ Future<void> checkGroupAchievements(String uid) async {
             builder: (context, hasVerificationAlert, _) {
               final showVerificationAction = _index == 1 && hasVerificationAlert;
               return AppBar(
-                backgroundColor: Colors.transparent,
-                surfaceTintColor: Colors.transparent,
-                shadowColor: Colors.transparent,
+                backgroundColor: const Color(0xFF0C1624),
+                surfaceTintColor: const Color(0xFF0C1624),
+                shadowColor: const Color(0xFF0C1624),
                 elevation: 0,
                 scrolledUnderElevation: 0,
                 centerTitle: true,
@@ -3931,9 +3931,11 @@ Future<void> checkGroupAchievements(String uid) async {
 
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: LayoutBuilder(
+      child: Container(
+        color: const Color(0xFF0C1624),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: LayoutBuilder(
           builder: (context, c) {
             final w = c.maxWidth;
             final itemW = w / items.length;
@@ -3951,9 +3953,7 @@ Future<void> checkGroupAchievements(String uid) async {
                       border: Border.all(color: cs.outlineVariant),
                     ),
                   ),
-                  AnimatedPositioned(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOut,
+                  Positioned(
                     left: _index * itemW + inset,
                     top: inset,
                     width: itemW - inset * 2,
@@ -4028,6 +4028,7 @@ Future<void> checkGroupAchievements(String uid) async {
               ),
             );
           },
+        ),
         ),
       ),
     );
@@ -5308,23 +5309,16 @@ Future<void> checkGroupAchievements(String uid) async {
         ];
 
         final useLeftMenu = kIsWeb && MediaQuery.of(context).size.width >= 1000;
+        const shellDecoration = BoxDecoration(
+          color: Color(0xFF0C1624),
+        );
 
         return WillPopScope(
           onWillPop: _onWillPop,
           child: useLeftMenu
               ? Scaffold(
                   body: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Color(0xFF0D1117),
-                          Color(0xFF0B1220),
-                          Color(0xFF0D1613),
-                        ],
-                      ),
-                    ),
+                    decoration: shellDecoration,
                     child: SafeArea(
                       child: Row(
                         children: [
@@ -5349,17 +5343,7 @@ Future<void> checkGroupAchievements(String uid) async {
               : Scaffold(
                   appBar: _pillAppBar(context),
                   body: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Color(0xFF0D1117),
-                          Color(0xFF0B1220),
-                          Color(0xFF0D1613),
-                        ],
-                      ),
-                    ),
+                    decoration: shellDecoration,
                     child: pages[_index],
                   ),
                   bottomNavigationBar: _pillBottomNav(
@@ -8389,17 +8373,22 @@ class _UsageSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Card(
+      clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface),
+            ),
             const SizedBox(height: 6),
-            Text('Celkem: $total'),
-            Text('$rxLabel: $rx'),
-            Text('$txLabel: $tx'),
+            Text('Celkem: $total', style: TextStyle(color: cs.onSurfaceVariant)),
+            Text('$rxLabel: $rx', style: TextStyle(color: cs.onSurfaceVariant)),
+            Text('$txLabel: $tx', style: TextStyle(color: cs.onSurfaceVariant)),
           ],
         ),
       ),
@@ -8422,6 +8411,7 @@ class _NetworkUsageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final totalRx = usage.networkRx(netKey);
     final totalTx = usage.networkTx(netKey);
     final total = totalRx + totalTx;
@@ -8429,20 +8419,29 @@ class _NetworkUsageCard extends StatelessWidget {
     final totals = usage.categoryTotalsForNetwork(netKey, categories);
 
     return Card(
+      clipBehavior: Clip.antiAlias,
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface),
+            ),
             const SizedBox(height: 6),
-            Text('Celkem: ${formatBytes(total)}'),
+            Text(
+              'Celkem: ${formatBytes(total)}',
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
             Text(
               '${AppLanguage.tr(context, 'Přijato', 'Received')}: ${formatBytes(totalRx)}',
+              style: TextStyle(color: cs.onSurfaceVariant),
             ),
             Text(
               '${AppLanguage.tr(context, 'Odesláno', 'Sent')}: ${formatBytes(totalTx)}',
+              style: TextStyle(color: cs.onSurfaceVariant),
             ),
             const SizedBox(height: 8),
             if (total > 0)
@@ -10055,9 +10054,20 @@ class _ProfileSectionCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xA6213448), Color(0x7F162636)],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant, width: 1.15),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33040A11),
+            blurRadius: 18,
+            offset: Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -10093,13 +10103,18 @@ class _ProfileMetricTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       constraints: const BoxConstraints(minWidth: 96),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white10,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white24),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0x99243A51), Color(0x66203448)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -11554,6 +11569,7 @@ class _ChatsTabState extends State<_ChatsTab>
     bool _incomingNotificationsRunning = false;
   Timer? _outgoingCallTimeout;
   Timer? _callElapsedTicker;
+  Timer? _callRingingFeedbackTicker;
   bool _incomingCallDialogOpen = false;
   String? _outgoingCallId;
   bool _outgoingCallRinging = false;
@@ -11789,6 +11805,77 @@ class _ChatsTabState extends State<_ChatsTab>
       return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
     }
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _emitCallFeedback({
+    bool alertTone = false,
+    bool light = false,
+    bool medium = false,
+    bool heavy = false,
+  }) async {
+    if (widget.settings.soundsEnabled) {
+      try {
+        await SystemSound.play(
+          alertTone ? SystemSoundType.alert : SystemSoundType.click,
+        );
+      } catch (_) {
+        // best-effort system sound
+      }
+    }
+
+    if (!widget.settings.vibrationEnabled) return;
+    try {
+      if (heavy) {
+        await HapticFeedback.heavyImpact();
+      } else if (medium) {
+        await HapticFeedback.mediumImpact();
+      } else if (light) {
+        await HapticFeedback.lightImpact();
+      } else {
+        await HapticFeedback.selectionClick();
+      }
+    } catch (_) {
+      // best-effort haptics
+    }
+  }
+
+  void _stopCallRingingFeedback() {
+    _callRingingFeedbackTicker?.cancel();
+    _callRingingFeedbackTicker = null;
+  }
+
+  void _startCallRingingFeedback({required bool incoming}) {
+    _stopCallRingingFeedback();
+    unawaited(
+      _emitCallFeedback(
+        alertTone: true,
+        heavy: incoming,
+        medium: !incoming,
+      ),
+    );
+
+    var pulse = 0;
+    _callRingingFeedbackTicker = Timer.periodic(
+      Duration(seconds: incoming ? 2 : 3),
+      (_) {
+        final stillRinging = incoming
+            ? _incomingCallDialogOpen
+            : (_outgoingCallRinging || _outgoingGroupCallRinging);
+        if (!mounted || !stillRinging) {
+          _stopCallRingingFeedback();
+          return;
+        }
+        pulse++;
+        unawaited(
+          _emitCallFeedback(
+            alertTone: true,
+            heavy: incoming && pulse.isOdd,
+            medium: !incoming,
+            light: incoming && pulse.isEven,
+          ),
+        );
+      },
+    );
   }
 
   bool get _hasAnyCallVisualState {
@@ -12077,6 +12164,7 @@ class _ChatsTabState extends State<_ChatsTab>
     }
     _outgoingCallTimeout?.cancel();
     _outgoingCallTimeout = null;
+    _stopCallRingingFeedback();
     if (!mounted) return;
     setState(() {
       _outgoingCallRinging = false;
@@ -12085,10 +12173,12 @@ class _ChatsTabState extends State<_ChatsTab>
   }
 
   Future<void> _callPrimaryAction() async {
+    unawaited(_emitCallFeedback(light: true));
     if (_outgoingGroupCallRinging) {
       await _cancelOutgoingGroupInvites();
       _outgoingCallTimeout?.cancel();
       _outgoingCallTimeout = null;
+      _stopCallRingingFeedback();
       if (mounted) {
         setState(() {
           _outgoingGroupCallRinging = false;
@@ -12812,6 +12902,8 @@ class _ChatsTabState extends State<_ChatsTab>
       'durationSec': duration,
       'peerUid': (peerUid ?? ''),
     });
+    _stopCallRingingFeedback();
+    unawaited(_emitCallFeedback(alertTone: false, medium: true));
 
     if (sendRemoteEnd &&
         current != null &&
@@ -12948,6 +13040,7 @@ class _ChatsTabState extends State<_ChatsTab>
       _callPeerUid = peerUid;
       _callPeerLogin = login;
     });
+    _startCallRingingFeedback(incoming: false);
 
     _outgoingCallTimeout?.cancel();
     _outgoingCallTimeout = Timer(const Duration(seconds: 35), () async {
@@ -12974,6 +13067,7 @@ class _ChatsTabState extends State<_ChatsTab>
         _outgoingCallRinging = false;
         _outgoingCallId = null;
       });
+      _stopCallRingingFeedback();
     });
   }
 
@@ -13073,6 +13167,7 @@ class _ChatsTabState extends State<_ChatsTab>
 
       if (_incomingCallDialogOpen || !mounted) return;
       _incomingCallDialogOpen = true;
+      _startCallRingingFeedback(incoming: true);
 
       final action = await showDialog<String>(
         context: context,
@@ -13123,9 +13218,11 @@ class _ChatsTabState extends State<_ChatsTab>
       );
 
       _incomingCallDialogOpen = false;
+      _stopCallRingingFeedback();
       if (!mounted) return;
 
       if (action == 'accept') {
+        unawaited(_emitCallFeedback(alertTone: false, heavy: true));
         final ok = await _prepareDmWebRtc(isCaller: false);
         if (!ok) {
           await _sendCallResponse(
@@ -13180,6 +13277,7 @@ class _ChatsTabState extends State<_ChatsTab>
           );
         }
       } else if (action == 'message') {
+        unawaited(_emitCallFeedback(alertTone: false, medium: true));
         final ctrl = TextEditingController();
         final msg = await showDialog<String>(
           context: context,
@@ -13254,6 +13352,7 @@ class _ChatsTabState extends State<_ChatsTab>
           },
         );
       } else {
+        unawaited(_emitCallFeedback(alertTone: false, medium: true));
         final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
         if (myLogin.isNotEmpty) {
           await _sendDmEncryptedSystemText(
@@ -13373,6 +13472,8 @@ class _ChatsTabState extends State<_ChatsTab>
       }
 
       if (action == 'accepted' && _outgoingCallId == respCallId) {
+        _stopCallRingingFeedback();
+        unawaited(_emitCallFeedback(alertTone: false, heavy: true));
         _outgoingCallTimeout?.cancel();
         _outgoingCallTimeout = null;
         final peerLogin = _callPeerLogin;
@@ -13402,6 +13503,8 @@ class _ChatsTabState extends State<_ChatsTab>
       } else if (action == 'accepted' &&
           _outgoingGroupCallRinging &&
           _outgoingGroupCallId == respCallId) {
+        _stopCallRingingFeedback();
+        unawaited(_emitCallFeedback(alertTone: false, heavy: true));
         _outgoingCallTimeout?.cancel();
         _outgoingCallTimeout = null;
         // First accepted participant wins the current media channel.
@@ -13430,6 +13533,8 @@ class _ChatsTabState extends State<_ChatsTab>
           await _startDmOfferFlow();
         }
       } else if (action == 'declined' && _outgoingCallId == respCallId) {
+        _stopCallRingingFeedback();
+        unawaited(_emitCallFeedback(alertTone: false, medium: true));
         _outgoingCallTimeout?.cancel();
         _outgoingCallTimeout = null;
         await _disposeDmWebRtc();
@@ -13462,6 +13567,8 @@ class _ChatsTabState extends State<_ChatsTab>
           _outgoingGroupCallId == respCallId) {
         // Keep waiting for other participants until timeout.
       } else if (action == 'ended' && _activeCallId == respCallId) {
+        _stopCallRingingFeedback();
+        unawaited(_emitCallFeedback(alertTone: false, medium: true));
         await _disposeDmWebRtc();
         _callElapsedTicker?.cancel();
         _callElapsedTicker = null;
@@ -15559,6 +15666,7 @@ class _ChatsTabState extends State<_ChatsTab>
     unawaited(_stopIncomingMessageNotifications());
     _outgoingCallTimeout?.cancel();
     _callElapsedTicker?.cancel();
+    _callRingingFeedbackTicker?.cancel();
     _disposeDmWebRtc();
     _flashMessageTimer?.cancel();
     _typingTimeout?.cancel();
@@ -15611,7 +15719,7 @@ class _ChatsTabState extends State<_ChatsTab>
 
   void _hapticSelect() {
     if (widget.settings.vibrationEnabled) {
-      HapticFeedback.selectionClick();
+      HapticFeedback.lightImpact();
     }
   }
 
@@ -15816,6 +15924,7 @@ class _ChatsTabState extends State<_ChatsTab>
     final login = _activeLogin?.trim();
     if (login == null || login.isEmpty) return;
     if (_outgoingGroupCallRinging) return;
+    unawaited(_emitCallFeedback(light: true));
 
     if (_callConnected && hasActiveDmCall) {
       await _endActiveCall(sendRemoteEnd: true);
@@ -15840,6 +15949,7 @@ class _ChatsTabState extends State<_ChatsTab>
       }
       _outgoingCallTimeout?.cancel();
       _outgoingCallTimeout = null;
+      _stopCallRingingFeedback();
       return;
     }
 
@@ -15976,6 +16086,7 @@ class _ChatsTabState extends State<_ChatsTab>
       _outgoingGroupId = groupId;
       _outgoingGroupTitle = groupTitle;
     });
+    _startCallRingingFeedback(incoming: false);
 
     _outgoingCallTimeout?.cancel();
     _outgoingCallTimeout = Timer(const Duration(seconds: 35), () async {
@@ -15987,12 +16098,14 @@ class _ChatsTabState extends State<_ChatsTab>
         _outgoingGroupCallRinging = false;
         _outgoingGroupCallId = null;
       });
+      _stopCallRingingFeedback();
     });
   }
 
   Future<void> openActiveGroupCallAction() async {
     final gid = _activeGroupId?.trim();
     if (gid == null || gid.isEmpty) return;
+    unawaited(_emitCallFeedback(light: true));
 
     if (_outgoingGroupCallRinging && _outgoingGroupId == gid) {
       await _cancelOutgoingGroupInvites();
@@ -16004,6 +16117,7 @@ class _ChatsTabState extends State<_ChatsTab>
           _outgoingGroupCallId = null;
         });
       }
+      _stopCallRingingFeedback();
       return;
     }
 
