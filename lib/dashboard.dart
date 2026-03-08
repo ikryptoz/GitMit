@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
@@ -36,7 +37,6 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:highlight/highlight.dart' as highlight;
 import 'package:http/http.dart' as http;
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
-
 
 // Group achievement logic (top-level, accessible everywhere)
 Future<void> checkGroupAchievements(String uid) async {
@@ -655,8 +655,7 @@ class _RichMessageText extends StatelessWidget {
       final idx = haystack.indexOf(normalizedQuery, start);
       if (idx < 0) break;
       final srcStart = normIndexToSource[idx];
-      final srcEnd =
-          normIndexToSource[idx + normalizedQuery.length - 1] + 1;
+      final srcEnd = normIndexToSource[idx + normalizedQuery.length - 1] + 1;
       if (ranges.isEmpty || srcStart > ranges.last.end) {
         ranges.add((start: srcStart, end: srcEnd));
       } else if (srcEnd > ranges.last.end) {
@@ -674,13 +673,15 @@ class _RichMessageText extends StatelessWidget {
     var cursor = 0;
     for (final r in ranges) {
       if (r.start > cursor) {
-        spans.add(TextSpan(text: source.substring(cursor, r.start), style: base));
+        spans.add(
+          TextSpan(text: source.substring(cursor, r.start), style: base),
+        );
       }
       spans.add(
         TextSpan(
           text: source.substring(r.start, r.end),
           style: base.copyWith(
-            backgroundColor: const Color(0xFF3FB950),
+            backgroundColor: const Color(0xFF2A8C63),
             color: const Color(0xFF0D1117),
             fontWeight: FontWeight.w700,
           ),
@@ -707,11 +708,7 @@ class _RichMessageText extends StatelessWidget {
     if (q.isNotEmpty) {
       return SelectableText.rich(
         TextSpan(
-          children: _buildHighlightedSpans(
-            source: text,
-            query: q,
-            base: base,
-          ),
+          children: _buildHighlightedSpans(source: text, query: q, base: base),
         ),
       );
     }
@@ -934,7 +931,9 @@ class _UserProfilePageState extends State<_UserProfilePage> {
   List<String> _parseBadges(Object? raw, {int? createdAt}) {
     final badges = <String>[];
     if (raw is List) {
-      badges.addAll(raw.map((e) => e.toString()).where((e) => e.trim().isNotEmpty));
+      badges.addAll(
+        raw.map((e) => e.toString()).where((e) => e.trim().isNotEmpty),
+      );
     } else if (raw is Map) {
       // Show all achievement labels if present, otherwise fallback to key
       for (final entry in raw.entries) {
@@ -948,7 +947,8 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     // Badge za roky v GitMitu
     if (createdAt != null && createdAt > 0) {
       final now = DateTime.now().millisecondsSinceEpoch;
-      final years = ((now - createdAt) / (365.25 * 24 * 60 * 60 * 1000)).floor();
+      final years = ((now - createdAt) / (365.25 * 24 * 60 * 60 * 1000))
+          .floor();
       for (var i = 1; i <= years; i++) {
         badges.add('GitMit $i ${i == 1 ? 'rok' : (i < 5 ? 'roky' : 'let')}');
       }
@@ -1476,7 +1476,8 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                 return Column(
                                   children: [
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Text(
                                           '@${widget.login}',
@@ -1500,25 +1501,56 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                       builder: (context, ghSnap) {
                                         final gh = ghSnap.data;
                                         final status = gh?['status'] as String?;
-                                        final lastSeen = gh?['updatedAt'] as String?;
-                                        if ((status == null || status.isEmpty) && (lastSeen == null || lastSeen.isEmpty)) {
+                                        final lastSeen =
+                                            gh?['updatedAt'] as String?;
+                                        if ((status == null ||
+                                                status.isEmpty) &&
+                                            (lastSeen == null ||
+                                                lastSeen.isEmpty)) {
                                           return const SizedBox.shrink();
                                         }
                                         return Padding(
-                                          padding: const EdgeInsets.only(top: 4),
+                                          padding: const EdgeInsets.only(
+                                            top: 4,
+                                          ),
                                           child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
                                             children: [
-                                              if (status != null && status.isNotEmpty) ...[
-                                                Icon(Icons.circle, color: Colors.green, size: 10),
+                                              if (status != null &&
+                                                  status.isNotEmpty) ...[
+                                                Icon(
+                                                  Icons.circle,
+                                                  color: Colors.green,
+                                                  size: 10,
+                                                ),
                                                 const SizedBox(width: 4),
-                                                Text(status, style: const TextStyle(fontSize: 13, color: Colors.green)),
+                                                Text(
+                                                  status,
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    color: Colors.green,
+                                                  ),
+                                                ),
                                               ],
-                                              if (lastSeen != null && lastSeen.isNotEmpty) ...[
-                                                if (status != null && status.isNotEmpty) const SizedBox(width: 12),
-                                                Icon(Icons.access_time, size: 12, color: Colors.grey),
+                                              if (lastSeen != null &&
+                                                  lastSeen.isNotEmpty) ...[
+                                                if (status != null &&
+                                                    status.isNotEmpty)
+                                                  const SizedBox(width: 12),
+                                                Icon(
+                                                  Icons.access_time,
+                                                  size: 12,
+                                                  color: Colors.grey,
+                                                ),
                                                 const SizedBox(width: 2),
-                                                Text('Aktivita: $lastSeen', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                                Text(
+                                                  'Aktivita: $lastSeen',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey,
+                                                  ),
+                                                ),
                                               ],
                                             ],
                                           ),
@@ -1618,121 +1650,149 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                       }
 
                                       return Padding(
-                                        padding: const EdgeInsets.only(
-                                          top: 8,
-                                          bottom: 8,
+                                        padding: const EdgeInsets.fromLTRB(
+                                          8,
+                                          8,
+                                          8,
+                                          8,
                                         ),
-                                        child: Card(
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(12),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  AppLanguage.tr(
-                                                    context,
-                                                    'E2EE Fingerprint (anti-MITM)',
-                                                    'E2EE Fingerprint (anti-MITM)',
-                                                  ),
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.bold,
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            24,
+                                          ),
+                                          child: BackdropFilter(
+                                            filter: ImageFilter.blur(
+                                              sigmaX: 26,
+                                              sigmaY: 26,
+                                            ),
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xEE1D3045),
+                                                borderRadius:
+                                                    BorderRadius.circular(24),
+                                                border: Border.all(
+                                                  color: const Color(
+                                                    0x778DB4DC,
                                                   ),
                                                 ),
-                                                const SizedBox(height: 8),
-                                                if (peerFp != null &&
-                                                    peerFp.isNotEmpty)
-                                                  ListTile(
-                                                    contentPadding:
-                                                        EdgeInsets.zero,
-                                                    title: Text(
+                                              ),
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(
+                                                  12,
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
                                                       AppLanguage.tr(
                                                         context,
-                                                        'Fingerprint protějšku',
-                                                        'Peer fingerprint',
+                                                        'E2EE Fingerprint (anti-MITM)',
+                                                        'E2EE Fingerprint (anti-MITM)',
+                                                      ),
+                                                      style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold,
                                                       ),
                                                     ),
-                                                    subtitle: SelectableText(
-                                                      peerFp,
-                                                    ),
-                                                    trailing: IconButton(
-                                                      icon: const Icon(
-                                                        Icons.copy,
-                                                      ),
-                                                      onPressed: () =>
-                                                          Clipboard.setData(
-                                                            ClipboardData(
-                                                              text: peerFp,
+                                                    const SizedBox(height: 8),
+                                                    if (peerFp != null &&
+                                                        peerFp.isNotEmpty)
+                                                      ListTile(
+                                                        contentPadding:
+                                                            EdgeInsets.zero,
+                                                        title: Text(
+                                                          AppLanguage.tr(
+                                                            context,
+                                                            'Fingerprint protějšku',
+                                                            'Peer fingerprint',
+                                                          ),
+                                                        ),
+                                                        subtitle:
+                                                            SelectableText(
+                                                              peerFp,
+                                                            ),
+                                                        trailing: IconButton(
+                                                          icon: const Icon(
+                                                            Icons.copy,
+                                                          ),
+                                                          onPressed: () =>
+                                                              Clipboard.setData(
+                                                                ClipboardData(
+                                                                  text: peerFp,
+                                                                ),
+                                                              ),
+                                                        ),
+                                                      )
+                                                    else
+                                                      Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Text(
+                                                            AppLanguage.tr(
+                                                              context,
+                                                              'Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).',
+                                                              'Peer fingerprint is unavailable (the user has not published a key yet).',
                                                             ),
                                                           ),
-                                                    ),
-                                                  )
-                                                else
-                                                  Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Text(
-                                                        AppLanguage.tr(
-                                                          context,
-                                                          'Fingerprint protějšku není dostupný (uživatel ještě nezveřejnil klíč).',
-                                                          'Peer fingerprint is unavailable (the user has not published a key yet).',
-                                                        ),
+                                                        ],
                                                       ),
-                                                    ],
-                                                  ),
-                                                if (myFp != null &&
-                                                    myFp.isNotEmpty)
-                                                  ListTile(
-                                                    contentPadding:
-                                                        EdgeInsets.zero,
-                                                    title: Text(
-                                                      AppLanguage.tr(
-                                                        context,
-                                                        'Můj fingerprint',
-                                                        'My fingerprint',
-                                                      ),
-                                                    ),
-                                                    subtitle: SelectableText(
-                                                      myFp,
-                                                    ),
-                                                    trailing: IconButton(
-                                                      icon: const Icon(
-                                                        Icons.copy,
-                                                      ),
-                                                      onPressed: () =>
-                                                          Clipboard.setData(
-                                                            ClipboardData(
-                                                              text: myFp,
-                                                            ),
+                                                    if (myFp != null &&
+                                                        myFp.isNotEmpty)
+                                                      ListTile(
+                                                        contentPadding:
+                                                            EdgeInsets.zero,
+                                                        title: Text(
+                                                          AppLanguage.tr(
+                                                            context,
+                                                            'Můj fingerprint',
+                                                            'My fingerprint',
                                                           ),
-                                                    ),
-                                                  ),
-                                                if (peerFp != null &&
-                                                    peerFp.isNotEmpty &&
-                                                    myFp != null &&
-                                                    myFp.isNotEmpty &&
-                                                    peerFp == myFp)
-                                                  Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                          top: 4,
                                                         ),
-                                                    child: Text(
-                                                      AppLanguage.tr(
-                                                        context,
-                                                        'Pozor: fingerprinty jsou shodné. To je neobvyklé (může jít o sdílené zařízení nebo záměnu účtů).',
-                                                        'Warning: fingerprints are identical. This is unusual (it may indicate a shared device or account mix-up).',
+                                                        subtitle:
+                                                            SelectableText(
+                                                              myFp,
+                                                            ),
+                                                        trailing: IconButton(
+                                                          icon: const Icon(
+                                                            Icons.copy,
+                                                          ),
+                                                          onPressed: () =>
+                                                              Clipboard.setData(
+                                                                ClipboardData(
+                                                                  text: myFp,
+                                                                ),
+                                                              ),
+                                                        ),
                                                       ),
-                                                      style: TextStyle(
-                                                        color: Theme.of(
-                                                          context,
-                                                        ).colorScheme.error,
+                                                    if (peerFp != null &&
+                                                        peerFp.isNotEmpty &&
+                                                        myFp != null &&
+                                                        myFp.isNotEmpty &&
+                                                        peerFp == myFp)
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets.only(
+                                                              top: 4,
+                                                            ),
+                                                        child: Text(
+                                                          AppLanguage.tr(
+                                                            context,
+                                                            'Pozor: fingerprinty jsou shodné. To je neobvyklé (může jít o sdílené zařízení nebo záměnu účtů).',
+                                                            'Warning: fingerprints are identical. This is unusual (it may indicate a shared device or account mix-up).',
+                                                          ),
+                                                          style: TextStyle(
+                                                            color: Theme.of(
+                                                              context,
+                                                            ).colorScheme.error,
+                                                          ),
+                                                        ),
                                                       ),
-                                                    ),
-                                                  ),
-                                              ],
+                                                  ],
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -1819,10 +1879,18 @@ class _UserProfilePageState extends State<_UserProfilePage> {
                                       if (mm?['createdAt'] is int) {
                                         createdAt = mm?['createdAt'] as int;
                                       } else {
-                                        createdAt = int.tryParse((mm?['createdAt'] ?? '').toString()) ?? 0;
+                                        createdAt =
+                                            int.tryParse(
+                                              (mm?['createdAt'] ?? '')
+                                                  .toString(),
+                                            ) ??
+                                            0;
                                       }
                                     }
-                                    final badges = _parseBadges(mm?['achievements'], createdAt: createdAt);
+                                    final badges = _parseBadges(
+                                      mm?['achievements'],
+                                      createdAt: createdAt,
+                                    );
                                     return badges.isEmpty
                                         ? Text(
                                             AppLanguage.tr(
@@ -2296,40 +2364,37 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
               if (mounted) setState(() {});
             },
             decoration: InputDecoration(
-              labelText: t(
-                context,
-                'Emoji ikonka skupiny',
-                'Group emoji icon',
-              ),
+              labelText: t(context, 'Emoji ikonka skupiny', 'Group emoji icon'),
               hintText: '💬',
             ),
           ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: [
-              '💬',
-              '🔥',
-              '🚀',
-              '🎮',
-              '📚',
-              '🎵',
-              '⚡',
-              '🛠️',
-              '🏆',
-              '🧠',
-              '🍕',
-              '🌍',
-            ]
-                .map(
-                  (emoji) => ActionChip(
-                    label: Text(emoji),
-                    onPressed: _saving
-                        ? null
-                        : () => setState(() => _logoEmoji.text = emoji),
-                  ),
-                )
-                .toList(growable: false),
+            children:
+                [
+                      '💬',
+                      '🔥',
+                      '🚀',
+                      '🎮',
+                      '📚',
+                      '🎵',
+                      '⚡',
+                      '🛠️',
+                      '🏆',
+                      '🧠',
+                      '🍕',
+                      '🌍',
+                    ]
+                    .map(
+                      (emoji) => ActionChip(
+                        label: Text(emoji),
+                        onPressed: _saving
+                            ? null
+                            : () => setState(() => _logoEmoji.text = emoji),
+                      ),
+                    )
+                    .toList(growable: false),
           ),
           const SizedBox(height: 10),
           Row(
@@ -2816,20 +2881,27 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                           if (m == null || m.isEmpty) {
                             return ListTile(
                               leading: const Icon(Icons.group_off),
-                              title: Text(t(context, 'Žádní členové', 'No members')),
+                              title: Text(
+                                t(context, 'Žádní členové', 'No members'),
+                              ),
                             );
                           }
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             _prefetchMemberProfiles(m);
                           });
                           final entries = m.entries.toList()
-                            ..sort((a, b) => (a.value['role'] == 'admin' ? -1 : 1));
+                            ..sort(
+                              (a, b) => (a.value['role'] == 'admin' ? -1 : 1),
+                            );
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 t(context, 'Členové skupiny', 'Group Members'),
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               ...entries.map((e) {
@@ -2837,22 +2909,25 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                 final memberMap = (e.value is Map)
                                     ? Map<String, dynamic>.from(e.value as Map)
                                     : <String, dynamic>{};
-                                final role =
-                                    (memberMap['role'] ?? 'member').toString();
+                                final role = (memberMap['role'] ?? 'member')
+                                    .toString();
                                 final fallbackAvatar =
                                     (memberMap['avatarUrl'] ?? '').toString();
                                 final cached = _memberProfileCache[uid];
-                                final gh =
-                                    (cached?['login'] ?? uid).toString().trim();
-                                final liveAvatar =
-                                    (cached?['avatarUrl'] ?? '').toString();
+                                final gh = (cached?['login'] ?? uid)
+                                    .toString()
+                                    .trim();
+                                final liveAvatar = (cached?['avatarUrl'] ?? '')
+                                    .toString();
                                 final avatar = liveAvatar.trim().isNotEmpty
                                     ? liveAvatar.trim()
                                     : fallbackAvatar.trim();
                                 final canOpenProfile =
-                                  gh.isNotEmpty && gh != uid;
+                                    gh.isNotEmpty && gh != uid;
                                 return Container(
-                                  margin: const EdgeInsets.symmetric(vertical: 3),
+                                  margin: const EdgeInsets.symmetric(
+                                    vertical: 3,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: Theme.of(context)
                                         .colorScheme
@@ -2938,7 +3013,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                               )
                               .toList(growable: false),
                         ),
-                            const SizedBox(height: 16),
+                        const SizedBox(height: 16),
                         FilledButton.tonalIcon(
                           onPressed: () =>
                               _pickAndUploadLogo(groupId: widget.groupId),
@@ -3197,8 +3272,7 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                           if (logo.isNotEmpty)
                                             'groupLogoUrl': logo,
                                           if (logoEmoji.trim().isNotEmpty)
-                                            'groupLogoEmoji':
-                                                logoEmoji.trim(),
+                                            'groupLogoEmoji': logoEmoji.trim(),
                                           'invitedByUid': current.uid,
                                           'invitedByGithub': myGithub,
                                           'createdAt': ServerValue.timestamp,
@@ -3574,41 +3648,40 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-
-// Top-level function for group achievements
-Future<void> checkGroupAchievements(String uid) async {
-  try {
-    final groupsSnap = await rtdb().ref('groupMembers').get();
-    final groupsVal = groupsSnap.value;
-    int groupCount = 0;
-    if (groupsVal is Map) {
-      for (final entry in groupsVal.entries) {
-        final members = entry.value;
-        if (members is Map && members.containsKey(uid)) {
-          groupCount++;
+  // Top-level function for group achievements
+  Future<void> checkGroupAchievements(String uid) async {
+    try {
+      final groupsSnap = await rtdb().ref('groupMembers').get();
+      final groupsVal = groupsSnap.value;
+      int groupCount = 0;
+      if (groupsVal is Map) {
+        for (final entry in groupsVal.entries) {
+          final members = entry.value;
+          if (members is Map && members.containsKey(uid)) {
+            groupCount++;
+          }
         }
       }
-    }
-    if (groupCount >= 1) {
-      await rtdb().ref('users/$uid/achievements/first_group').set({
-        'unlockedAt': ServerValue.timestamp,
-        'label': 'První skupina',
-      });
-    }
-    if (groupCount >= 10) {
-      await rtdb().ref('users/$uid/achievements/10_groups').set({
-        'unlockedAt': ServerValue.timestamp,
-        'label': '10 skupin',
-      });
-    }
-    if (groupCount >= 100) {
-      await rtdb().ref('users/$uid/achievements/100_groups').set({
-        'unlockedAt': ServerValue.timestamp,
-        'label': '100 skupin',
-      });
-    }
-  } catch (_) {}
-}
+      if (groupCount >= 1) {
+        await rtdb().ref('users/$uid/achievements/first_group').set({
+          'unlockedAt': ServerValue.timestamp,
+          'label': 'První skupina',
+        });
+      }
+      if (groupCount >= 10) {
+        await rtdb().ref('users/$uid/achievements/10_groups').set({
+          'unlockedAt': ServerValue.timestamp,
+          'label': '10 skupin',
+        });
+      }
+      if (groupCount >= 100) {
+        await rtdb().ref('users/$uid/achievements/100_groups').set({
+          'unlockedAt': ServerValue.timestamp,
+          'label': '100 skupin',
+        });
+      }
+    } catch (_) {}
+  }
 
   String _titleForIndex(BuildContext context, int index) {
     switch (index) {
@@ -3654,248 +3727,287 @@ Future<void> checkGroupAchievements(String uid) async {
         valueListenable: _chatsCanStepBack,
         builder: (context, canStepBack, _) {
           final showChatBack = _index == 1 && canStepBack;
-          final chatsState = _chatsKey.currentState;
-          final showDmActions = _index == 1 && (chatsState?.hasActiveDm ?? false);
-          final showGroupCallAction =
-              _index == 1 && (chatsState?.hasActiveGroup ?? false);
-          final showChatSearchAction =
-              _index == 1 &&
-              ((chatsState?.hasActiveDm ?? false) ||
-                  (chatsState?.hasActiveGroup ?? false));
           return ValueListenableBuilder<bool>(
             valueListenable: _chatsHasVerificationAlert,
             builder: (context, hasVerificationAlert, _) {
-              final showVerificationAction = _index == 1 && hasVerificationAlert;
-              return AppBar(
-                backgroundColor: const Color(0xFF0C1624),
-                surfaceTintColor: const Color(0xFF0C1624),
-                shadowColor: const Color(0xFF0C1624),
-                elevation: 0,
-                scrolledUnderElevation: 0,
-                centerTitle: true,
-                leadingWidth: showChatBack ? 56 : null,
-                leading: showChatBack
-                    ? IconButton(
-                        icon: const Icon(Icons.arrow_back),
-                        onPressed: () {
-                          final handled = _chatsKey.currentState?.handleBack() == true;
-                          if (handled && mounted) {
-                            setState(() {});
-                          }
-                        },
-                      )
-                    : null,
-                actions: (showVerificationAction ||
-                  showDmActions ||
-                  showGroupCallAction ||
-                  showChatSearchAction)
-                    ? [
-                        if (showVerificationAction)
-                          IconButton(
-                            tooltip: AppLanguage.tr(
-                              context,
-                              'Ověření účtu (notifikace)',
-                              'Account verification (notification)',
-                            ),
-                            icon: const Icon(Icons.check_circle_outline),
-                            onPressed: () =>
-                                chatsState?.openVerificationNotificationChat(),
-                          ),
-                        if (showDmActions)
-                          IconButton(
-                            tooltip: AppLanguage.tr(
-                              context,
-                              'Fingerprint klíčů',
-                              'Key fingerprint',
-                            ),
-                            icon: const Icon(Icons.fingerprint),
-                            onPressed: () => chatsState?.openActiveDmFingerprint(),
-                          ),
-                        if (showChatSearchAction)
-                          IconButton(
-                            tooltip: AppLanguage.tr(
-                              context,
-                              'Najít v chatu',
-                              'Find in chat',
-                            ),
-                            icon: const Icon(Icons.search),
-                            onPressed: () => chatsState?.openActiveChatFind(),
-                          ),
-                      ]
-                    : null,
-                title: ValueListenableBuilder<String?>(
-                  valueListenable: _chatsTopHandle,
-                  builder: (context, activeHandle, _) {
-                final handle = (_index == 1) ? activeHandle : null;
-                final currentChatsState = _chatsKey.currentState;
-                final canOpenGroup =
-                    _index == 1 && (currentChatsState?.hasActiveGroup ?? false);
-                final canOpenDmProfile =
-                    _index == 1 && (currentChatsState?.hasActiveDm ?? false);
-                final canCallDm =
-                    _index == 1 && (currentChatsState?.hasActiveDm ?? false);
-                final canCallGroup =
-                    _index == 1 && (currentChatsState?.hasActiveGroup ?? false);
-                final showCallLeft = canCallDm || canCallGroup;
-                final screenWidth = MediaQuery.sizeOf(context).width;
-                final pillMaxWidth =
-                  (screenWidth * (showCallLeft ? 0.46 : 0.56))
-                    .clamp(160.0, 320.0)
-                    .toDouble();
-                final handleMaxWidth =
-                  (pillMaxWidth * 0.58).clamp(90.0, 190.0).toDouble();
-                final dmPresenceUid =
-                  _index == 1 && (currentChatsState?.hasActiveDm ?? false)
-                  ? ((currentChatsState?.activeDmPresenceUid ?? '').trim())
-                  : '';
-                final isDmCompactPill =
-                  _index == 1 &&
-                  (currentChatsState?.hasActiveDm ?? false) &&
-                  (handle != null && handle.trim().isNotEmpty);
-                final isCallActive =
-                    (currentChatsState?.hasActiveDmCall ?? false) ||
-                    (currentChatsState?.hasActiveGroupCall ?? false);
-                final isPillClickable = canOpenGroup || canOpenDmProfile;
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (showCallLeft)
-                          IconButton(
-                            tooltip: AppLanguage.tr(
-                              context,
-                              canCallGroup ? 'Skupinový hovor' : 'Volat',
-                              canCallGroup ? 'Group call' : 'Call',
-                            ),
-                            icon: Icon(
-                              canCallGroup
-                                  ? (isCallActive ? Icons.call_end : Icons.groups)
-                                  : (isCallActive ? Icons.call_end : Icons.call),
-                              color: isCallActive ? Colors.redAccent : null,
-                            ),
+              final showVerificationAction =
+                  _index == 1 && hasVerificationAlert;
+              final shellBg = Theme.of(context).scaffoldBackgroundColor;
+              return ValueListenableBuilder<String?>(
+                valueListenable: _chatsTopHandle,
+                builder: (context, activeHandle, _) {
+                  final liveState = _chatsKey.currentState;
+                  final liveShowDmActions =
+                      _index == 1 && (liveState?.hasActiveDm ?? false);
+                  final liveShowGroupCallAction =
+                      _index == 1 && (liveState?.hasActiveGroup ?? false);
+                  final liveShowChatSearchAction =
+                      _index == 1 &&
+                      ((liveState?.hasActiveDm ?? false) ||
+                          (liveState?.hasActiveGroup ?? false));
+                  return AppBar(
+                    backgroundColor: shellBg,
+                    surfaceTintColor: shellBg,
+                    shadowColor: shellBg,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    centerTitle: true,
+                    leadingWidth: showChatBack ? 56 : null,
+                    leading: showChatBack
+                        ? IconButton(
+                            icon: const Icon(Icons.arrow_back),
                             onPressed: () {
-                              final liveState = _chatsKey.currentState;
-                              if (liveState == null) return;
-                              if (liveState.hasActiveGroup) {
-                                liveState.openActiveGroupCallAction();
-                                return;
-                              }
-                              if (liveState.hasActiveDm) {
-                                liveState.openActiveDmCallAction();
+                              final handled =
+                                  _chatsKey.currentState?.handleBack() == true;
+                              if (handled && mounted) {
+                                setState(() {});
                               }
                             },
-                          ),
-                        Material(
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(maxWidth: pillMaxWidth),
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: isPillClickable
-                                    ? () {
-                                        final liveState = _chatsKey.currentState;
-                                        if (liveState == null) return;
-                                        if (liveState.hasActiveGroup) {
-                                          liveState.openActiveGroupInfo();
-                                          return;
-                                        }
-                                        if (liveState.hasActiveDm) {
-                                          liveState.openActiveDmProfile();
-                                        }
-                                      }
-                                    : null,
-                                borderRadius: BorderRadius.circular(999),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: cs.surface,
+                          )
+                        : null,
+                    actions:
+                        (showVerificationAction ||
+                            liveShowDmActions ||
+                            liveShowGroupCallAction ||
+                            liveShowChatSearchAction)
+                        ? [
+                            if (showVerificationAction)
+                              IconButton(
+                                tooltip: AppLanguage.tr(
+                                  context,
+                                  'Ověření účtu (notifikace)',
+                                  'Account verification (notification)',
+                                ),
+                                icon: const Icon(Icons.check_circle_outline),
+                                onPressed: () => liveState
+                                    ?.openVerificationNotificationChat(),
+                              ),
+                            if (liveShowDmActions)
+                              IconButton(
+                                tooltip: AppLanguage.tr(
+                                  context,
+                                  'Fingerprint klíčů',
+                                  'Key fingerprint',
+                                ),
+                                icon: const Icon(Icons.fingerprint),
+                                onPressed: () =>
+                                    liveState?.openActiveDmFingerprint(),
+                              ),
+                            if (liveShowChatSearchAction)
+                              IconButton(
+                                tooltip: AppLanguage.tr(
+                                  context,
+                                  'Najít v chatu',
+                                  'Find in chat',
+                                ),
+                                icon: const Icon(Icons.search),
+                                onPressed: () =>
+                                    liveState?.openActiveChatFind(),
+                              ),
+                          ]
+                        : null,
+                    title: Builder(
+                      builder: (context) {
+                        final handle = (_index == 1) ? activeHandle : null;
+                        final currentChatsState = _chatsKey.currentState;
+                        final canOpenGroup =
+                            _index == 1 &&
+                            (currentChatsState?.hasActiveGroup ?? false);
+                        final canOpenDmProfile =
+                            _index == 1 &&
+                            (currentChatsState?.hasActiveDm ?? false);
+                        final canCallDm =
+                            _index == 1 &&
+                            (currentChatsState?.hasActiveDm ?? false);
+                        final canCallGroup =
+                            _index == 1 &&
+                            (currentChatsState?.hasActiveGroup ?? false);
+                        final showCallLeft = canCallDm || canCallGroup;
+                        final screenWidth = MediaQuery.sizeOf(context).width;
+                        final pillMaxWidth =
+                            (screenWidth * (showCallLeft ? 0.46 : 0.56))
+                                .clamp(160.0, 320.0)
+                                .toDouble();
+                        final handleMaxWidth = (pillMaxWidth * 0.58)
+                            .clamp(90.0, 190.0)
+                            .toDouble();
+                        final dmPresenceUid =
+                            _index == 1 &&
+                                (currentChatsState?.hasActiveDm ?? false)
+                            ? ((currentChatsState?.activeDmPresenceUid ?? '')
+                                  .trim())
+                            : '';
+                        final isDmCompactPill =
+                            _index == 1 &&
+                            (currentChatsState?.hasActiveDm ?? false) &&
+                            (handle != null && handle.trim().isNotEmpty);
+                        final isCallActive =
+                            (currentChatsState?.hasActiveDmCall ?? false) ||
+                            (currentChatsState?.hasActiveGroupCall ?? false);
+                        final isPillClickable =
+                            canOpenGroup || canOpenDmProfile;
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (showCallLeft)
+                              IconButton(
+                                tooltip: AppLanguage.tr(
+                                  context,
+                                  canCallGroup ? 'Skupinový hovor' : 'Volat',
+                                  canCallGroup ? 'Group call' : 'Call',
+                                ),
+                                icon: Icon(
+                                  canCallGroup
+                                      ? (isCallActive
+                                            ? Icons.call_end
+                                            : Icons.groups)
+                                      : (isCallActive
+                                            ? Icons.call_end
+                                            : Icons.call),
+                                  color: isCallActive ? Colors.redAccent : null,
+                                ),
+                                onPressed: () {
+                                  final liveState = _chatsKey.currentState;
+                                  if (liveState == null) return;
+                                  if (liveState.hasActiveGroup) {
+                                    liveState.openActiveGroupCallAction();
+                                    return;
+                                  }
+                                  if (liveState.hasActiveDm) {
+                                    liveState.openActiveDmCallAction();
+                                  }
+                                },
+                              ),
+                            Material(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxWidth: pillMaxWidth,
+                                ),
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: isPillClickable
+                                        ? () {
+                                            final liveState =
+                                                _chatsKey.currentState;
+                                            if (liveState == null) return;
+                                            if (liveState.hasActiveGroup) {
+                                              liveState.openActiveGroupInfo();
+                                              return;
+                                            }
+                                            if (liveState.hasActiveDm) {
+                                              liveState.openActiveDmProfile();
+                                            }
+                                          }
+                                        : null,
                                     borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(color: cs.outlineVariant),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (!isDmCompactPill)
-                                        Flexible(
-                                          child: Text(
-                                            title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w700,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: cs.surface,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        border: Border.all(
+                                          color: cs.outlineVariant,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (!isDmCompactPill)
+                                            Flexible(
+                                              child: Text(
+                                                title,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .titleMedium
+                                                    ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                              ),
+                                            ),
+                                          if (handle != null &&
+                                              handle.trim().isNotEmpty) ...[
+                                            if (!isDmCompactPill)
+                                              const SizedBox(width: 8),
+                                            if (dmPresenceUid.isNotEmpty) ...[
+                                              _PresenceDotByUid(
+                                                uid: dmPresenceUid,
+                                                size: 9,
+                                              ),
+                                              const SizedBox(width: 6),
+                                            ],
+                                            ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: handleMaxWidth,
+                                              ),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 3,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0x183B7FB8,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        999,
+                                                      ),
+                                                  border: Border.all(
+                                                    color: const Color(
+                                                      0x443B7FB8,
+                                                    ),
+                                                  ),
                                                 ),
-                                          ),
-                                        ),
-                                      if (handle != null &&
-                                          handle.trim().isNotEmpty) ...[
-                                        if (!isDmCompactPill)
-                                          const SizedBox(width: 8),
-                                        if (dmPresenceUid.isNotEmpty) ...[
-                                          _PresenceDotByUid(
-                                            uid: dmPresenceUid,
-                                            size: 9,
-                                          ),
-                                          const SizedBox(width: 6),
+                                                child: Text(
+                                                  handle,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Color(0xFF79A9D6),
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          if (isPillClickable &&
+                                              !isDmCompactPill) ...[
+                                            const SizedBox(width: 6),
+                                            Icon(
+                                              Icons.open_in_new,
+                                              size: 14,
+                                              color: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.color
+                                                  ?.withValues(alpha: 0.75),
+                                            ),
+                                          ],
                                         ],
-                                        ConstrainedBox(
-                                          constraints: BoxConstraints(
-                                            maxWidth: handleMaxWidth,
-                                          ),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 3,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0x1A58A6FF),
-                                              borderRadius: BorderRadius.circular(
-                                                999,
-                                              ),
-                                              border: Border.all(
-                                                color: const Color(0x4458A6FF),
-                                              ),
-                                            ),
-                                            child: Text(
-                                              handle,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                color: Color(0xFF8DC4FF),
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                      if (isPillClickable && !isDmCompactPill) ...[
-                                        const SizedBox(width: 6),
-                                        Icon(
-                                          Icons.open_in_new,
-                                          size: 14,
-                                          color: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.color
-                                              ?.withValues(alpha: 0.75),
-                                        ),
-                                      ],
-                                    ],
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
+                          ],
+                        );
+                      },
+                    ),
+                  );
+                },
               );
             },
           );
@@ -3909,6 +4021,7 @@ Future<void> checkGroupAchievements(String uid) async {
     required bool vibrationEnabled,
   }) {
     final cs = Theme.of(context).colorScheme;
+    final shellBg = Theme.of(context).scaffoldBackgroundColor;
     final items = <({IconData icon, String label})>[
       (icon: Icons.dashboard, label: 'Jobs'),
       (
@@ -3932,103 +4045,105 @@ Future<void> checkGroupAchievements(String uid) async {
     return SafeArea(
       top: false,
       child: Container(
-        color: const Color(0xFF0C1624),
+        color: shellBg,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
           child: LayoutBuilder(
-          builder: (context, c) {
-            final w = c.maxWidth;
-            final itemW = w / items.length;
-            const h = 64.0;
-            const inset = 4.0;
+            builder: (context, c) {
+              final w = c.maxWidth;
+              final itemW = w / items.length;
+              const h = 64.0;
+              const inset = 4.0;
 
-            return SizedBox(
-              height: h,
-              child: Stack(
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: cs.surface,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: cs.outlineVariant),
-                    ),
-                  ),
-                  Positioned(
-                    left: _index * itemW + inset,
-                    top: inset,
-                    width: itemW - inset * 2,
-                    height: h - inset * 2,
-                    child: Container(
+              return SizedBox(
+                height: h,
+                child: Stack(
+                  children: [
+                    Container(
                       decoration: BoxDecoration(
-                        color: cs.secondary,
+                        color: cs.surface,
                         borderRadius: BorderRadius.circular(999),
                         border: Border.all(color: cs.outlineVariant),
                       ),
                     ),
-                  ),
-                  Row(
-                    children: [
-                      for (var i = 0; i < items.length; i++)
-                        Expanded(
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(999),
-                            onTap: () {
-                              if (i != _index) {
-                                if (vibrationEnabled) {
-                                  HapticFeedback.selectionClick();
+                    Positioned(
+                      left: _index * itemW + inset,
+                      top: inset,
+                      width: itemW - inset * 2,
+                      height: h - inset * 2,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: cs.secondary,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: cs.outlineVariant),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        for (var i = 0; i < items.length; i++)
+                          Expanded(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: () {
+                                if (i != _index) {
+                                  if (vibrationEnabled) {
+                                    HapticFeedback.selectionClick();
+                                  }
                                 }
-                              }
-                              setState(() {
-                                if (i == 1 && _index != 1) {
-                                  // Ruční přepnutí na Chaty vždy otevře přehled.
-                                  _openChatLogin = null;
-                                  _openChatAvatarUrl = null;
-                                  _chatsOverviewToken++;
-                                }
-                                _index = i;
-                              });
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    items[i].icon,
-                                    size: 22,
-                                    color: (i == _index)
-                                        ? cs.onSecondary
-                                        : cs.onSurface,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    items[i].label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: (i == _index)
-                                              ? cs.onSecondary
-                                              : cs.onSurface,
-                                          fontWeight: (i == _index)
-                                              ? FontWeight.w700
-                                              : FontWeight.w500,
-                                        ),
-                                  ),
-                                ],
+                                setState(() {
+                                  if (i == 1 && _index != 1) {
+                                    // Ruční přepnutí na Chaty vždy otevře přehled.
+                                    _openChatLogin = null;
+                                    _openChatAvatarUrl = null;
+                                    _chatsOverviewToken++;
+                                  }
+                                  _index = i;
+                                });
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      items[i].icon,
+                                      size: 22,
+                                      color: (i == _index)
+                                          ? cs.onSecondary
+                                          : cs.onSurface,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      items[i].label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: (i == _index)
+                                                ? cs.onSecondary
+                                                : cs.onSurface,
+                                            fontWeight: (i == _index)
+                                                ? FontWeight.w700
+                                                : FontWeight.w500,
+                                          ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -4436,7 +4551,9 @@ Future<void> checkGroupAchievements(String uid) async {
     // Achievement za první přihlášení z webu
     try {
       if (_devicePlatformLabel().toLowerCase().contains('web')) {
-        final achRef = rtdb().ref('users/${current.uid}/achievements/first_web_login');
+        final achRef = rtdb().ref(
+          'users/${current.uid}/achievements/first_web_login',
+        );
         final snap = await achRef.get();
         if (!snap.exists) {
           await achRef.set({
@@ -4474,8 +4591,12 @@ Future<void> checkGroupAchievements(String uid) async {
       unawaited(_maybeShowPairingQrIfNeeded());
     }
 
-    unawaited(_listenAutoDeviceKeyTransfers(uid: current.uid, deviceId: deviceId));
-    unawaited(_requestAutoKeyRestoreIfNeeded(uid: current.uid, deviceId: deviceId));
+    unawaited(
+      _listenAutoDeviceKeyTransfers(uid: current.uid, deviceId: deviceId),
+    );
+    unawaited(
+      _requestAutoKeyRestoreIfNeeded(uid: current.uid, deviceId: deviceId),
+    );
   }
 
   Future<void> _maybeShowPairingQrIfNeeded() async {
@@ -4811,8 +4932,12 @@ Future<void> checkGroupAchievements(String uid) async {
             if (token.isEmpty || entry.value is! Map) continue;
             final m = Map<String, dynamic>.from(entry.value as Map);
             final status = (m['status'] ?? '').toString().trim();
-            final sourceDeviceId = (m['sourceDeviceId'] ?? '').toString().trim();
-            final targetDeviceId = (m['targetDeviceId'] ?? '').toString().trim();
+            final sourceDeviceId = (m['sourceDeviceId'] ?? '')
+                .toString()
+                .trim();
+            final targetDeviceId = (m['targetDeviceId'] ?? '')
+                .toString()
+                .trim();
 
             // This device should answer an automatic restore request.
             if (status == 'waiting_auto' &&
@@ -4828,9 +4953,11 @@ Future<void> checkGroupAchievements(String uid) async {
                   if (v is! Map) return;
                   final fresh = Map<String, dynamic>.from(v);
                   final freshStatus = (fresh['status'] ?? '').toString().trim();
-                  final freshSource =
-                      (fresh['sourceDeviceId'] ?? '').toString().trim();
-                  if (freshStatus != 'waiting_auto' || freshSource == deviceId) {
+                  final freshSource = (fresh['sourceDeviceId'] ?? '')
+                      .toString()
+                      .trim();
+                  if (freshStatus != 'waiting_auto' ||
+                      freshSource == deviceId) {
                     return;
                   }
 
@@ -4935,7 +5062,8 @@ Future<void> checkGroupAchievements(String uid) async {
 
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_autoRestoreInFlight) return;
-    if (now - _autoRestoreLastAttemptAt < _autoRestoreRetryThrottle.inMilliseconds) {
+    if (now - _autoRestoreLastAttemptAt <
+        _autoRestoreRetryThrottle.inMilliseconds) {
       return;
     }
 
@@ -4990,7 +5118,8 @@ Future<void> checkGroupAchievements(String uid) async {
         if (!hasOnlinePeer) return;
 
         final token =
-            rtdb().ref().push().key ?? DateTime.now().millisecondsSinceEpoch.toString();
+            rtdb().ref().push().key ??
+            DateTime.now().millisecondsSinceEpoch.toString();
         final expiresAt = DateTime.now()
             .add(const Duration(minutes: 5))
             .millisecondsSinceEpoch;
@@ -5041,7 +5170,9 @@ Future<void> checkGroupAchievements(String uid) async {
     if (state == AppLifecycleState.resumed) {
       final did = _currentDeviceId;
       if (did != null && did.isNotEmpty) {
-        unawaited(_requestAutoKeyRestoreIfNeeded(uid: current.uid, deviceId: did));
+        unawaited(
+          _requestAutoKeyRestoreIfNeeded(uid: current.uid, deviceId: did),
+        );
       }
       final online = _presenceStatus != 'hidden';
       presenceRef.update({
@@ -5309,8 +5440,8 @@ Future<void> checkGroupAchievements(String uid) async {
         ];
 
         final useLeftMenu = kIsWeb && MediaQuery.of(context).size.width >= 1000;
-        const shellDecoration = BoxDecoration(
-          color: Color(0xFF0C1624),
+        final shellDecoration = BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
         );
 
         return WillPopScope(
@@ -5815,9 +5946,7 @@ class _PresenceDotByUid extends StatelessWidget {
         } else if (status == 'dnd') {
           dotColor = const Color(0xFFEF4444);
         } else {
-          dotColor = online
-              ? const Color(0xFF22C55E)
-              : const Color(0xFF94A3B8);
+          dotColor = online ? const Color(0xFF22C55E) : const Color(0xFF94A3B8);
         }
 
         return Container(
@@ -6022,6 +6151,8 @@ class _JobsTabState extends State<_JobsTab> {
   _JobsAudience _audience = _JobsAudience.seekers;
   bool _posting = false;
   String _stackFilter = 'All';
+  double _audienceSwipeDx = 0;
+  double _audienceSwipeDy = 0;
 
   static const List<String> _stackFilters = <String>[
     'All',
@@ -6031,6 +6162,33 @@ class _JobsTabState extends State<_JobsTab> {
     'Python',
     'DevOps',
   ];
+
+  void _setAudience(_JobsAudience audience) {
+    if (_audience == audience) return;
+    setState(() => _audience = audience);
+  }
+
+  void _startAudienceSwipe(DragStartDetails _) {
+    _audienceSwipeDx = 0;
+    _audienceSwipeDy = 0;
+  }
+
+  void _updateAudienceSwipe(DragUpdateDetails details) {
+    _audienceSwipeDx += details.delta.dx;
+    _audienceSwipeDy += details.delta.dy.abs();
+  }
+
+  void _endAudienceSwipe(DragEndDetails _) {
+    final absDx = _audienceSwipeDx.abs();
+    final absDy = _audienceSwipeDy;
+    final isIntentionalHorizontal = absDx >= 52 && absDx > (absDy * 1.25);
+    if (!isIntentionalHorizontal) return;
+    if (_audienceSwipeDx < 0) {
+      _setAudience(_JobsAudience.companies);
+    } else {
+      _setAudience(_JobsAudience.seekers);
+    }
+  }
 
   List<String> _normalizeStackTags(String raw) {
     final tags = raw
@@ -6390,30 +6548,38 @@ class _JobsTabState extends State<_JobsTab> {
   }
 
   Widget _audienceSwitch() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      padding: const EdgeInsets.all(4),
-      child: Row(
-        children: [
-          Expanded(
-            child: _JobsTabButton(
-              label: _JobsAudience.seekers.tabTitle(context),
-              selected: _audience == _JobsAudience.seekers,
-              onTap: () => setState(() => _audience = _JobsAudience.seekers),
-            ),
+    return GestureDetector(
+      behavior: HitTestBehavior.deferToChild,
+      onHorizontalDragStart: _startAudienceSwipe,
+      onHorizontalDragUpdate: _updateAudienceSwipe,
+      onHorizontalDragEnd: _endAudienceSwipe,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
           ),
-          Expanded(
-            child: _JobsTabButton(
-              label: _JobsAudience.companies.tabTitle(context),
-              selected: _audience == _JobsAudience.companies,
-              onTap: () => setState(() => _audience = _JobsAudience.companies),
+        ),
+        padding: const EdgeInsets.all(5),
+        child: Row(
+          children: [
+            Expanded(
+              child: _JobsTabButton(
+                label: _JobsAudience.seekers.tabTitle(context),
+                selected: _audience == _JobsAudience.seekers,
+                onTap: () => _setAudience(_JobsAudience.seekers),
+              ),
             ),
-          ),
-        ],
+            Expanded(
+              child: _JobsTabButton(
+                label: _JobsAudience.companies.tabTitle(context),
+                selected: _audience == _JobsAudience.companies,
+                onTap: () => _setAudience(_JobsAudience.companies),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -6442,216 +6608,224 @@ class _JobsTabState extends State<_JobsTab> {
   Widget build(BuildContext context) {
     final feedRef = rtdb().ref(_audience.feedPath);
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-          child: _audienceSwitch(),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 10, 8),
-          child: Row(
-            children: [
-              Text(
-                _audience == _JobsAudience.seekers
-                    ? AppLanguage.tr(
-                        context,
-                        'Lidé, kteří hledají práci',
-                        'People looking for work',
-                      )
-                    : AppLanguage.tr(
-                        context,
-                        'Firmy, které hledají lidi',
-                        'Companies looking for people',
-                      ),
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const Spacer(),
-              IconButton(
-                tooltip: _audience.addLabel(context),
-                onPressed: _posting ? null : () => _openComposer(_audience),
-                icon: const Icon(Icons.add_circle_outline),
-              ),
-            ],
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: _startAudienceSwipe,
+      onHorizontalDragUpdate: _updateAudienceSwipe,
+      onHorizontalDragEnd: _endAudienceSwipe,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: _audienceSwitch(),
           ),
-        ),
-        _stackFilterBar(),
-        const SizedBox(height: 8),
-        Expanded(
-          child: StreamBuilder<DatabaseEvent>(
-            stream: feedRef.onValue,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              return FutureBuilder<List<_JobsPostView>>(
-                future: _readPosts(snapshot.data?.snapshot.value),
-                builder: (context, postsSnap) {
-                  if (postsSnap.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  if (postsSnap.hasError) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                          '${AppLanguage.tr(context, 'Nepodařilo se načíst Jobs feed.', 'Failed to load Jobs feed.')} ${postsSnap.error}',
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    );
-                  }
-
-                  var posts = postsSnap.data ?? const <_JobsPostView>[];
-                  if (_stackFilter != 'All') {
-                    posts = posts
-                        .where(
-                          (p) => p.stackTags.any(
-                            (s) =>
-                                s.toLowerCase() == _stackFilter.toLowerCase(),
-                          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 10, 8),
+            child: Row(
+              children: [
+                Text(
+                  _audience == _JobsAudience.seekers
+                      ? AppLanguage.tr(
+                          context,
+                          'Lidé, kteří hledají práci',
+                          'People looking for work',
                         )
-                        .toList(growable: false);
-                  }
-                  if (posts.isEmpty) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Text(
-                          _audience == _JobsAudience.seekers
-                              ? AppLanguage.tr(
-                                  context,
-                                  'Zatím tu nejsou žádné profily. Přidej první přes +.',
-                                  'No profiles here yet. Add the first one with +.',
-                                )
-                              : AppLanguage.tr(
-                                  context,
-                                  'Zatím tu nejsou žádné nabídky. Přidej první přes +.',
-                                  'No listings here yet. Add the first one with +.',
-                                ),
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodyLarge,
+                      : AppLanguage.tr(
+                          context,
+                          'Firmy, které hledají lidi',
+                          'Companies looking for people',
                         ),
-                      ),
-                    );
-                  }
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: _audience.addLabel(context),
+                  onPressed: _posting ? null : () => _openComposer(_audience),
+                  icon: const Icon(Icons.add_circle_outline),
+                ),
+              ],
+            ),
+          ),
+          _stackFilterBar(),
+          const SizedBox(height: 8),
+          Expanded(
+            child: StreamBuilder<DatabaseEvent>(
+              stream: feedRef.onValue,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-                  Future<void> _handleApply(_JobsPostView post) async {
-                    final user = FirebaseAuth.instance.currentUser;
-                    if (user == null) return;
-                    final myLogin = await _githubLoginForUid(user.uid);
-                    final authorLogin = post.author;
-                    final chatLink = 'https://github.com/$myLogin';
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Chat s @$authorLogin byl vytvořen! Váš odkaz: $chatLink',
+                return FutureBuilder<List<_JobsPostView>>(
+                  future: _readPosts(snapshot.data?.snapshot.value),
+                  builder: (context, postsSnap) {
+                    if (postsSnap.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    if (postsSnap.hasError) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            '${AppLanguage.tr(context, 'Nepodařilo se načíst Jobs feed.', 'Failed to load Jobs feed.')} ${postsSnap.error}',
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       );
                     }
-                    // TODO: Implementovat skutečné vytvoření chatu a odeslání odkazu
-                  }
 
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
-                    itemCount: posts.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final post = posts[index];
-                      final currentUid = FirebaseAuth.instance.currentUser?.uid;
-                      final isMine =
-                          currentUid != null && post.authorUid == currentUid;
-                      return _JobsPostCard(
-                        post: post,
-                        timeLabel: _timeLabel(post.createdAt),
-                        isMine: isMine,
-                        onOpenProfile: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => _UserProfilePage(
-                                login: post.author,
-                                avatarUrl: post.authorAvatarUrl,
-                                githubDataFuture: _fetchGithubProfileData(
-                                  post.author,
+                    var posts = postsSnap.data ?? const <_JobsPostView>[];
+                    if (_stackFilter != 'All') {
+                      posts = posts
+                          .where(
+                            (p) => p.stackTags.any(
+                              (s) =>
+                                  s.toLowerCase() == _stackFilter.toLowerCase(),
+                            ),
+                          )
+                          .toList(growable: false);
+                    }
+                    if (posts.isEmpty) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            _audience == _JobsAudience.seekers
+                                ? AppLanguage.tr(
+                                    context,
+                                    'Zatím tu nejsou žádné profily. Přidej první přes +.',
+                                    'No profiles here yet. Add the first one with +.',
+                                  )
+                                : AppLanguage.tr(
+                                    context,
+                                    'Zatím tu nejsou žádné nabídky. Přidej první přes +.',
+                                    'No listings here yet. Add the first one with +.',
+                                  ),
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                        ),
+                      );
+                    }
+
+                    Future<void> _handleApply(_JobsPostView post) async {
+                      final user = FirebaseAuth.instance.currentUser;
+                      if (user == null) return;
+                      final myLogin = await _githubLoginForUid(user.uid);
+                      final authorLogin = post.author;
+                      final chatLink = 'https://github.com/$myLogin';
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Chat s @$authorLogin byl vytvořen! Váš odkaz: $chatLink',
+                            ),
+                          ),
+                        );
+                      }
+                      // TODO: Implementovat skutečné vytvoření chatu a odeslání odkazu
+                    }
+
+                    return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+                      itemCount: posts.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final post = posts[index];
+                        final currentUid =
+                            FirebaseAuth.instance.currentUser?.uid;
+                        final isMine =
+                            currentUid != null && post.authorUid == currentUid;
+                        return _JobsPostCard(
+                          post: post,
+                          timeLabel: _timeLabel(post.createdAt),
+                          isMine: isMine,
+                          onOpenProfile: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => _UserProfilePage(
+                                  login: post.author,
+                                  avatarUrl: post.authorAvatarUrl,
+                                  githubDataFuture: _fetchGithubProfileData(
+                                    post.author,
+                                  ),
                                 ),
                               ),
-                            ),
-                          );
-                        },
-                        onEdit: isMine
-                            ? () => _openComposer(_audience, editingPost: post)
-                            : null,
-                        onDelete: isMine
-                            ? () async {
-                                final ok =
-                                    await showDialog<bool>(
-                                      context: context,
-                                      builder: (ctx) => AlertDialog(
-                                        title: Text(
-                                          AppLanguage.tr(
-                                            context,
-                                            'Smazat příspěvek?',
-                                            'Delete post?',
-                                          ),
-                                        ),
-                                        content: Text(
-                                          AppLanguage.tr(
-                                            context,
-                                            'Tato akce nejde vrátit zpět.',
-                                            'This action cannot be undone.',
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.of(ctx).pop(false),
-                                            child: Text(
-                                              AppLanguage.tr(
-                                                context,
-                                                'Zrušit',
-                                                'Cancel',
-                                              ),
+                            );
+                          },
+                          onEdit: isMine
+                              ? () =>
+                                    _openComposer(_audience, editingPost: post)
+                              : null,
+                          onDelete: isMine
+                              ? () async {
+                                  final ok =
+                                      await showDialog<bool>(
+                                        context: context,
+                                        builder: (ctx) => AlertDialog(
+                                          title: Text(
+                                            AppLanguage.tr(
+                                              context,
+                                              'Smazat příspěvek?',
+                                              'Delete post?',
                                             ),
                                           ),
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.of(ctx).pop(true),
-                                            child: Text(
-                                              AppLanguage.tr(
-                                                context,
-                                                'Smazat',
-                                                'Delete',
-                                              ),
+                                          content: Text(
+                                            AppLanguage.tr(
+                                              context,
+                                              'Tato akce nejde vrátit zpět.',
+                                              'This action cannot be undone.',
                                             ),
                                           ),
-                                        ],
-                                      ),
-                                    ) ??
-                                    false;
-                                if (!ok) return;
-                                await _deletePost(
-                                  audience: _audience,
-                                  post: post,
-                                );
-                              }
-                            : null,
-                        onApply: () => _handleApply(post),
-                      );
-                    },
-                  );
-                  // removed duplicate _handleApply
-                },
-              );
-            },
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.of(ctx).pop(false),
+                                              child: Text(
+                                                AppLanguage.tr(
+                                                  context,
+                                                  'Zrušit',
+                                                  'Cancel',
+                                                ),
+                                              ),
+                                            ),
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.of(ctx).pop(true),
+                                              child: Text(
+                                                AppLanguage.tr(
+                                                  context,
+                                                  'Smazat',
+                                                  'Delete',
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ) ??
+                                      false;
+                                  if (!ok) return;
+                                  await _deletePost(
+                                    audience: _audience,
+                                    post: post,
+                                  );
+                                }
+                              : null,
+                          onApply: () => _handleApply(post),
+                        );
+                      },
+                    );
+                    // removed duplicate _handleApply
+                  },
+                );
+              },
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -6676,7 +6850,7 @@ class _JobsTabButton extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
         decoration: BoxDecoration(
           color: selected ? cs.secondary : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
@@ -6686,6 +6860,7 @@ class _JobsTabButton extends StatelessWidget {
           textAlign: TextAlign.center,
           style: TextStyle(
             fontWeight: FontWeight.w700,
+            fontSize: 14,
             color: selected ? cs.onSecondary : cs.onSurface,
           ),
         ),
@@ -6787,8 +6962,9 @@ class _JobsPostCard extends StatelessWidget {
                         ),
                         child: Text(
                           '@${post.author}',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: ghAccent,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: ghAccent,
                                 fontWeight: FontWeight.w700,
                               ),
                         ),
@@ -6797,9 +6973,9 @@ class _JobsPostCard extends StatelessWidget {
                   else
                     Text(
                       '@${post.author}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.white70,
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: Colors.white70),
                     ),
                   Text(
                     ' • $timeLabel',
@@ -6828,7 +7004,8 @@ class _JobsPostCard extends StatelessWidget {
                           ),
                           child: Text(
                             tag,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
                                   color: const Color(0xFFB9DCFF),
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -8383,10 +8560,16 @@ class _UsageSummaryCard extends StatelessWidget {
           children: [
             Text(
               title,
-              style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
             ),
             const SizedBox(height: 6),
-            Text('Celkem: $total', style: TextStyle(color: cs.onSurfaceVariant)),
+            Text(
+              'Celkem: $total',
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
             Text('$rxLabel: $rx', style: TextStyle(color: cs.onSurfaceVariant)),
             Text('$txLabel: $tx', style: TextStyle(color: cs.onSurfaceVariant)),
           ],
@@ -8428,7 +8611,10 @@ class _NetworkUsageCard extends StatelessWidget {
           children: [
             Text(
               title,
-              style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
@@ -9742,7 +9928,7 @@ class _ChatPreview extends StatelessWidget {
       required String text,
       required double maxWidth,
     }) {
-        final tcolor = outgoing ? outText : inText;
+      final tcolor = outgoing ? outText : inText;
       return Align(
         alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
         child: ConstrainedBox(
@@ -9751,7 +9937,7 @@ class _ChatPreview extends StatelessWidget {
             margin: const EdgeInsets.symmetric(vertical: 6),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-                color: Colors.transparent,
+              color: Colors.transparent,
               borderRadius: BorderRadius.circular(settings.bubbleRadius),
             ),
             child: Text(
@@ -10050,46 +10236,45 @@ class _ProfileSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xA6213448), Color(0x7F162636)],
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant, width: 1.15),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33040A11),
-            blurRadius: 18,
-            offset: Offset(0, 10),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF1E3147), Color(0xFF152434)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: cs.outlineVariant, width: 1.15),
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (icon != null) ...[
-                Icon(icon, size: 18),
-                const SizedBox(width: 8),
-              ],
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 18),
+                    const SizedBox(width: 8),
+                  ],
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 10),
+              child,
             ],
           ),
-          const SizedBox(height: 10),
-          child,
-        ],
+        ),
       ),
     );
   }
@@ -11006,7 +11191,9 @@ class _ContactsTabState extends State<_ContactsTab> {
       Future<void> checkFirstFileAchievement(String uid) async {
         try {
           final filesSnap = await rtdb().ref('files/$uid').get();
-          if (filesSnap.exists && filesSnap.value is Map && (filesSnap.value as Map).isNotEmpty) {
+          if (filesSnap.exists &&
+              filesSnap.value is Map &&
+              (filesSnap.value as Map).isNotEmpty) {
             await rtdb().ref('users/$uid/achievements/first_file').set({
               'unlockedAt': ServerValue.timestamp,
               'label': 'První soubor odeslán',
@@ -11018,8 +11205,12 @@ class _ContactsTabState extends State<_ContactsTab> {
       // Achievement: 7 days dark mode
       Future<void> checkDarkModeStreakAchievement(String uid) async {
         try {
-          final streakSnap = await rtdb().ref('users/$uid/dark_mode_streak').get();
-          final streak = (streakSnap.value is int) ? streakSnap.value as int : int.tryParse('${streakSnap.value}') ?? 0;
+          final streakSnap = await rtdb()
+              .ref('users/$uid/dark_mode_streak')
+              .get();
+          final streak = (streakSnap.value is int)
+              ? streakSnap.value as int
+              : int.tryParse('${streakSnap.value}') ?? 0;
           if (streak >= 7) {
             await rtdb().ref('users/$uid/achievements/7_days_dark_mode').set({
               'unlockedAt': ServerValue.timestamp,
@@ -11033,7 +11224,8 @@ class _ContactsTabState extends State<_ContactsTab> {
       Future<void> checkThreePlatformsAchievement(String uid) async {
         try {
           final platSnap = await rtdb().ref('users/$uid/platforms').get();
-          if (platSnap.value is List && (platSnap.value as List).toSet().length >= 3) {
+          if (platSnap.value is List &&
+              (platSnap.value as List).toSet().length >= 3) {
             await rtdb().ref('users/$uid/achievements/3_platforms').set({
               'unlockedAt': ServerValue.timestamp,
               'label': 'Přihlášení ze 3 platforem',
@@ -11046,7 +11238,9 @@ class _ContactsTabState extends State<_ContactsTab> {
       Future<void> checkThirtyDaysStreakAchievement(String uid) async {
         try {
           final streakSnap = await rtdb().ref('users/$uid/login_streak').get();
-          final streak = (streakSnap.value is int) ? streakSnap.value as int : int.tryParse('${streakSnap.value}') ?? 0;
+          final streak = (streakSnap.value is int)
+              ? streakSnap.value as int
+              : int.tryParse('${streakSnap.value}') ?? 0;
           if (streak >= 30) {
             await rtdb().ref('users/$uid/achievements/30_days_streak').set({
               'unlockedAt': ServerValue.timestamp,
@@ -11060,7 +11254,9 @@ class _ContactsTabState extends State<_ContactsTab> {
       Future<void> checkFirstNotificationAchievement(String uid) async {
         try {
           final notifSnap = await rtdb().ref('users/$uid/notifications').get();
-          if (notifSnap.exists && notifSnap.value is Map && (notifSnap.value as Map).isNotEmpty) {
+          if (notifSnap.exists &&
+              notifSnap.value is Map &&
+              (notifSnap.value as Map).isNotEmpty) {
             await rtdb().ref('users/$uid/achievements/first_notification').set({
               'unlockedAt': ServerValue.timestamp,
               'label': 'První notifikace',
@@ -11072,8 +11268,13 @@ class _ContactsTabState extends State<_ContactsTab> {
       // Achievement: first search
       Future<void> checkFirstSearchAchievement(String uid) async {
         try {
-          final searchSnap = await rtdb().ref('users/$uid/search_history').get();
-          if (searchSnap.exists && searchSnap.value is List && (searchSnap.value as List).isNotEmpty) {
+          final searchSnap = await rtdb()
+              .ref('users/$uid/search_history')
+              .get();
+          final v = searchSnap.value;
+          final hasSearch =
+              (v is List && v.isNotEmpty) || (v is Map && v.isNotEmpty);
+          if (searchSnap.exists && hasSearch) {
             await rtdb().ref('users/$uid/achievements/first_search').set({
               'unlockedAt': ServerValue.timestamp,
               'label': 'První vyhledávání',
@@ -11086,7 +11287,9 @@ class _ContactsTabState extends State<_ContactsTab> {
       Future<void> checkFirstProfileEditAchievement(String uid) async {
         try {
           final editSnap = await rtdb().ref('users/$uid/profile_edits').get();
-          if (editSnap.exists && editSnap.value is int && (editSnap.value as int) > 0) {
+          if (editSnap.exists &&
+              editSnap.value is int &&
+              (editSnap.value as int) > 0) {
             await rtdb().ref('users/$uid/achievements/first_profile_edit').set({
               'unlockedAt': ServerValue.timestamp,
               'label': 'První úprava profilu',
@@ -11094,6 +11297,14 @@ class _ContactsTabState extends State<_ContactsTab> {
           }
         } catch (_) {}
       }
+
+      await checkFirstFileAchievement(current.uid);
+      await checkDarkModeStreakAchievement(current.uid);
+      await checkThreePlatformsAchievement(current.uid);
+      await checkThirtyDaysStreakAchievement(current.uid);
+      await checkFirstNotificationAchievement(current.uid);
+      await checkFirstSearchAchievement(current.uid);
+      await checkFirstProfileEditAchievement(current.uid);
     } catch (_) {}
   }
 
@@ -11492,7 +11703,7 @@ class _ChatsTab extends StatefulWidget {
 }
 
 class _ChatsTabState extends State<_ChatsTab>
-  with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   String? _activeLogin;
   String? _activeAvatarUrl;
   String? _activeOtherUid;
@@ -11549,24 +11760,24 @@ class _ChatsTabState extends State<_ChatsTab>
   final Map<String, List<Map<String, dynamic>>> _localOnlyChatNotes =
       <String, List<Map<String, dynamic>>>{};
   String? _lastAutoScrolledChatViewKey;
-    final Map<String, String> _lastObservedBottomMsgKeyByChat =
+  final Map<String, String> _lastObservedBottomMsgKeyByChat =
       <String, String>{};
-    final Map<String, int> _lastObservedMsgCountByChat = <String, int>{};
-    final Map<String, int> _pendingNewCountByChat = <String, int>{};
-    String? _activeDmScrollChatViewKey;
+  final Map<String, int> _lastObservedMsgCountByChat = <String, int>{};
+  final Map<String, int> _pendingNewCountByChat = <String, int>{};
+  String? _activeDmScrollChatViewKey;
   StreamSubscription<DatabaseEvent>? _incomingCallInviteSub;
   StreamSubscription<DatabaseEvent>? _callResponseSub;
-    StreamSubscription<DatabaseEvent>? _dmThreadAddedSub;
-    StreamSubscription<DatabaseEvent>? _dmThreadRemovedSub;
-    final Map<String, StreamSubscription<DatabaseEvent>> _dmIncomingSubs =
+  StreamSubscription<DatabaseEvent>? _dmThreadAddedSub;
+  StreamSubscription<DatabaseEvent>? _dmThreadRemovedSub;
+  final Map<String, StreamSubscription<DatabaseEvent>> _dmIncomingSubs =
       <String, StreamSubscription<DatabaseEvent>>{};
-    StreamSubscription<DatabaseEvent>? _userGroupsSub;
-    final Map<String, StreamSubscription<DatabaseEvent>> _groupIncomingSubs =
+  StreamSubscription<DatabaseEvent>? _userGroupsSub;
+  final Map<String, StreamSubscription<DatabaseEvent>> _groupIncomingSubs =
       <String, StreamSubscription<DatabaseEvent>>{};
-    final Map<String, String> _groupTitleCache = <String, String>{};
-    final Set<String> _incomingNotificationSeen = <String>{};
-    int _incomingNotificationsStartMs = 0;
-    bool _incomingNotificationsRunning = false;
+  final Map<String, String> _groupTitleCache = <String, String>{};
+  final Set<String> _incomingNotificationSeen = <String>{};
+  int _incomingNotificationsStartMs = 0;
+  bool _incomingNotificationsRunning = false;
   Timer? _outgoingCallTimeout;
   Timer? _callElapsedTicker;
   Timer? _callRingingFeedbackTicker;
@@ -11847,11 +12058,7 @@ class _ChatsTabState extends State<_ChatsTab>
   void _startCallRingingFeedback({required bool incoming}) {
     _stopCallRingingFeedback();
     unawaited(
-      _emitCallFeedback(
-        alertTone: true,
-        heavy: incoming,
-        medium: !incoming,
-      ),
+      _emitCallFeedback(alertTone: true, heavy: incoming, medium: !incoming),
     );
 
     var pulse = 0;
@@ -11913,7 +12120,10 @@ class _ChatsTabState extends State<_ChatsTab>
     return raw.substring(i + 1);
   }
 
-  void _callLog(String event, [Map<String, Object?> details = const <String, Object?>{}]) {
+  void _callLog(
+    String event, [
+    Map<String, Object?> details = const <String, Object?>{},
+  ]) {
     final ts = DateTime.now().toIso8601String();
     final safe = <String, Object?>{};
     for (final e in details.entries) {
@@ -12018,7 +12228,11 @@ class _ChatsTabState extends State<_ChatsTab>
     } else {
       out.add(
         _callDiagBadge(
-          label: AppLanguage.tr(context, 'network: probing', 'network: probing'),
+          label: AppLanguage.tr(
+            context,
+            'network: probing',
+            'network: probing',
+          ),
           bg: const Color(0xFF1F2937),
           fg: const Color(0xFFD1D5DB),
           icon: Icons.network_check,
@@ -12106,50 +12320,49 @@ class _ChatsTabState extends State<_ChatsTab>
       'activeCallId': (_activeCallId ?? '').trim(),
       'isCaller': _dmIsCaller,
     });
-    _callConnectingWatchdog = Timer.periodic(
-      const Duration(seconds: 6),
-      (_) async {
-        if (!mounted) return;
-        if (!_dmIsCaller || _callConnected) return;
-        if (_activeCallId == null || _activeCallId!.trim().isEmpty) return;
-        if (_callConnectRestartAttempts >= 4) return;
+    _callConnectingWatchdog = Timer.periodic(const Duration(seconds: 6), (
+      _,
+    ) async {
+      if (!mounted) return;
+      if (!_dmIsCaller || _callConnected) return;
+      if (_activeCallId == null || _activeCallId!.trim().isEmpty) return;
+      if (_callConnectRestartAttempts >= 4) return;
 
-        final ice = _callIceState.toLowerCase();
-        if (ice == 'connected' || ice == 'completed') return;
+      final ice = _callIceState.toLowerCase();
+      if (ice == 'connected' || ice == 'completed') return;
 
-        final pc = _dmPeerConnection;
-        if (pc == null) return;
+      final pc = _dmPeerConnection;
+      if (pc == null) return;
 
-        _callConnectRestartAttempts++;
-        _callLog('watchdog_restart_attempt', {
+      _callConnectRestartAttempts++;
+      _callLog('watchdog_restart_attempt', {
+        'attempt': _callConnectRestartAttempts,
+        'callId': (_activeCallId ?? '').trim(),
+        'ice': _callIceState,
+        'pc': _callPeerConnectionState,
+      });
+      try {
+        final offer = await pc.createOffer(<String, dynamic>{
+          'iceRestart': true,
+          'offerToReceiveAudio': true,
+        });
+        await pc.setLocalDescription(offer);
+        await _sendDmWebRtcSignal(
+          action: 'webrtc_offer',
+          data: <String, dynamic>{
+            'sdp': offer.sdp ?? '',
+            'sdpType': offer.type ?? 'offer',
+            'restart': true,
+          },
+        );
+      } catch (_) {
+        // best-effort watchdog restart
+        _callLog('watchdog_restart_failed', {
           'attempt': _callConnectRestartAttempts,
           'callId': (_activeCallId ?? '').trim(),
-          'ice': _callIceState,
-          'pc': _callPeerConnectionState,
         });
-        try {
-          final offer = await pc.createOffer(<String, dynamic>{
-            'iceRestart': true,
-            'offerToReceiveAudio': true,
-          });
-          await pc.setLocalDescription(offer);
-          await _sendDmWebRtcSignal(
-            action: 'webrtc_offer',
-            data: <String, dynamic>{
-              'sdp': offer.sdp ?? '',
-              'sdpType': offer.type ?? 'offer',
-              'restart': true,
-            },
-          );
-        } catch (_) {
-          // best-effort watchdog restart
-          _callLog('watchdog_restart_failed', {
-            'attempt': _callConnectRestartAttempts,
-            'callId': (_activeCallId ?? '').trim(),
-          });
-        }
-      },
-    );
+      }
+    });
   }
 
   Future<void> _cancelOutgoingDmRinging() async {
@@ -12212,7 +12425,10 @@ class _ChatsTabState extends State<_ChatsTab>
             color: const Color(0xE6111822),
             child: SafeArea(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 22,
+                ),
                 child: Column(
                   children: [
                     const Spacer(),
@@ -12222,11 +12438,14 @@ class _ChatsTabState extends State<_ChatsTab>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: const Color(0xFF132A1C),
-                        border: Border.all(color: const Color(0xFF3FB950), width: 2),
+                        border: Border.all(
+                          color: const Color(0xFF2A8C63),
+                          width: 2,
+                        ),
                       ),
                       child: const Icon(
                         Icons.verified_user_rounded,
-                        color: Color(0xFF3FB950),
+                        color: Color(0xFF2A8C63),
                         size: 52,
                       ),
                     ),
@@ -12244,11 +12463,17 @@ class _ChatsTabState extends State<_ChatsTab>
                     Text(
                       _callPeerLabel(context),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70, fontSize: 15),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
+                      ),
                     ),
                     const SizedBox(height: 14),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFF0E4429),
                         borderRadius: BorderRadius.circular(999),
@@ -12284,13 +12509,23 @@ class _ChatsTabState extends State<_ChatsTab>
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           IconButton.filledTonal(
-                            tooltip: AppLanguage.tr(context, 'Mikrofon', 'Microphone'),
+                            tooltip: AppLanguage.tr(
+                              context,
+                              'Mikrofon',
+                              'Microphone',
+                            ),
                             onPressed: () => _toggleDmMic(),
-                            icon: Icon(_dmMicEnabled ? Icons.mic : Icons.mic_off),
+                            icon: Icon(
+                              _dmMicEnabled ? Icons.mic : Icons.mic_off,
+                            ),
                           ),
                           const SizedBox(width: 16),
                           IconButton.filledTonal(
-                            tooltip: AppLanguage.tr(context, 'Reproduktor', 'Speaker'),
+                            tooltip: AppLanguage.tr(
+                              context,
+                              'Reproduktor',
+                              'Speaker',
+                            ),
                             onPressed: () => _toggleDmSpeaker(),
                             icon: Icon(
                               _dmSpeakerEnabled
@@ -12312,9 +12547,7 @@ class _ChatsTabState extends State<_ChatsTab>
                       ),
                       onPressed: () => _callPrimaryAction(),
                       icon: const Icon(Icons.call_end),
-                      label: Text(
-                        AppLanguage.tr(context, 'Ukončit', 'End'),
-                      ),
+                      label: Text(AppLanguage.tr(context, 'Ukončit', 'End')),
                     ),
                   ],
                 ),
@@ -12516,7 +12749,9 @@ class _ChatsTabState extends State<_ChatsTab>
       _callMicDenied = true;
       _callPeerConnectionState = 'mic_denied';
       if (mounted) setState(() {});
-      _callLog('webrtc_get_user_media_failed', {'reason': 'mic_denied_or_unavailable'});
+      _callLog('webrtc_get_user_media_failed', {
+        'reason': 'mic_denied_or_unavailable',
+      });
       if (mounted) {
         _safeShowSnackBarSnackBar(
           SnackBar(
@@ -12597,15 +12832,18 @@ class _ChatsTabState extends State<_ChatsTab>
         return;
       }
 
-      if (state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+      if (state ==
+              rtc.RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
           state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
         if (_dmIsCaller && _dmReconnectAttempts < 3) {
           _dmReconnectAttempts++;
           try {
-            final offer = await _dmPeerConnection!.createOffer(<String, dynamic>{
-              'iceRestart': true,
-              'offerToReceiveAudio': true,
-            });
+            final offer = await _dmPeerConnection!.createOffer(
+              <String, dynamic>{
+                'iceRestart': true,
+                'offerToReceiveAudio': true,
+              },
+            );
             await _dmPeerConnection!.setLocalDescription(offer);
             await _sendDmWebRtcSignal(
               action: 'webrtc_offer',
@@ -13008,7 +13246,10 @@ class _ChatsTabState extends State<_ChatsTab>
         otherUid: peerUid,
         plaintext: jsonEncode(payload),
       );
-      _callLog('dm_call_invite_encrypted', {'callId': callId, 'peerUid': peerUid});
+      _callLog('dm_call_invite_encrypted', {
+        'callId': callId,
+        'peerUid': peerUid,
+      });
     } catch (_) {
       // Fallback: keep call invite delivery working with plaintext payload.
       _callLog('dm_call_invite_encrypt_failed_fallback_plain', {
@@ -13029,7 +13270,10 @@ class _ChatsTabState extends State<_ChatsTab>
       await rtdb().ref('callInvites/$peerUid/$callId').set(offerPacket);
       _callLog('dm_call_invite_sent', {'callId': callId, 'peerUid': peerUid});
     } catch (_) {
-      _callLog('dm_call_invite_send_failed', {'callId': callId, 'peerUid': peerUid});
+      _callLog('dm_call_invite_send_failed', {
+        'callId': callId,
+        'peerUid': peerUid,
+      });
       return;
     }
 
@@ -13079,309 +13323,342 @@ class _ChatsTabState extends State<_ChatsTab>
         .ref('callInvites/${current.uid}')
         .onChildAdded
         .listen((event) async {
-      final callId = event.snapshot.key?.toString() ?? '';
-      final raw = event.snapshot.value;
-      if (callId.isEmpty || raw is! Map) return;
-      final packet = Map<String, dynamic>.from(raw);
-      packet['__key'] = callId;
-      Future<void> removeCurrent() async {
-        try {
-          await rtdb().ref('callResponses/${current.uid}/$callId').remove();
-        } catch (_) {}
-      }
-      final fromUid = (packet['fromUid'] ?? '').toString();
-      if (fromUid.isEmpty) {
-        await removeCurrent();
-        return;
-      }
-      _callLog('incoming_call_invite_received', {'callId': callId, 'fromUid': fromUid});
-
-      String clear;
-      try {
-        clear = await E2ee.decryptFromUser(otherUid: fromUid, message: packet);
-        _callLog('incoming_call_invite_decrypt_ok', {'callId': callId, 'fromUid': fromUid});
-      } catch (_) {
-        final plain = (packet['payloadPlain'] ?? '').toString().trim();
-        if (plain.isEmpty) {
-          await removeCurrent();
-          return;
-        }
-        clear = plain;
-        _callLog('incoming_call_invite_decrypt_failed_using_plain', {
-          'callId': callId,
-          'fromUid': fromUid,
-        });
-      }
-
-      Map<String, dynamic> payload;
-      try {
-        final decoded = jsonDecode(clear);
-        if (decoded is! Map) {
-          await removeCurrent();
-          return;
-        }
-        payload = Map<String, dynamic>.from(decoded);
-      } catch (_) {
-        await removeCurrent();
-        return;
-      }
-
-      final offerType = (payload['type'] ?? '').toString();
-      final isDmOffer = offerType == 'dm_call_offer';
-      final isGroupOffer = offerType == 'group_call_offer';
-      if (!isDmOffer && !isGroupOffer) return;
-
-      final fromLogin = (payload['fromLogin'] ?? '').toString();
-      if (fromLogin.trim().isEmpty) return;
-      final fromAvatarUrl =
-          (packet['fromAvatarUrl'] ?? payload['fromAvatarUrl'] ?? '')
-              .toString();
-      final groupId = (payload['groupId'] ?? '').toString();
-      final groupTitle = (payload['groupTitle'] ?? '').toString();
-
-      final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
-      if (myLogin.isNotEmpty) {
-        await _ensureDmAutoAcceptForIncomingCall(
-          myUid: current.uid,
-          myLogin: myLogin,
-          fromUid: fromUid,
-          fromLogin: fromLogin,
-          fromAvatarUrl: fromAvatarUrl,
-        );
-      }
-
-      // Busy: auto-decline incoming call.
-      if (_callConnected || _outgoingCallRinging || _outgoingGroupCallRinging) {
-        await _sendCallResponse(
-          toUid: fromUid,
-          callId: callId,
-          payload: <String, dynamic>{
-            'type': 'dm_call_response',
-            'action': 'declined',
-            'callId': callId,
-          },
-        );
-        await rtdb().ref('callInvites/${current.uid}/$callId').remove();
-        return;
-      }
-
-      if (_incomingCallDialogOpen || !mounted) return;
-      _incomingCallDialogOpen = true;
-      _startCallRingingFeedback(incoming: true);
-
-      final action = await showDialog<String>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) {
-          return AlertDialog(
-            title: Text(
-              isGroupOffer
-                  ? AppLanguage.tr(context, 'Příchozí skupinový hovor', 'Incoming group call')
-                  : AppLanguage.tr(context, 'Příchozí hovor', 'Incoming call'),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AnimatedBuilder(
-                  animation: _typingAnim,
-                  builder: (_, child) {
-                    final scale = 1.0 + (_typingAnim.value * 0.12);
-                    return Transform.scale(scale: scale, child: child);
-                  },
-                  child: const Icon(Icons.call, size: 42, color: Color(0xFF3FB950)),
-                ),
-                const SizedBox(height: 10),
-                Text('@$fromLogin'),
-                if (isGroupOffer && groupTitle.trim().isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text('#$groupTitle', style: const TextStyle(color: Colors.white70)),
-                  ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop('message'),
-                child: Text(AppLanguage.tr(context, 'Napsat zprávu', 'Send message')),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop('decline'),
-                child: Text(AppLanguage.tr(context, 'Odmítnout', 'Decline')),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop('accept'),
-                child: Text(AppLanguage.tr(context, 'Přijmout', 'Accept')),
-              ),
-            ],
-          );
-        },
-      );
-
-      _incomingCallDialogOpen = false;
-      _stopCallRingingFeedback();
-      if (!mounted) return;
-
-      if (action == 'accept') {
-        unawaited(_emitCallFeedback(alertTone: false, heavy: true));
-        final ok = await _prepareDmWebRtc(isCaller: false);
-        if (!ok) {
-          await _sendCallResponse(
-            toUid: fromUid,
-            callId: callId,
-            payload: <String, dynamic>{
-              'type': 'dm_call_response',
-              'action': 'declined',
-              'callId': callId,
-            },
-          );
-          await rtdb().ref('callInvites/${current.uid}/$callId').remove();
-          return;
-        }
-
-        setState(() {
-          _activeCallId = callId;
-          _callPeerUid = fromUid;
-          _callPeerLogin = fromLogin;
-          _callConnected = false;
-          _callElapsedSeconds = 0;
-          _outgoingCallRinging = false;
-          _outgoingCallId = null;
-          if (isGroupOffer && groupId.trim().isNotEmpty) {
-            _outgoingGroupId = groupId;
-            _outgoingGroupTitle = groupTitle;
+          final callId = event.snapshot.key?.toString() ?? '';
+          final raw = event.snapshot.value;
+          if (callId.isEmpty || raw is! Map) return;
+          final packet = Map<String, dynamic>.from(raw);
+          packet['__key'] = callId;
+          Future<void> removeCurrent() async {
+            try {
+              await rtdb().ref('callResponses/${current.uid}/$callId').remove();
+            } catch (_) {}
           }
-        });
-        await _drainPendingSignalsForActiveCall();
 
-        await _sendCallResponse(
-          toUid: fromUid,
-          callId: callId,
-          payload: <String, dynamic>{
-            'type': 'dm_call_response',
-            'action': 'accepted',
+          final fromUid = (packet['fromUid'] ?? '').toString();
+          if (fromUid.isEmpty) {
+            await removeCurrent();
+            return;
+          }
+          _callLog('incoming_call_invite_received', {
             'callId': callId,
-            'mode': isGroupOffer ? 'group' : 'dm',
-            if (groupId.trim().isNotEmpty) 'groupId': groupId,
-            if (myLogin.isNotEmpty) 'fromLogin': myLogin,
-          },
-        );
-        if (myLogin.isNotEmpty) {
-          await _sendDmEncryptedSystemText(
-            myUid: current.uid,
-            myLogin: myLogin,
-            peerUid: fromUid,
-            peerLogin: fromLogin,
-            text: isGroupOffer
-                ? '📞 Přijal(a) jsi skupinový hovor${groupTitle.trim().isNotEmpty ? ' #$groupTitle' : ''}'
-                : '📞 Hovor přijat',
-          );
-        }
-      } else if (action == 'message') {
-        unawaited(_emitCallFeedback(alertTone: false, medium: true));
-        final ctrl = TextEditingController();
-        final msg = await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(AppLanguage.tr(context, 'Rychlá zpráva', 'Quick message')),
-            content: TextField(
-              controller: ctrl,
-              autofocus: true,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: AppLanguage.tr(
-                  context,
-                  'Napiš krátkou odpověď',
-                  'Write a short response',
-                ),
-              ),
-              onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(''),
-                child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
-                child: Text(AppLanguage.tr(context, 'Odeslat', 'Send')),
-              ),
-            ],
-          ),
-        );
+            'fromUid': fromUid,
+          });
 
-        final quick = (msg ?? '').trim();
-        if (quick.isNotEmpty) {
-          await _sendCallResponse(
-            toUid: fromUid,
-            callId: callId,
-            payload: <String, dynamic>{
-              'type': 'dm_call_response',
-              'action': 'message',
+          String clear;
+          try {
+            clear = await E2ee.decryptFromUser(
+              otherUid: fromUid,
+              message: packet,
+            );
+            _callLog('incoming_call_invite_decrypt_ok', {
               'callId': callId,
-              'message': quick,
-              'mode': isGroupOffer ? 'group' : 'dm',
-              if (groupId.trim().isNotEmpty) 'groupId': groupId,
+              'fromUid': fromUid,
+            });
+          } catch (_) {
+            final plain = (packet['payloadPlain'] ?? '').toString().trim();
+            if (plain.isEmpty) {
+              await removeCurrent();
+              return;
+            }
+            clear = plain;
+            _callLog('incoming_call_invite_decrypt_failed_using_plain', {
+              'callId': callId,
+              'fromUid': fromUid,
+            });
+          }
+
+          Map<String, dynamic> payload;
+          try {
+            final decoded = jsonDecode(clear);
+            if (decoded is! Map) {
+              await removeCurrent();
+              return;
+            }
+            payload = Map<String, dynamic>.from(decoded);
+          } catch (_) {
+            await removeCurrent();
+            return;
+          }
+
+          final offerType = (payload['type'] ?? '').toString();
+          final isDmOffer = offerType == 'dm_call_offer';
+          final isGroupOffer = offerType == 'group_call_offer';
+          if (!isDmOffer && !isGroupOffer) return;
+
+          final fromLogin = (payload['fromLogin'] ?? '').toString();
+          if (fromLogin.trim().isEmpty) return;
+          final fromAvatarUrl =
+              (packet['fromAvatarUrl'] ?? payload['fromAvatarUrl'] ?? '')
+                  .toString();
+          final groupId = (payload['groupId'] ?? '').toString();
+          final groupTitle = (payload['groupTitle'] ?? '').toString();
+
+          final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+          if (myLogin.isNotEmpty) {
+            await _ensureDmAutoAcceptForIncomingCall(
+              myUid: current.uid,
+              myLogin: myLogin,
+              fromUid: fromUid,
+              fromLogin: fromLogin,
+              fromAvatarUrl: fromAvatarUrl,
+            );
+          }
+
+          // Busy: auto-decline incoming call.
+          if (_callConnected ||
+              _outgoingCallRinging ||
+              _outgoingGroupCallRinging) {
+            await _sendCallResponse(
+              toUid: fromUid,
+              callId: callId,
+              payload: <String, dynamic>{
+                'type': 'dm_call_response',
+                'action': 'declined',
+                'callId': callId,
+              },
+            );
+            await rtdb().ref('callInvites/${current.uid}/$callId').remove();
+            return;
+          }
+
+          if (_incomingCallDialogOpen || !mounted) return;
+          _incomingCallDialogOpen = true;
+          _startCallRingingFeedback(incoming: true);
+
+          final action = await showDialog<String>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) {
+              return AlertDialog(
+                title: Text(
+                  isGroupOffer
+                      ? AppLanguage.tr(
+                          context,
+                          'Příchozí skupinový hovor',
+                          'Incoming group call',
+                        )
+                      : AppLanguage.tr(
+                          context,
+                          'Příchozí hovor',
+                          'Incoming call',
+                        ),
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedBuilder(
+                      animation: _typingAnim,
+                      builder: (_, child) {
+                        final scale = 1.0 + (_typingAnim.value * 0.12);
+                        return Transform.scale(scale: scale, child: child);
+                      },
+                      child: const Icon(
+                        Icons.call,
+                        size: 42,
+                        color: Color(0xFF2A8C63),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text('@$fromLogin'),
+                    if (isGroupOffer && groupTitle.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          '#$groupTitle',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop('message'),
+                    child: Text(
+                      AppLanguage.tr(context, 'Napsat zprávu', 'Send message'),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop('decline'),
+                    child: Text(
+                      AppLanguage.tr(context, 'Odmítnout', 'Decline'),
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop('accept'),
+                    child: Text(AppLanguage.tr(context, 'Přijmout', 'Accept')),
+                  ),
+                ],
+              );
             },
           );
-        }
-        final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
-        if (myLogin.isNotEmpty) {
-          await _sendDmEncryptedSystemText(
-            myUid: current.uid,
-            myLogin: myLogin,
-            peerUid: fromUid,
-            peerLogin: fromLogin,
-            text: quick.isNotEmpty
-                ? (isGroupOffer
-                    ? '📞 Skupinový hovor odmítnut • $quick'
-                    : '📞 Hovor odmítnut • $quick')
-                : (isGroupOffer
-                    ? '📞 Skupinový hovor odmítnut'
-                    : '📞 Hovor odmítnut'),
-          );
-        }
-        await _sendCallResponse(
-          toUid: fromUid,
-          callId: callId,
-          payload: <String, dynamic>{
-            'type': 'dm_call_response',
-            'action': 'declined',
-            'callId': callId,
-            'mode': isGroupOffer ? 'group' : 'dm',
-            if (groupId.trim().isNotEmpty) 'groupId': groupId,
-          },
-        );
-      } else {
-        unawaited(_emitCallFeedback(alertTone: false, medium: true));
-        final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
-        if (myLogin.isNotEmpty) {
-          await _sendDmEncryptedSystemText(
-            myUid: current.uid,
-            myLogin: myLogin,
-            peerUid: fromUid,
-            peerLogin: fromLogin,
-            text: isGroupOffer
-                ? '📞 Skupinový hovor odmítnut'
-                : '📞 Hovor odmítnut',
-          );
-        }
-        await _sendCallResponse(
-          toUid: fromUid,
-          callId: callId,
-          payload: <String, dynamic>{
-            'type': 'dm_call_response',
-            'action': 'declined',
-            'callId': callId,
-            'mode': isGroupOffer ? 'group' : 'dm',
-            if (groupId.trim().isNotEmpty) 'groupId': groupId,
-          },
-        );
-      }
 
-      try {
-        await rtdb().ref('callInvites/${current.uid}/$callId').remove();
-      } catch (_) {}
-    });
+          _incomingCallDialogOpen = false;
+          _stopCallRingingFeedback();
+          if (!mounted) return;
+
+          if (action == 'accept') {
+            unawaited(_emitCallFeedback(alertTone: false, heavy: true));
+            final ok = await _prepareDmWebRtc(isCaller: false);
+            if (!ok) {
+              await _sendCallResponse(
+                toUid: fromUid,
+                callId: callId,
+                payload: <String, dynamic>{
+                  'type': 'dm_call_response',
+                  'action': 'declined',
+                  'callId': callId,
+                },
+              );
+              await rtdb().ref('callInvites/${current.uid}/$callId').remove();
+              return;
+            }
+
+            setState(() {
+              _activeCallId = callId;
+              _callPeerUid = fromUid;
+              _callPeerLogin = fromLogin;
+              _callConnected = false;
+              _callElapsedSeconds = 0;
+              _outgoingCallRinging = false;
+              _outgoingCallId = null;
+              if (isGroupOffer && groupId.trim().isNotEmpty) {
+                _outgoingGroupId = groupId;
+                _outgoingGroupTitle = groupTitle;
+              }
+            });
+            await _drainPendingSignalsForActiveCall();
+
+            await _sendCallResponse(
+              toUid: fromUid,
+              callId: callId,
+              payload: <String, dynamic>{
+                'type': 'dm_call_response',
+                'action': 'accepted',
+                'callId': callId,
+                'mode': isGroupOffer ? 'group' : 'dm',
+                if (groupId.trim().isNotEmpty) 'groupId': groupId,
+                if (myLogin.isNotEmpty) 'fromLogin': myLogin,
+              },
+            );
+            if (myLogin.isNotEmpty) {
+              await _sendDmEncryptedSystemText(
+                myUid: current.uid,
+                myLogin: myLogin,
+                peerUid: fromUid,
+                peerLogin: fromLogin,
+                text: isGroupOffer
+                    ? '📞 Přijal(a) jsi skupinový hovor${groupTitle.trim().isNotEmpty ? ' #$groupTitle' : ''}'
+                    : '📞 Hovor přijat',
+              );
+            }
+          } else if (action == 'message') {
+            unawaited(_emitCallFeedback(alertTone: false, medium: true));
+            final ctrl = TextEditingController();
+            final msg = await showDialog<String>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text(
+                  AppLanguage.tr(context, 'Rychlá zpráva', 'Quick message'),
+                ),
+                content: TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: AppLanguage.tr(
+                      context,
+                      'Napiš krátkou odpověď',
+                      'Write a short response',
+                    ),
+                  ),
+                  onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(''),
+                    child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+                    child: Text(AppLanguage.tr(context, 'Odeslat', 'Send')),
+                  ),
+                ],
+              ),
+            );
+
+            final quick = (msg ?? '').trim();
+            if (quick.isNotEmpty) {
+              await _sendCallResponse(
+                toUid: fromUid,
+                callId: callId,
+                payload: <String, dynamic>{
+                  'type': 'dm_call_response',
+                  'action': 'message',
+                  'callId': callId,
+                  'message': quick,
+                  'mode': isGroupOffer ? 'group' : 'dm',
+                  if (groupId.trim().isNotEmpty) 'groupId': groupId,
+                },
+              );
+            }
+            final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+            if (myLogin.isNotEmpty) {
+              await _sendDmEncryptedSystemText(
+                myUid: current.uid,
+                myLogin: myLogin,
+                peerUid: fromUid,
+                peerLogin: fromLogin,
+                text: quick.isNotEmpty
+                    ? (isGroupOffer
+                          ? '📞 Skupinový hovor odmítnut • $quick'
+                          : '📞 Hovor odmítnut • $quick')
+                    : (isGroupOffer
+                          ? '📞 Skupinový hovor odmítnut'
+                          : '📞 Hovor odmítnut'),
+              );
+            }
+            await _sendCallResponse(
+              toUid: fromUid,
+              callId: callId,
+              payload: <String, dynamic>{
+                'type': 'dm_call_response',
+                'action': 'declined',
+                'callId': callId,
+                'mode': isGroupOffer ? 'group' : 'dm',
+                if (groupId.trim().isNotEmpty) 'groupId': groupId,
+              },
+            );
+          } else {
+            unawaited(_emitCallFeedback(alertTone: false, medium: true));
+            final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
+            if (myLogin.isNotEmpty) {
+              await _sendDmEncryptedSystemText(
+                myUid: current.uid,
+                myLogin: myLogin,
+                peerUid: fromUid,
+                peerLogin: fromLogin,
+                text: isGroupOffer
+                    ? '📞 Skupinový hovor odmítnut'
+                    : '📞 Hovor odmítnut',
+              );
+            }
+            await _sendCallResponse(
+              toUid: fromUid,
+              callId: callId,
+              payload: <String, dynamic>{
+                'type': 'dm_call_response',
+                'action': 'declined',
+                'callId': callId,
+                'mode': isGroupOffer ? 'group' : 'dm',
+                if (groupId.trim().isNotEmpty) 'groupId': groupId,
+              },
+            );
+          }
+
+          try {
+            await rtdb().ref('callInvites/${current.uid}/$callId').remove();
+          } catch (_) {}
+        });
   }
 
   Future<void> _listenCallResponses() async {
@@ -13392,206 +13669,216 @@ class _ChatsTabState extends State<_ChatsTab>
         .ref('callResponses/${current.uid}')
         .onChildAdded
         .listen((event) async {
-      final callId = event.snapshot.key?.toString() ?? '';
-      final raw = event.snapshot.value;
-      if (callId.isEmpty || raw is! Map) return;
-      final packet = Map<String, dynamic>.from(raw);
-      packet['__key'] = callId;
-      Future<void> removeCurrent() async {
-        try {
-          await rtdb().ref('callResponses/${current.uid}/$callId').remove();
-        } catch (_) {}
-      }
-      final fromUid = (packet['fromUid'] ?? '').toString();
-      if (fromUid.isEmpty) {
-        await removeCurrent();
-        return;
-      }
-      _callLog('call_response_received', {'dbKey': callId, 'fromUid': fromUid});
+          final callId = event.snapshot.key?.toString() ?? '';
+          final raw = event.snapshot.value;
+          if (callId.isEmpty || raw is! Map) return;
+          final packet = Map<String, dynamic>.from(raw);
+          packet['__key'] = callId;
+          Future<void> removeCurrent() async {
+            try {
+              await rtdb().ref('callResponses/${current.uid}/$callId').remove();
+            } catch (_) {}
+          }
 
-      String clear;
-      try {
-        clear = await E2ee.decryptFromUser(otherUid: fromUid, message: packet);
-        _callLog('call_response_decrypt_ok', {'dbKey': callId, 'fromUid': fromUid});
-      } catch (_) {
-        final plain = (packet['payloadPlain'] ?? '').toString().trim();
-        if (plain.isEmpty) {
-          await removeCurrent();
-          return;
-        }
-        clear = plain;
-        _callLog('call_response_decrypt_failed_using_plain', {
-          'dbKey': callId,
-          'fromUid': fromUid,
-        });
-      }
+          final fromUid = (packet['fromUid'] ?? '').toString();
+          if (fromUid.isEmpty) {
+            await removeCurrent();
+            return;
+          }
+          _callLog('call_response_received', {
+            'dbKey': callId,
+            'fromUid': fromUid,
+          });
 
-      Map<String, dynamic> payload;
-      try {
-        final decoded = jsonDecode(clear);
-        if (decoded is! Map) {
-          await removeCurrent();
-          return;
-        }
-        payload = Map<String, dynamic>.from(decoded);
-      } catch (_) {
-        await removeCurrent();
-        return;
-      }
-
-      final action = (payload['action'] ?? '').toString();
-      final respCallId = (payload['callId'] ?? callId).toString();
-      final mode = (payload['mode'] ?? 'dm').toString();
-      final fromLogin = (payload['fromLogin'] ?? '').toString();
-      final isGroupResp = mode == 'group';
-      _callLog('call_response_parsed', {
-        'action': action,
-        'respCallId': respCallId,
-        'mode': mode,
-      });
-
-      if (action == 'webrtc_offer' ||
-          action == 'webrtc_answer' ||
-          action == 'webrtc_ice') {
-        final handled = await _handleDmWebRtcSignal(payload);
-        if (!handled) {
-          _enqueuePendingCallSignal(payload);
-        }
-        await removeCurrent();
-        return;
-      }
-
-      if ((payload['type'] ?? '').toString() != 'dm_call_response') {
-        _callLog('call_response_ignored_unexpected_type', {
-          'dbKey': callId,
-          'type': (payload['type'] ?? '').toString(),
-          'action': action,
-        });
-        await removeCurrent();
-        return;
-      }
-
-      if (action == 'accepted' && _outgoingCallId == respCallId) {
-        _stopCallRingingFeedback();
-        unawaited(_emitCallFeedback(alertTone: false, heavy: true));
-        _outgoingCallTimeout?.cancel();
-        _outgoingCallTimeout = null;
-        final peerLogin = _callPeerLogin;
-        final ok = await _prepareDmWebRtc(isCaller: true);
-        if (!ok) {
-          if (mounted) {
-            setState(() {
-              _outgoingCallRinging = false;
-              _outgoingCallId = null;
+          String clear;
+          try {
+            clear = await E2ee.decryptFromUser(
+              otherUid: fromUid,
+              message: packet,
+            );
+            _callLog('call_response_decrypt_ok', {
+              'dbKey': callId,
+              'fromUid': fromUid,
+            });
+          } catch (_) {
+            final plain = (packet['payloadPlain'] ?? '').toString().trim();
+            if (plain.isEmpty) {
+              await removeCurrent();
+              return;
+            }
+            clear = plain;
+            _callLog('call_response_decrypt_failed_using_plain', {
+              'dbKey': callId,
+              'fromUid': fromUid,
             });
           }
-        } else {
-          if (!mounted) return;
-          setState(() {
-            _outgoingCallRinging = false;
-            _callConnected = false;
-            _activeCallId = respCallId;
-            _callElapsedSeconds = 0;
-            _callPeerUid = fromUid;
-            if (peerLogin != null && peerLogin.trim().isNotEmpty) {
-              _callPeerLogin = peerLogin;
-            }
-          });
-          await _drainPendingSignalsForActiveCall();
-          await _startDmOfferFlow();
-        }
-      } else if (action == 'accepted' &&
-          _outgoingGroupCallRinging &&
-          _outgoingGroupCallId == respCallId) {
-        _stopCallRingingFeedback();
-        unawaited(_emitCallFeedback(alertTone: false, heavy: true));
-        _outgoingCallTimeout?.cancel();
-        _outgoingCallTimeout = null;
-        // First accepted participant wins the current media channel.
-        await _cancelOutgoingGroupInvites();
-        final ok = await _prepareDmWebRtc(isCaller: true);
-        if (!ok) {
-          if (mounted) {
-            setState(() {
-              _outgoingGroupCallRinging = false;
-              _outgoingGroupCallId = null;
-            });
-          }
-        } else {
-          if (!mounted) return;
-          setState(() {
-            _outgoingGroupCallRinging = false;
-            _callConnected = false;
-            _activeCallId = respCallId;
-            _callElapsedSeconds = 0;
-            _callPeerUid = fromUid;
-            if (fromLogin.trim().isNotEmpty) {
-              _callPeerLogin = fromLogin;
-            }
-          });
-          await _drainPendingSignalsForActiveCall();
-          await _startDmOfferFlow();
-        }
-      } else if (action == 'declined' && _outgoingCallId == respCallId) {
-        _stopCallRingingFeedback();
-        unawaited(_emitCallFeedback(alertTone: false, medium: true));
-        _outgoingCallTimeout?.cancel();
-        _outgoingCallTimeout = null;
-        await _disposeDmWebRtc();
-        if (mounted) {
-          setState(() {
-            _outgoingCallRinging = false;
-            _outgoingCallId = null;
-          });
-        }
-      } else if (action == 'message' && _outgoingCallId == respCallId) {
-        final msg = (payload['message'] ?? '').toString().trim();
-        if (msg.isNotEmpty && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('📩 $msg')),
-          );
-        }
-      } else if (action == 'message' &&
-          isGroupResp &&
-          _outgoingGroupCallRinging &&
-          _outgoingGroupCallId == respCallId) {
-        final msg = (payload['message'] ?? '').toString().trim();
-        if (msg.isNotEmpty && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('📩 $msg')),
-          );
-        }
-      } else if (action == 'declined' &&
-          isGroupResp &&
-          _outgoingGroupCallRinging &&
-          _outgoingGroupCallId == respCallId) {
-        // Keep waiting for other participants until timeout.
-      } else if (action == 'ended' && _activeCallId == respCallId) {
-        _stopCallRingingFeedback();
-        unawaited(_emitCallFeedback(alertTone: false, medium: true));
-        await _disposeDmWebRtc();
-        _callElapsedTicker?.cancel();
-        _callElapsedTicker = null;
-        _resetCallDiagnostics();
-        if (mounted) {
-          setState(() {
-            _callConnected = false;
-            _activeCallId = null;
-            _callElapsedSeconds = 0;
-            _callPeerUid = null;
-            _callPeerLogin = null;
-            _dmMicEnabled = true;
-            _dmSpeakerEnabled = false;
-            _dmIsCaller = false;
-            _dmReconnectAttempts = 0;
-          });
-        }
-      }
 
-      try {
-        await rtdb().ref('callResponses/${current.uid}/$callId').remove();
-      } catch (_) {}
-    });
+          Map<String, dynamic> payload;
+          try {
+            final decoded = jsonDecode(clear);
+            if (decoded is! Map) {
+              await removeCurrent();
+              return;
+            }
+            payload = Map<String, dynamic>.from(decoded);
+          } catch (_) {
+            await removeCurrent();
+            return;
+          }
+
+          final action = (payload['action'] ?? '').toString();
+          final respCallId = (payload['callId'] ?? callId).toString();
+          final mode = (payload['mode'] ?? 'dm').toString();
+          final fromLogin = (payload['fromLogin'] ?? '').toString();
+          final isGroupResp = mode == 'group';
+          _callLog('call_response_parsed', {
+            'action': action,
+            'respCallId': respCallId,
+            'mode': mode,
+          });
+
+          if (action == 'webrtc_offer' ||
+              action == 'webrtc_answer' ||
+              action == 'webrtc_ice') {
+            final handled = await _handleDmWebRtcSignal(payload);
+            if (!handled) {
+              _enqueuePendingCallSignal(payload);
+            }
+            await removeCurrent();
+            return;
+          }
+
+          if ((payload['type'] ?? '').toString() != 'dm_call_response') {
+            _callLog('call_response_ignored_unexpected_type', {
+              'dbKey': callId,
+              'type': (payload['type'] ?? '').toString(),
+              'action': action,
+            });
+            await removeCurrent();
+            return;
+          }
+
+          if (action == 'accepted' && _outgoingCallId == respCallId) {
+            _stopCallRingingFeedback();
+            unawaited(_emitCallFeedback(alertTone: false, heavy: true));
+            _outgoingCallTimeout?.cancel();
+            _outgoingCallTimeout = null;
+            final peerLogin = _callPeerLogin;
+            final ok = await _prepareDmWebRtc(isCaller: true);
+            if (!ok) {
+              if (mounted) {
+                setState(() {
+                  _outgoingCallRinging = false;
+                  _outgoingCallId = null;
+                });
+              }
+            } else {
+              if (!mounted) return;
+              setState(() {
+                _outgoingCallRinging = false;
+                _callConnected = false;
+                _activeCallId = respCallId;
+                _callElapsedSeconds = 0;
+                _callPeerUid = fromUid;
+                if (peerLogin != null && peerLogin.trim().isNotEmpty) {
+                  _callPeerLogin = peerLogin;
+                }
+              });
+              await _drainPendingSignalsForActiveCall();
+              await _startDmOfferFlow();
+            }
+          } else if (action == 'accepted' &&
+              _outgoingGroupCallRinging &&
+              _outgoingGroupCallId == respCallId) {
+            _stopCallRingingFeedback();
+            unawaited(_emitCallFeedback(alertTone: false, heavy: true));
+            _outgoingCallTimeout?.cancel();
+            _outgoingCallTimeout = null;
+            // First accepted participant wins the current media channel.
+            await _cancelOutgoingGroupInvites();
+            final ok = await _prepareDmWebRtc(isCaller: true);
+            if (!ok) {
+              if (mounted) {
+                setState(() {
+                  _outgoingGroupCallRinging = false;
+                  _outgoingGroupCallId = null;
+                });
+              }
+            } else {
+              if (!mounted) return;
+              setState(() {
+                _outgoingGroupCallRinging = false;
+                _callConnected = false;
+                _activeCallId = respCallId;
+                _callElapsedSeconds = 0;
+                _callPeerUid = fromUid;
+                if (fromLogin.trim().isNotEmpty) {
+                  _callPeerLogin = fromLogin;
+                }
+              });
+              await _drainPendingSignalsForActiveCall();
+              await _startDmOfferFlow();
+            }
+          } else if (action == 'declined' && _outgoingCallId == respCallId) {
+            _stopCallRingingFeedback();
+            unawaited(_emitCallFeedback(alertTone: false, medium: true));
+            _outgoingCallTimeout?.cancel();
+            _outgoingCallTimeout = null;
+            await _disposeDmWebRtc();
+            if (mounted) {
+              setState(() {
+                _outgoingCallRinging = false;
+                _outgoingCallId = null;
+              });
+            }
+          } else if (action == 'message' && _outgoingCallId == respCallId) {
+            final msg = (payload['message'] ?? '').toString().trim();
+            if (msg.isNotEmpty && mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('📩 $msg')));
+            }
+          } else if (action == 'message' &&
+              isGroupResp &&
+              _outgoingGroupCallRinging &&
+              _outgoingGroupCallId == respCallId) {
+            final msg = (payload['message'] ?? '').toString().trim();
+            if (msg.isNotEmpty && mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('📩 $msg')));
+            }
+          } else if (action == 'declined' &&
+              isGroupResp &&
+              _outgoingGroupCallRinging &&
+              _outgoingGroupCallId == respCallId) {
+            // Keep waiting for other participants until timeout.
+          } else if (action == 'ended' && _activeCallId == respCallId) {
+            _stopCallRingingFeedback();
+            unawaited(_emitCallFeedback(alertTone: false, medium: true));
+            await _disposeDmWebRtc();
+            _callElapsedTicker?.cancel();
+            _callElapsedTicker = null;
+            _resetCallDiagnostics();
+            if (mounted) {
+              setState(() {
+                _callConnected = false;
+                _activeCallId = null;
+                _callElapsedSeconds = 0;
+                _callPeerUid = null;
+                _callPeerLogin = null;
+                _dmMicEnabled = true;
+                _dmSpeakerEnabled = false;
+                _dmIsCaller = false;
+                _dmReconnectAttempts = 0;
+              });
+            }
+          }
+
+          try {
+            await rtdb().ref('callResponses/${current.uid}/$callId').remove();
+          } catch (_) {}
+        });
   }
 
   void _pushLocalOnlyChatNote({
@@ -13661,10 +13948,7 @@ class _ChatsTabState extends State<_ChatsTab>
   bool _mentionsMyHandle(String text, String myGithubLower) {
     if (myGithubLower.trim().isEmpty || text.trim().isEmpty) return false;
     final escaped = RegExp.escape(myGithubLower.trim());
-    final re = RegExp(
-      '(^|\\s)@$escaped(?![A-Za-z0-9-])',
-      caseSensitive: false,
-    );
+    final re = RegExp('(^|\\s)@$escaped(?![A-Za-z0-9-])', caseSensitive: false);
     return re.hasMatch(text);
   }
 
@@ -13787,8 +14071,10 @@ class _ChatsTabState extends State<_ChatsTab>
     final input = rawText.trim();
     if (input.isEmpty) return null;
 
-    final m = RegExp(r'^ttl\s*:\s*([^\s]+)\s+(.+)$', caseSensitive: false)
-        .firstMatch(input);
+    final m = RegExp(
+      r'^ttl\s*:\s*([^\s]+)\s+(.+)$',
+      caseSensitive: false,
+    ).firstMatch(input);
     if (m == null) return null;
 
     final token = (m.group(1) ?? '').trim().toLowerCase();
@@ -13905,10 +14191,9 @@ class _ChatsTabState extends State<_ChatsTab>
                 width: 44,
                 height: 5,
                 decoration: BoxDecoration(
-                  color: Theme.of(ctx)
-                      .colorScheme
-                      .outlineVariant
-                      .withAlpha((0.7 * 255).round()),
+                  color: Theme.of(
+                    ctx,
+                  ).colorScheme.outlineVariant.withAlpha((0.7 * 255).round()),
                   borderRadius: BorderRadius.circular(99),
                 ),
               ),
@@ -13919,7 +14204,9 @@ class _ChatsTabState extends State<_ChatsTab>
                   minTileHeight: _uiActionTileHeight,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                   leading: const Icon(Icons.image_outlined),
-                  title: Text(AppLanguage.tr(context, 'Poslat obrázek', 'Send image')),
+                  title: Text(
+                    AppLanguage.tr(context, 'Poslat obrázek', 'Send image'),
+                  ),
                   onTap: () => Navigator.of(ctx).pop('image'),
                 ),
               ),
@@ -13929,7 +14216,9 @@ class _ChatsTabState extends State<_ChatsTab>
                   minTileHeight: _uiActionTileHeight,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                   leading: const Icon(Icons.code),
-                  title: Text(AppLanguage.tr(context, 'Vložit kód', 'Insert code')),
+                  title: Text(
+                    AppLanguage.tr(context, 'Vložit kód', 'Insert code'),
+                  ),
                   onTap: () => Navigator.of(ctx).pop('code'),
                 ),
               ),
@@ -13939,7 +14228,9 @@ class _ChatsTabState extends State<_ChatsTab>
                   minTileHeight: _uiActionTileHeight,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                   leading: const Icon(Icons.timer_outlined),
-                  title: Text(AppLanguage.tr(context, 'Nastavit TTL', 'Set TTL')),
+                  title: Text(
+                    AppLanguage.tr(context, 'Nastavit TTL', 'Set TTL'),
+                  ),
                   subtitle: Text(_ttlModeLabelUi(context, _dmTtlMode)),
                   onTap: () => Navigator.of(ctx).pop('ttl_config'),
                 ),
@@ -14023,7 +14314,7 @@ class _ChatsTabState extends State<_ChatsTab>
           isGroup: isGroup,
           chatId: chatId,
           text:
-            'Commands: /help /me /shrug /tableflip /unflip /lenny /hash /ttl /timer /burn /code /image /img /bold /italic /quote /spoiler /h1 /h2 /h3',
+              'Commands: /help /me /shrug /tableflip /unflip /lenny /hash /ttl /timer /burn /code /image /img /bold /italic /quote /spoiler /h1 /h2 /h3',
         );
         return null;
       case 'me':
@@ -14264,7 +14555,9 @@ class _ChatsTabState extends State<_ChatsTab>
     return q;
   }
 
-  Future<List<String>> _resolveGroupMemberLogins(List<String> memberUids) async {
+  Future<List<String>> _resolveGroupMemberLogins(
+    List<String> memberUids,
+  ) async {
     final out = <String>[];
     for (final uid in memberUids) {
       var login = _groupMemberLoginCache[uid];
@@ -15088,6 +15381,38 @@ class _ChatsTabState extends State<_ChatsTab>
 
   int _overviewMode = 0; // 0=priváty, 1=skupiny, 2=složky
   String? _activeFolderId; // when _overviewMode==2
+  double _overviewSwipeDx = 0;
+  double _overviewSwipeDy = 0;
+
+  void _setOverviewMode(int mode) {
+    final normalized = mode.clamp(0, 2);
+    if (_overviewMode == normalized && _activeFolderId == null) return;
+    setState(() {
+      _overviewMode = normalized;
+      _activeFolderId = null;
+    });
+    _syncShellChatMeta();
+  }
+
+  void _startOverviewSwipe(DragStartDetails _) {
+    _overviewSwipeDx = 0;
+    _overviewSwipeDy = 0;
+  }
+
+  void _updateOverviewSwipe(DragUpdateDetails details) {
+    _overviewSwipeDx += details.delta.dx;
+    _overviewSwipeDy += details.delta.dy.abs();
+  }
+
+  void _endOverviewSwipe(DragEndDetails _) {
+    final absDx = _overviewSwipeDx.abs();
+    final absDy = _overviewSwipeDy;
+    final isIntentionalHorizontal = absDx >= 52 && absDx > (absDy * 1.25);
+    if (!isIntentionalHorizontal) return;
+    final next = _overviewSwipeDx < 0 ? _overviewMode + 1 : _overviewMode - 1;
+    if (next < 0 || next > 2) return;
+    _setOverviewMode(next);
+  }
 
   Future<String?> _myGithubUsername(String myUid) async {
     final snap = await rtdb().ref('users/$myUid/githubUsername').get();
@@ -15859,7 +16184,9 @@ class _ChatsTabState extends State<_ChatsTab>
         _activeVerifiedGithub = myGithub;
       });
       _syncShellChatMeta();
-      await _verifiedRequestRef(current.uid).update({'hasNewModeratorMessage': false});
+      await _verifiedRequestRef(
+        current.uid,
+      ).update({'hasNewModeratorMessage': false});
       _syncVerificationAlertBadge(false);
       return;
     }
@@ -15883,7 +16210,9 @@ class _ChatsTabState extends State<_ChatsTab>
           if (rv is! Map) continue;
           final req = Map<String, dynamic>.from(rv);
           if ((req['status'] ?? '').toString() != 'pending') continue;
-          final createdAt = (req['createdAt'] is int) ? req['createdAt'] as int : 0;
+          final createdAt = (req['createdAt'] is int)
+              ? req['createdAt'] as int
+              : 0;
           if (createdAt >= pickedCreatedAt) {
             pickedCreatedAt = createdAt;
             pickedUid = uid;
@@ -16190,7 +16519,10 @@ class _ChatsTabState extends State<_ChatsTab>
       final key = (message['__key'] ?? '').toString();
       if (key.isNotEmpty) {
         PlaintextCache.putDm(
-          otherLoginLower: ((message['__login'] ?? '').toString().trim().toLowerCase()),
+          otherLoginLower: ((message['__login'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase()),
           messageKey: key,
           plaintext: decrypted,
         );
@@ -16299,10 +16631,7 @@ class _ChatsTabState extends State<_ChatsTab>
           sender: sender,
           preview: preview,
           title: 'GitMit',
-          openTarget: {
-            'type': 'dm',
-            'chatLogin': login.trim(),
-          },
+          openTarget: {'type': 'dm', 'chatLogin': login.trim()},
         );
       });
     }
@@ -16314,8 +16643,10 @@ class _ChatsTabState extends State<_ChatsTab>
     });
 
     _dmThreadRemovedSub = dmRootRef.onChildRemoved.listen((event) {
-      final loginLower =
-          (event.snapshot.key ?? '').toString().trim().toLowerCase();
+      final loginLower = (event.snapshot.key ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
       final sub = _dmIncomingSubs.remove(loginLower);
       sub?.cancel();
     });
@@ -16334,7 +16665,7 @@ class _ChatsTabState extends State<_ChatsTab>
         // best-effort
       }
 
-        final ref = rtdb()
+      final ref = rtdb()
           .ref('groupMessages/$gid')
           .orderByChild('createdAt')
           .startAt((_incomingNotificationsStartMs + 1).toDouble());
@@ -16372,10 +16703,7 @@ class _ChatsTabState extends State<_ChatsTab>
           sender: sender,
           preview: preview,
           title: title,
-          openTarget: {
-            'type': 'group',
-            'groupId': gid,
-          },
+          openTarget: {'type': 'group', 'groupId': gid},
         );
       });
     }
@@ -16903,8 +17231,8 @@ class _ChatsTabState extends State<_ChatsTab>
     }
 
     final forwardedText = preservePayload
-      ? messageText
-      : 'Přeposláno:\n$messageText';
+        ? messageText
+        : 'Přeposláno:\n$messageText';
     final accepted = await _isDmAccepted(
       myUid: current.uid,
       otherLoginLower: cleaned.toLowerCase(),
@@ -16982,7 +17310,10 @@ class _ChatsTabState extends State<_ChatsTab>
     try {
       if (isGroup) {
         SecretKey? gk = _groupKeyCache[chatTarget];
-        gk ??= await E2ee.fetchGroupKey(groupId: chatTarget, myUid: current.uid);
+        gk ??= await E2ee.fetchGroupKey(
+          groupId: chatTarget,
+          myUid: current.uid,
+        );
         if (gk != null) _groupKeyCache[chatTarget] = gk;
         final plain = await E2ee.decryptGroupMessage(
           groupId: chatTarget,
@@ -17051,8 +17382,7 @@ class _ChatsTabState extends State<_ChatsTab>
                           width: 44,
                           height: 44,
                           child: TextButton(
-                            onPressed: () =>
-                                Navigator.of(ctx).pop('react:$e'),
+                            onPressed: () => Navigator.of(ctx).pop('react:$e'),
                             style: TextButton.styleFrom(
                               padding: EdgeInsets.zero,
                               shape: RoundedRectangleBorder(
@@ -17288,7 +17618,10 @@ class _ChatsTabState extends State<_ChatsTab>
                     // Exact match first.
                     final exactUid = usernames[enteredLower]?.toString() ?? '';
                     if (exactUid.isNotEmpty) {
-                      candidates.add({'loginLower': enteredLower, 'uid': exactUid});
+                      candidates.add({
+                        'loginLower': enteredLower,
+                        'uid': exactUid,
+                      });
                     }
 
                     // Partial matches (prefix first, then contains).
@@ -17306,10 +17639,14 @@ class _ChatsTabState extends State<_ChatsTab>
                       }
                     }
                     prefix.sort(
-                      (a, b) => (a['loginLower'] ?? '').compareTo(b['loginLower'] ?? ''),
+                      (a, b) => (a['loginLower'] ?? '').compareTo(
+                        b['loginLower'] ?? '',
+                      ),
                     );
                     contains.sort(
-                      (a, b) => (a['loginLower'] ?? '').compareTo(b['loginLower'] ?? ''),
+                      (a, b) => (a['loginLower'] ?? '').compareTo(
+                        b['loginLower'] ?? '',
+                      ),
                     );
                     candidates.addAll(prefix);
                     candidates.addAll(contains);
@@ -17329,8 +17666,9 @@ class _ChatsTabState extends State<_ChatsTab>
                       final um = (uv is Map)
                           ? Map<String, dynamic>.from(uv)
                           : <String, dynamic>{};
-                      final loginFound =
-                          (um['githubUsername'] ?? lower).toString().trim();
+                      final loginFound = (um['githubUsername'] ?? lower)
+                          .toString()
+                          .trim();
                       final avatar = (um['avatarUrl'] ?? '').toString().trim();
                       hydrated.add({
                         'login': loginFound.isNotEmpty ? loginFound : lower,
@@ -17411,9 +17749,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                   ),
                                 )
                               : const Icon(Icons.search),
-                          label: Text(
-                            AppLanguage.tr(context, 'Najít', 'Find'),
-                          ),
+                          label: Text(AppLanguage.tr(context, 'Najít', 'Find')),
                         ),
                       ),
                       if (findError != null) ...[
@@ -17433,43 +17769,47 @@ class _ChatsTabState extends State<_ChatsTab>
                           child: ListView(
                             shrinkWrap: true,
                             padding: EdgeInsets.zero,
-                            children: foundUsers.map((u) {
-                              final login = (u['login'] ?? '').trim();
-                              final avatarUrl = (u['avatarUrl'] ?? '').trim();
-                              final isSelected = selectedLogin == login;
-                              return ListTile(
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                leading: CircleAvatar(
-                                  backgroundImage: avatarUrl.isNotEmpty
-                                      ? NetworkImage(avatarUrl)
-                                      : null,
-                                  child: avatarUrl.isEmpty
-                                      ? const Icon(Icons.person)
-                                      : null,
-                                ),
-                                title: Text(
-                                  login.startsWith('@') ? login : '@$login',
-                                ),
-                                subtitle: Text(
-                                  AppLanguage.tr(
-                                    context,
-                                    'Nalezený uživatel',
-                                    'Found user',
-                                  ),
-                                ),
-                                trailing: isSelected
-                                    ? const Icon(
-                                        Icons.check_circle,
-                                        color: Colors.green,
-                                      )
-                                    : null,
-                                onTap: () =>
-                                    setLocalState(() => selectedLogin = login),
-                              );
-                            }).toList(growable: false),
+                            children: foundUsers
+                                .map((u) {
+                                  final login = (u['login'] ?? '').trim();
+                                  final avatarUrl = (u['avatarUrl'] ?? '')
+                                      .trim();
+                                  final isSelected = selectedLogin == login;
+                                  return ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    leading: CircleAvatar(
+                                      backgroundImage: avatarUrl.isNotEmpty
+                                          ? NetworkImage(avatarUrl)
+                                          : null,
+                                      child: avatarUrl.isEmpty
+                                          ? const Icon(Icons.person)
+                                          : null,
+                                    ),
+                                    title: Text(
+                                      login.startsWith('@') ? login : '@$login',
+                                    ),
+                                    subtitle: Text(
+                                      AppLanguage.tr(
+                                        context,
+                                        'Nalezený uživatel',
+                                        'Found user',
+                                      ),
+                                    ),
+                                    trailing: isSelected
+                                        ? const Icon(
+                                            Icons.check_circle,
+                                            color: Colors.green,
+                                          )
+                                        : null,
+                                    onTap: () => setLocalState(
+                                      () => selectedLogin = login,
+                                    ),
+                                  );
+                                })
+                                .toList(growable: false),
                           ),
                         ),
                       ],
@@ -17509,8 +17849,8 @@ class _ChatsTabState extends State<_ChatsTab>
         final forwardText = (forwardAttachment != null)
             ? jsonEncode(forwardAttachment.toJson())
             : (forwardCode != null)
-                  ? jsonEncode(forwardCode.toJson())
-                  : forwardPlaintext;
+            ? jsonEncode(forwardCode.toJson())
+            : forwardPlaintext;
         final preservePayload =
             forwardAttachment != null || forwardCode != null;
 
@@ -17923,10 +18263,9 @@ class _ChatsTabState extends State<_ChatsTab>
 
   Widget _dayDivider(BuildContext context, int timestampMs) {
     final label = _dayDividerLabel(timestampMs);
-    final lineColor = Theme.of(context)
-        .colorScheme
-        .outlineVariant
-        .withAlpha((0.55 * 255).round());
+    final lineColor = Theme.of(
+      context,
+    ).colorScheme.outlineVariant.withAlpha((0.55 * 255).round());
     return Padding(
       padding: const EdgeInsets.fromLTRB(6, 12, 6, 10),
       child: Row(
@@ -17937,10 +18276,9 @@ class _ChatsTabState extends State<_ChatsTab>
             child: Text(
               label,
               style: TextStyle(
-                color: Theme.of(context)
-                    .colorScheme
-                    .onSurface
-                    .withAlpha((0.72 * 255).round()),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withAlpha((0.72 * 255).round()),
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
@@ -18151,11 +18489,11 @@ class _ChatsTabState extends State<_ChatsTab>
     _setTyping(false);
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     final oneShotBurn = inlineTtl?.burnAfterRead == true
-      ? true
-      : _oneShotBurnAfterRead;
+        ? true
+        : _oneShotBurnAfterRead;
     final oneShotTtlSeconds = inlineTtl != null
-      ? inlineTtl.ttlSeconds
-      : _oneShotTtlSeconds;
+        ? inlineTtl.ttlSeconds
+        : _oneShotTtlSeconds;
     if (mounted && (oneShotBurn || oneShotTtlSeconds != null)) {
       setState(() {
         _oneShotBurnAfterRead = false;
@@ -18170,13 +18508,13 @@ class _ChatsTabState extends State<_ChatsTab>
         ? 0
         : (oneShotTtlSeconds ??
               switch (_dmTtlMode) {
-      0 => widget.settings.autoDeleteSeconds,
-      1 => 0,
-      2 => 60,
-      3 => 60 * 60,
-      4 => 60 * 60 * 24,
-      _ => widget.settings.autoDeleteSeconds,
-    });
+                0 => widget.settings.autoDeleteSeconds,
+                1 => 0,
+                2 => 60,
+                3 => 60 * 60,
+                4 => 60 * 60 * 24,
+                _ => widget.settings.autoDeleteSeconds,
+              });
     final expiresAt = (!burnAfterRead && ttlSeconds > 0)
         ? (nowMs + (ttlSeconds * 1000))
         : null;
@@ -18260,8 +18598,7 @@ class _ChatsTabState extends State<_ChatsTab>
     if (loginLower.isEmpty) return;
 
     final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
-    final peerUid =
-        ((_activeLogin ?? '').trim().toLowerCase() == loginLower)
+    final peerUid = ((_activeLogin ?? '').trim().toLowerCase() == loginLower)
         ? await _ensureActiveOtherUid()
         : await _lookupUidForLoginLower(loginLower);
 
@@ -18383,346 +18720,1246 @@ class _ChatsTabState extends State<_ChatsTab>
       final userGroupsRef = rtdb().ref('userGroups/${current.uid}');
       final groupsRef = rtdb().ref('groups');
 
-      return _withCallOverlay(StreamBuilder<DatabaseEvent>(
-        stream: currentUserRef.onValue,
-        builder: (context, userSnap) {
-          final uval = userSnap.data?.snapshot.value;
-          final umap = (uval is Map) ? uval : null;
-          final myGithub = umap?['githubUsername']?.toString() ?? '';
-          final isModerator = _isModeratorFromUserMap(umap);
-
-          return StreamBuilder<DatabaseEvent>(
-            stream: myVerifyReqRef.onValue,
-            builder: (context, myReqSnap) {
-              final rv = myReqSnap.data?.snapshot.value;
-              final myReq = (rv is Map) ? rv : null;
-              final myStatus = myReq?['status']?.toString();
-              final hasNew = myReq?['hasNewModeratorMessage'] == true;
+      return GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: _startOverviewSwipe,
+        onHorizontalDragUpdate: _updateOverviewSwipe,
+        onHorizontalDragEnd: _endOverviewSwipe,
+        child: _withCallOverlay(
+          StreamBuilder<DatabaseEvent>(
+            stream: currentUserRef.onValue,
+            builder: (context, userSnap) {
+              final uval = userSnap.data?.snapshot.value;
+              final umap = (uval is Map) ? uval : null;
+              final myGithub = umap?['githubUsername']?.toString() ?? '';
+              final isModerator = _isModeratorFromUserMap(umap);
 
               return StreamBuilder<DatabaseEvent>(
-                stream: isModerator ? allVerifyReqsRef.onValue : null,
-                builder: (context, allReqSnap) {
-                  final allVal = allReqSnap.data?.snapshot.value;
-                  final allMap = (allVal is Map) ? allVal : null;
-                  final pendingReqs = <Map<String, dynamic>>[];
-                  if (isModerator && allMap != null) {
-                    for (final entry in allMap.entries) {
-                      final uid = entry.key.toString();
-                      final v = entry.value;
-                      if (v is! Map) continue;
-                      final m = Map<String, dynamic>.from(v);
-                      if ((m['status'] ?? '').toString() == 'pending') {
-                        m['uid'] = uid;
-                        pendingReqs.add(m);
-                      }
-                    }
-                    pendingReqs.sort((a, b) {
-                      final at = (a['createdAt'] is int)
-                          ? a['createdAt'] as int
-                          : 0;
-                      final bt = (b['createdAt'] is int)
-                          ? b['createdAt'] as int
-                          : 0;
-                      return bt.compareTo(at);
-                    });
-                  }
-
-                  final hasVerificationAlert =
-                      (hasNew && myStatus != null) ||
-                      (isModerator && pendingReqs.isNotEmpty);
-                  _syncVerificationAlertBadge(hasVerificationAlert);
+                stream: myVerifyReqRef.onValue,
+                builder: (context, myReqSnap) {
+                  final rv = myReqSnap.data?.snapshot.value;
+                  final myReq = (rv is Map) ? rv : null;
+                  final myStatus = myReq?['status']?.toString();
+                  final hasNew = myReq?['hasNewModeratorMessage'] == true;
 
                   return StreamBuilder<DatabaseEvent>(
-                    stream: blockedRef.onValue,
-                    builder: (context, blockedSnap) {
-                      final bv = blockedSnap.data?.snapshot.value;
-                      final blockedMap = (bv is Map) ? bv : null;
+                    stream: isModerator ? allVerifyReqsRef.onValue : null,
+                    builder: (context, allReqSnap) {
+                      final allVal = allReqSnap.data?.snapshot.value;
+                      final allMap = (allVal is Map) ? allVal : null;
+                      final pendingReqs = <Map<String, dynamic>>[];
+                      if (isModerator && allMap != null) {
+                        for (final entry in allMap.entries) {
+                          final uid = entry.key.toString();
+                          final v = entry.value;
+                          if (v is! Map) continue;
+                          final m = Map<String, dynamic>.from(v);
+                          if ((m['status'] ?? '').toString() == 'pending') {
+                            m['uid'] = uid;
+                            pendingReqs.add(m);
+                          }
+                        }
+                        pendingReqs.sort((a, b) {
+                          final at = (a['createdAt'] is int)
+                              ? a['createdAt'] as int
+                              : 0;
+                          final bt = (b['createdAt'] is int)
+                              ? b['createdAt'] as int
+                              : 0;
+                          return bt.compareTo(at);
+                        });
+                      }
+
+                      final hasVerificationAlert =
+                          (hasNew && myStatus != null) ||
+                          (isModerator && pendingReqs.isNotEmpty);
+                      _syncVerificationAlertBadge(hasVerificationAlert);
 
                       return StreamBuilder<DatabaseEvent>(
-                        stream: chatsMetaRef.onValue,
-                        builder: (context, metaSnap) {
-                          final mv = metaSnap.data?.snapshot.value;
-                          final metaMap = (mv is Map) ? mv : null;
+                        stream: blockedRef.onValue,
+                        builder: (context, blockedSnap) {
+                          final bv = blockedSnap.data?.snapshot.value;
+                          final blockedMap = (bv is Map) ? bv : null;
 
                           return StreamBuilder<DatabaseEvent>(
-                            stream: chatsMessagesRef.onValue,
-                            builder: (context, msgSnap) {
-                              final vv = msgSnap.data?.snapshot.value;
-                              final root = (vv is Map) ? vv : null;
+                            stream: chatsMetaRef.onValue,
+                            builder: (context, metaSnap) {
+                              final mv = metaSnap.data?.snapshot.value;
+                              final metaMap = (mv is Map) ? mv : null;
 
-                              final rows = <Map<String, Object?>>[];
-                              final handled = <String>{};
-                              if (root != null) {
-                                for (final entry in root.entries) {
-                                  final login = entry.key.toString();
-                                  final lower = login.trim().toLowerCase();
-                                  final blocked =
-                                      (blockedMap != null &&
-                                      blockedMap[lower] == true);
-                                  if (blocked) continue;
+                              return StreamBuilder<DatabaseEvent>(
+                                stream: chatsMessagesRef.onValue,
+                                builder: (context, msgSnap) {
+                                  final vv = msgSnap.data?.snapshot.value;
+                                  final root = (vv is Map) ? vv : null;
 
-                                  final thread = (entry.value is Map)
-                                      ? (entry.value as Map)
-                                      : null;
-                                  if (thread == null || thread.isEmpty)
-                                    continue;
+                                  final rows = <Map<String, Object?>>[];
+                                  final handled = <String>{};
+                                  if (root != null) {
+                                    for (final entry in root.entries) {
+                                      final login = entry.key.toString();
+                                      final lower = login.trim().toLowerCase();
+                                      final blocked =
+                                          (blockedMap != null &&
+                                          blockedMap[lower] == true);
+                                      if (blocked) continue;
 
-                                  int lastAt = 0;
-                                  String lastText = '';
-                                  String? lastKey;
-                                  int unreadCount = 0;
-                                  for (final me in thread.entries) {
-                                    if (me.value is! Map) continue;
-                                    final mm = Map<String, dynamic>.from(
-                                      me.value as Map,
-                                    );
-                                    final createdAt = (mm['createdAt'] is int)
-                                        ? mm['createdAt'] as int
-                                        : 0;
-                                    final fromUid = (mm['fromUid'] ?? '')
-                                        .toString();
-                                    final readBy = (mm['readBy'] is Map)
-                                        ? (mm['readBy'] as Map)
-                                        : null;
-                                    final isUnreadForMe =
-                                        fromUid != current.uid &&
-                                        (readBy == null ||
-                                            readBy[current.uid] != true);
-                                    if (isUnreadForMe) unreadCount++;
-                                    if (createdAt >= lastAt) {
-                                      lastAt = createdAt;
-                                      lastKey = me.key.toString();
-                                      lastText = (mm['text'] ?? '').toString();
-                                    }
-                                  }
+                                      final thread = (entry.value is Map)
+                                          ? (entry.value as Map)
+                                          : null;
+                                      if (thread == null || thread.isEmpty)
+                                        continue;
 
-                                  if (lastText.trim().isEmpty &&
-                                      lastKey != null &&
-                                      lastKey.isNotEmpty) {
-                                    final cached =
-                                        PlaintextCache.tryGetDm(
-                                          otherLoginLower: lower,
-                                          messageKey: lastKey,
-                                        ) ??
-                                        _decryptedCache[lastKey];
-                                    if (cached != null &&
-                                        cached.trim().isNotEmpty) {
-                                      lastText = cached;
-                                    }
-                                  }
-
-                                  final meta =
-                                      (metaMap != null && metaMap[login] is Map)
-                                      ? (metaMap[login] as Map)
-                                      : null;
-                                  final avatarUrl = (meta?['avatarUrl'] ?? '')
-                                      .toString();
-                                  final status = (meta?['status'] ?? 'accepted')
-                                      .toString();
-                                  if (status.startsWith('pending')) {
-                                    lastText = 'Žádost o chat';
-                                  } else if (lastText.trim().isEmpty) {
-                                    lastText = '🔒';
-                                  } else {
-                                    final attachment =
-                                        _AttachmentPayload.tryParse(lastText);
-                                    final codePayload =
-                                        _CodeMessagePayload.tryParse(lastText);
-                                    if (attachment != null) {
-                                      lastText = '🖼️';
-                                    } else if (codePayload != null) {
-                                      lastText = codePayload.previewLabel();
-                                    } else {
-                                      lastText = lastText.replaceAll('\n', ' ');
-                                    }
-                                  }
-
-                                  handled.add(lower);
-
-                                  rows.add({
-                                    'login': login,
-                                    'avatarUrl': avatarUrl,
-                                    'lastAt': lastAt,
-                                    'lastText': lastText,
-                                    'status': status,
-                                    'unreadCount': unreadCount,
-                                  });
-                                }
-                              }
-
-                              // Include pending chats from savedChats even when thread doesn't exist yet.
-                              if (metaMap != null) {
-                                for (final entry in metaMap.entries) {
-                                  final login = entry.key.toString();
-                                  final lower = login.trim().toLowerCase();
-                                  if (handled.contains(lower)) continue;
-                                  final blocked =
-                                      (blockedMap != null &&
-                                      blockedMap[lower] == true);
-                                  if (blocked) continue;
-                                  if (entry.value is! Map) continue;
-                                  final meta = Map<String, dynamic>.from(
-                                    entry.value as Map,
-                                  );
-                                  final status = (meta['status'] ?? 'accepted')
-                                      .toString();
-                                  if (!(status.startsWith('pending') ||
-                                      status == 'accepted'))
-                                    continue;
-                                  final avatarUrl = (meta['avatarUrl'] ?? '')
-                                      .toString();
-                                  final lastAt = (meta['lastMessageAt'] is int)
-                                      ? meta['lastMessageAt'] as int
-                                      : ((meta['savedAt'] is int)
-                                            ? meta['savedAt'] as int
-                                            : 0);
-                                  final lastText = status.startsWith('pending')
-                                      ? 'Žádost o chat'
-                                      : '🔒';
-                                  rows.add({
-                                    'login': login,
-                                    'avatarUrl': avatarUrl,
-                                    'lastAt': lastAt,
-                                    'lastText': lastText,
-                                    'status': status,
-                                    'unreadCount': 0,
-                                  });
-                                }
-                              }
-
-                              rows.sort(
-                                (a, b) => ((b['lastAt'] as int?) ?? 0)
-                                    .compareTo(((a['lastAt'] as int?) ?? 0)),
-                              );
-
-                              return RefreshIndicator(
-                                onRefresh: () async {
-                                  await Future.wait<void>([
-                                    chatsMetaRef.get(),
-                                    chatsMessagesRef.get(),
-                                    blockedRef.get(),
-                                    myVerifyReqRef.get(),
-                                    invitesRef.get(),
-                                    userGroupsRef.get(),
-                                  ]);
-                                  if (mounted) setState(() {});
-                                },
-                                child: ListView(
-                                  physics: const AlwaysScrollableScrollPhysics(),
-                                  children: [
-                                  if (myStatus != null) ...[
-                                    ListTile(
-                                      leading: const Icon(Icons.verified_user),
-                                      title: Text(
-                                        AppLanguage.tr(
-                                          context,
-                                          'Ověření účtu',
-                                          'Account verification',
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        _statusText(context, myStatus),
-                                      ),
-                                      trailing: hasNew
-                                          ? const Icon(
-                                              Icons.circle,
-                                              size: 10,
-                                              color: Colors.redAccent,
-                                            )
-                                          : null,
-                                      onTap: () async {
-                                        setState(() {
-                                          _activeVerifiedUid = current.uid;
-                                          _activeVerifiedGithub = myGithub;
-                                        });
-                                        await myVerifyReqRef.update({
-                                          'hasNewModeratorMessage': false,
-                                        });
-                                      },
-                                    ),
-                                    const Divider(height: 1),
-                                  ],
-
-                                  // Pozvánky do skupin (pod ověřením účtu)
-                                  StreamBuilder<DatabaseEvent>(
-                                    stream: invitesRef.onValue,
-                                    builder: (context, invSnap) {
-                                      final iv = invSnap.data?.snapshot.value;
-                                      final imap = (iv is Map) ? iv : null;
-                                      final invites = <Map<String, dynamic>>[];
-                                      if (imap != null) {
-                                        for (final e in imap.entries) {
-                                          if (e.value is! Map) continue;
-                                          final m = Map<String, dynamic>.from(
-                                            e.value as Map,
-                                          );
-                                          m['__key'] = e.key.toString();
-                                          invites.add(m);
-                                        }
-                                        invites.sort((a, b) {
-                                          final at = (a['createdAt'] is int)
-                                              ? a['createdAt'] as int
-                                              : 0;
-                                          final bt = (b['createdAt'] is int)
-                                              ? b['createdAt'] as int
-                                              : 0;
-                                          return bt.compareTo(at);
-                                        });
-                                      }
-
-                                      Future<void> acceptInvite(
-                                        String key,
-                                        Map<String, dynamic> inv,
-                                      ) async {
-                                        final groupId = (inv['groupId'] ?? '')
+                                      int lastAt = 0;
+                                      String lastText = '';
+                                      String? lastKey;
+                                      int unreadCount = 0;
+                                      for (final me in thread.entries) {
+                                        if (me.value is! Map) continue;
+                                        final mm = Map<String, dynamic>.from(
+                                          me.value as Map,
+                                        );
+                                        final createdAt =
+                                            (mm['createdAt'] is int)
+                                            ? mm['createdAt'] as int
+                                            : 0;
+                                        final fromUid = (mm['fromUid'] ?? '')
                                             .toString();
-                                        if (groupId.isEmpty) return;
-                                        await rtdb()
-                                            .ref(
-                                              'groupMembers/$groupId/${current.uid}',
-                                            )
-                                            .set({
-                                              'role': 'member',
-                                              'joinedAt': ServerValue.timestamp,
-                                              'joinedVia': 'invite',
-                                            });
-                                        await rtdb()
-                                            .ref(
-                                              'userGroups/${current.uid}/$groupId',
-                                            )
-                                            .set(true);
-                                        await invitesRef.child(key).remove();
-                                      }
-
-                                      Future<void> declineInvite(
-                                        String key,
-                                      ) async {
-                                        await invitesRef.child(key).remove();
-                                      }
-
-                                      Future<void> acceptAll() async {
-                                        for (final inv in invites) {
-                                          final key = (inv['__key'] ?? '')
+                                        final readBy = (mm['readBy'] is Map)
+                                            ? (mm['readBy'] as Map)
+                                            : null;
+                                        final isUnreadForMe =
+                                            fromUid != current.uid &&
+                                            (readBy == null ||
+                                                readBy[current.uid] != true);
+                                        if (isUnreadForMe) unreadCount++;
+                                        if (createdAt >= lastAt) {
+                                          lastAt = createdAt;
+                                          lastKey = me.key.toString();
+                                          lastText = (mm['text'] ?? '')
                                               .toString();
-                                          if (key.isEmpty) continue;
-                                          await acceptInvite(key, inv);
                                         }
                                       }
 
-                                      Future<void> declineAll() async {
-                                        for (final inv in invites) {
-                                          final key = (inv['__key'] ?? '')
-                                              .toString();
-                                          if (key.isEmpty) continue;
-                                          await declineInvite(key);
+                                      if (lastText.trim().isEmpty &&
+                                          lastKey != null &&
+                                          lastKey.isNotEmpty) {
+                                        final cached =
+                                            PlaintextCache.tryGetDm(
+                                              otherLoginLower: lower,
+                                              messageKey: lastKey,
+                                            ) ??
+                                            _decryptedCache[lastKey];
+                                        if (cached != null &&
+                                            cached.trim().isNotEmpty) {
+                                          lastText = cached;
                                         }
                                       }
 
-                                      if (invites.isEmpty)
-                                        return const SizedBox.shrink();
+                                      final meta =
+                                          (metaMap != null &&
+                                              metaMap[login] is Map)
+                                          ? (metaMap[login] as Map)
+                                          : null;
+                                      final avatarUrl =
+                                          (meta?['avatarUrl'] ?? '').toString();
+                                      final status =
+                                          (meta?['status'] ?? 'accepted')
+                                              .toString();
+                                      if (status.startsWith('pending')) {
+                                        lastText = 'Žádost o chat';
+                                      } else if (lastText.trim().isEmpty) {
+                                        lastText = '🔒';
+                                      } else {
+                                        final attachment =
+                                            _AttachmentPayload.tryParse(
+                                              lastText,
+                                            );
+                                        final codePayload =
+                                            _CodeMessagePayload.tryParse(
+                                              lastText,
+                                            );
+                                        if (attachment != null) {
+                                          lastText = '🖼️';
+                                        } else if (codePayload != null) {
+                                          lastText = codePayload.previewLabel();
+                                        } else {
+                                          lastText = lastText.replaceAll(
+                                            '\n',
+                                            ' ',
+                                          );
+                                        }
+                                      }
 
-                                      return Column(
-                                        children: [
+                                      handled.add(lower);
+
+                                      rows.add({
+                                        'login': login,
+                                        'avatarUrl': avatarUrl,
+                                        'lastAt': lastAt,
+                                        'lastText': lastText,
+                                        'status': status,
+                                        'unreadCount': unreadCount,
+                                      });
+                                    }
+                                  }
+
+                                  // Include pending chats from savedChats even when thread doesn't exist yet.
+                                  if (metaMap != null) {
+                                    for (final entry in metaMap.entries) {
+                                      final login = entry.key.toString();
+                                      final lower = login.trim().toLowerCase();
+                                      if (handled.contains(lower)) continue;
+                                      final blocked =
+                                          (blockedMap != null &&
+                                          blockedMap[lower] == true);
+                                      if (blocked) continue;
+                                      if (entry.value is! Map) continue;
+                                      final meta = Map<String, dynamic>.from(
+                                        entry.value as Map,
+                                      );
+                                      final status =
+                                          (meta['status'] ?? 'accepted')
+                                              .toString();
+                                      if (!(status.startsWith('pending') ||
+                                          status == 'accepted'))
+                                        continue;
+                                      final avatarUrl =
+                                          (meta['avatarUrl'] ?? '').toString();
+                                      final lastAt =
+                                          (meta['lastMessageAt'] is int)
+                                          ? meta['lastMessageAt'] as int
+                                          : ((meta['savedAt'] is int)
+                                                ? meta['savedAt'] as int
+                                                : 0);
+                                      final lastText =
+                                          status.startsWith('pending')
+                                          ? 'Žádost o chat'
+                                          : '🔒';
+                                      rows.add({
+                                        'login': login,
+                                        'avatarUrl': avatarUrl,
+                                        'lastAt': lastAt,
+                                        'lastText': lastText,
+                                        'status': status,
+                                        'unreadCount': 0,
+                                      });
+                                    }
+                                  }
+
+                                  rows.sort(
+                                    (a, b) =>
+                                        ((b['lastAt'] as int?) ?? 0).compareTo(
+                                          ((a['lastAt'] as int?) ?? 0),
+                                        ),
+                                  );
+
+                                  return RefreshIndicator(
+                                    onRefresh: () async {
+                                      await Future.wait<void>([
+                                        chatsMetaRef.get(),
+                                        chatsMessagesRef.get(),
+                                        blockedRef.get(),
+                                        myVerifyReqRef.get(),
+                                        invitesRef.get(),
+                                        userGroupsRef.get(),
+                                      ]);
+                                      if (mounted) setState(() {});
+                                    },
+                                    child: ListView(
+                                      physics:
+                                          const AlwaysScrollableScrollPhysics(),
+                                      children: [
+                                        if (myStatus != null) ...[
+                                          ListTile(
+                                            leading: const Icon(
+                                              Icons.verified_user,
+                                            ),
+                                            title: Text(
+                                              AppLanguage.tr(
+                                                context,
+                                                'Ověření účtu',
+                                                'Account verification',
+                                              ),
+                                            ),
+                                            subtitle: Text(
+                                              _statusText(context, myStatus),
+                                            ),
+                                            trailing: hasNew
+                                                ? const Icon(
+                                                    Icons.circle,
+                                                    size: 10,
+                                                    color: Colors.redAccent,
+                                                  )
+                                                : null,
+                                            onTap: () async {
+                                              setState(() {
+                                                _activeVerifiedUid =
+                                                    current.uid;
+                                                _activeVerifiedGithub =
+                                                    myGithub;
+                                              });
+                                              await myVerifyReqRef.update({
+                                                'hasNewModeratorMessage': false,
+                                              });
+                                            },
+                                          ),
+                                          const Divider(height: 1),
+                                        ],
+
+                                        // Pozvánky do skupin (pod ověřením účtu)
+                                        StreamBuilder<DatabaseEvent>(
+                                          stream: invitesRef.onValue,
+                                          builder: (context, invSnap) {
+                                            final iv =
+                                                invSnap.data?.snapshot.value;
+                                            final imap = (iv is Map)
+                                                ? iv
+                                                : null;
+                                            final invites =
+                                                <Map<String, dynamic>>[];
+                                            if (imap != null) {
+                                              for (final e in imap.entries) {
+                                                if (e.value is! Map) continue;
+                                                final m =
+                                                    Map<String, dynamic>.from(
+                                                      e.value as Map,
+                                                    );
+                                                m['__key'] = e.key.toString();
+                                                invites.add(m);
+                                              }
+                                              invites.sort((a, b) {
+                                                final at =
+                                                    (a['createdAt'] is int)
+                                                    ? a['createdAt'] as int
+                                                    : 0;
+                                                final bt =
+                                                    (b['createdAt'] is int)
+                                                    ? b['createdAt'] as int
+                                                    : 0;
+                                                return bt.compareTo(at);
+                                              });
+                                            }
+
+                                            Future<void> acceptInvite(
+                                              String key,
+                                              Map<String, dynamic> inv,
+                                            ) async {
+                                              final groupId =
+                                                  (inv['groupId'] ?? '')
+                                                      .toString();
+                                              if (groupId.isEmpty) return;
+                                              await rtdb()
+                                                  .ref(
+                                                    'groupMembers/$groupId/${current.uid}',
+                                                  )
+                                                  .set({
+                                                    'role': 'member',
+                                                    'joinedAt':
+                                                        ServerValue.timestamp,
+                                                    'joinedVia': 'invite',
+                                                  });
+                                              await rtdb()
+                                                  .ref(
+                                                    'userGroups/${current.uid}/$groupId',
+                                                  )
+                                                  .set(true);
+                                              await invitesRef
+                                                  .child(key)
+                                                  .remove();
+                                            }
+
+                                            Future<void> declineInvite(
+                                              String key,
+                                            ) async {
+                                              await invitesRef
+                                                  .child(key)
+                                                  .remove();
+                                            }
+
+                                            Future<void> acceptAll() async {
+                                              for (final inv in invites) {
+                                                final key = (inv['__key'] ?? '')
+                                                    .toString();
+                                                if (key.isEmpty) continue;
+                                                await acceptInvite(key, inv);
+                                              }
+                                            }
+
+                                            Future<void> declineAll() async {
+                                              for (final inv in invites) {
+                                                final key = (inv['__key'] ?? '')
+                                                    .toString();
+                                                if (key.isEmpty) continue;
+                                                await declineInvite(key);
+                                              }
+                                            }
+
+                                            if (invites.isEmpty)
+                                              return const SizedBox.shrink();
+
+                                            return Column(
+                                              children: [
+                                                ListTile(
+                                                  leading: const Icon(
+                                                    Icons.group_add,
+                                                  ),
+                                                  title: Text(
+                                                    AppLanguage.tr(
+                                                      context,
+                                                      'Pozvánky do skupin',
+                                                      'Group invites',
+                                                    ),
+                                                  ),
+                                                  subtitle: Text(
+                                                    '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${invites.length}',
+                                                  ),
+                                                ),
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.fromLTRB(
+                                                        16,
+                                                        0,
+                                                        16,
+                                                        8,
+                                                      ),
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: OutlinedButton(
+                                                          onPressed: acceptAll,
+                                                          child: Text(
+                                                            AppLanguage.tr(
+                                                              context,
+                                                              'Přijmout všechny',
+                                                              'Accept all',
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 12),
+                                                      Expanded(
+                                                        child: OutlinedButton(
+                                                          onPressed: declineAll,
+                                                          child: Text(
+                                                            AppLanguage.tr(
+                                                              context,
+                                                              'Odmítnout všechny',
+                                                              'Decline all',
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                ...invites.map((inv) {
+                                                  final key =
+                                                      (inv['__key'] ?? '')
+                                                          .toString();
+                                                  final groupTitle =
+                                                      (inv['groupTitle'] ??
+                                                              AppLanguage.tr(
+                                                                context,
+                                                                'Skupina',
+                                                                'Group',
+                                                              ))
+                                                          .toString();
+                                                  final groupId =
+                                                      (inv['groupId'] ?? '')
+                                                          .toString();
+                                                  final invitedBy =
+                                                      (inv['invitedByGithub'] ??
+                                                              '')
+                                                          .toString();
+                                                  final groupLogo =
+                                                      (inv['groupLogoUrl'] ??
+                                                              '')
+                                                          .toString();
+                                                  final groupLogoEmoji =
+                                                      (inv['groupLogoEmoji'] ??
+                                                              '')
+                                                          .toString()
+                                                          .trim();
+                                                  return ListTile(
+                                                    leading: CircleAvatar(
+                                                      radius: 18,
+                                                      backgroundImage:
+                                                          groupLogo.isNotEmpty
+                                                          ? NetworkImage(
+                                                              groupLogo,
+                                                            )
+                                                          : null,
+                                                      child: groupLogo.isEmpty
+                                                          ? (groupLogoEmoji
+                                                                    .isNotEmpty
+                                                                ? Text(
+                                                                    groupLogoEmoji,
+                                                                  )
+                                                                : const Icon(
+                                                                    Icons.group,
+                                                                  ))
+                                                          : null,
+                                                    ),
+                                                    title: Text(groupTitle),
+                                                    subtitle:
+                                                        invitedBy.isNotEmpty
+                                                        ? Text(
+                                                            '${AppLanguage.tr(context, 'Pozval', 'Invited by')}: @$invitedBy',
+                                                          )
+                                                        : (groupId.isNotEmpty
+                                                              ? Text(groupId)
+                                                              : null),
+                                                    trailing: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        IconButton(
+                                                          icon: const Icon(
+                                                            Icons.close,
+                                                          ),
+                                                          onPressed: () =>
+                                                              declineInvite(
+                                                                key,
+                                                              ),
+                                                        ),
+                                                        IconButton(
+                                                          icon: const Icon(
+                                                            Icons.check,
+                                                          ),
+                                                          onPressed: () =>
+                                                              acceptInvite(
+                                                                key,
+                                                                inv,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                }),
+                                                const Divider(height: 1),
+                                              ],
+                                            );
+                                          },
+                                        ),
+
+                                        // Inbox pro adminy skupin: žádosti od členů na přidání lidí
+                                        StreamBuilder<DatabaseEvent>(
+                                          stream: rtdb()
+                                              .ref(
+                                                'groupAdminInbox/${current.uid}',
+                                              )
+                                              .onValue,
+                                          builder: (context, inboxSnap) {
+                                            final iv =
+                                                inboxSnap.data?.snapshot.value;
+                                            final im = (iv is Map) ? iv : null;
+                                            final items =
+                                                <Map<String, dynamic>>[];
+                                            if (im != null) {
+                                              for (final e in im.entries) {
+                                                if (e.value is! Map) continue;
+                                                final m =
+                                                    Map<String, dynamic>.from(
+                                                      e.value as Map,
+                                                    );
+                                                m['__key'] = e.key.toString();
+                                                items.add(m);
+                                              }
+                                              items.sort((a, b) {
+                                                final at =
+                                                    (a['createdAt'] is int)
+                                                    ? a['createdAt'] as int
+                                                    : 0;
+                                                final bt =
+                                                    (b['createdAt'] is int)
+                                                    ? b['createdAt'] as int
+                                                    : 0;
+                                                return bt.compareTo(at);
+                                              });
+                                            }
+
+                                            Future<void> _cleanupAllAdmins({
+                                              required String groupId,
+                                              required String targetLower,
+                                            }) async {
+                                              final membersSnap = await rtdb()
+                                                  .ref('groupMembers/$groupId')
+                                                  .get();
+                                              final mv = membersSnap.value;
+                                              final m = (mv is Map) ? mv : null;
+                                              if (m != null) {
+                                                for (final e in m.entries) {
+                                                  if (e.value is! Map) continue;
+                                                  final mm =
+                                                      Map<String, dynamic>.from(
+                                                        e.value as Map,
+                                                      );
+                                                  final role =
+                                                      (mm['role'] ?? 'member')
+                                                          .toString();
+                                                  if (role != 'admin') continue;
+                                                  final adminUid = e.key
+                                                      .toString();
+                                                  await rtdb()
+                                                      .ref(
+                                                        'groupAdminInbox/$adminUid/${groupId}~$targetLower',
+                                                      )
+                                                      .remove();
+                                                }
+                                              }
+                                            }
+
+                                            Future<void> _approve(
+                                              Map<String, dynamic> item,
+                                            ) async {
+                                              final key = (item['__key'] ?? '')
+                                                  .toString();
+                                              final groupId =
+                                                  (item['groupId'] ?? '')
+                                                      .toString();
+                                              final targetLower =
+                                                  (item['targetLower'] ?? '')
+                                                      .toString();
+                                              final targetLogin =
+                                                  (item['targetLogin'] ?? '')
+                                                      .toString();
+                                              if (groupId.isEmpty ||
+                                                  targetLower.isEmpty)
+                                                return;
+
+                                              final uidSnap = await rtdb()
+                                                  .ref('usernames/$targetLower')
+                                                  .get();
+                                              final targetUid = uidSnap.value
+                                                  ?.toString();
+                                              if (targetUid == null ||
+                                                  targetUid.isEmpty) {
+                                                await _cleanupAllAdmins(
+                                                  groupId: groupId,
+                                                  targetLower: targetLower,
+                                                );
+                                                await rtdb()
+                                                    .ref(
+                                                      'groupJoinRequests/$groupId/$targetLower',
+                                                    )
+                                                    .remove();
+                                                return;
+                                              }
+
+                                              final gSnap = await rtdb()
+                                                  .ref('groups/$groupId')
+                                                  .get();
+                                              final gv = gSnap.value;
+                                              final gm = (gv is Map)
+                                                  ? gv
+                                                  : null;
+                                              final title = (gm?['title'] ?? '')
+                                                  .toString();
+                                              final logo =
+                                                  (gm?['logoUrl'] ?? '')
+                                                      .toString();
+                                              final logoEmoji =
+                                                  (gm?['logoEmoji'] ?? '')
+                                                      .toString()
+                                                      .trim();
+
+                                              await rtdb()
+                                                  .ref(
+                                                    'groupInvites/$targetUid/$groupId',
+                                                  )
+                                                  .set({
+                                                    'groupId': groupId,
+                                                    'groupTitle': title,
+                                                    if (logo.isNotEmpty)
+                                                      'groupLogoUrl': logo,
+                                                    if (logoEmoji.isNotEmpty)
+                                                      'groupLogoEmoji':
+                                                          logoEmoji,
+                                                    'invitedByUid': current.uid,
+                                                    'invitedByGithub': myGithub,
+                                                    'createdAt':
+                                                        ServerValue.timestamp,
+                                                    'via': 'member_request',
+                                                    if (targetLogin.isNotEmpty)
+                                                      'targetLogin':
+                                                          targetLogin,
+                                                  });
+
+                                              await _cleanupAllAdmins(
+                                                groupId: groupId,
+                                                targetLower: targetLower,
+                                              );
+                                              await rtdb()
+                                                  .ref(
+                                                    'groupJoinRequests/$groupId/$targetLower',
+                                                  )
+                                                  .remove();
+                                              await rtdb()
+                                                  .ref(
+                                                    'groupAdminInbox/${current.uid}/$key',
+                                                  )
+                                                  .remove();
+                                            }
+
+                                            Future<void> _reject(
+                                              Map<String, dynamic> item,
+                                            ) async {
+                                              final key = (item['__key'] ?? '')
+                                                  .toString();
+                                              final groupId =
+                                                  (item['groupId'] ?? '')
+                                                      .toString();
+                                              final targetLower =
+                                                  (item['targetLower'] ?? '')
+                                                      .toString();
+                                              if (groupId.isEmpty ||
+                                                  targetLower.isEmpty)
+                                                return;
+                                              await _cleanupAllAdmins(
+                                                groupId: groupId,
+                                                targetLower: targetLower,
+                                              );
+                                              await rtdb()
+                                                  .ref(
+                                                    'groupJoinRequests/$groupId/$targetLower',
+                                                  )
+                                                  .remove();
+                                              await rtdb()
+                                                  .ref(
+                                                    'groupAdminInbox/${current.uid}/$key',
+                                                  )
+                                                  .remove();
+                                            }
+
+                                            if (items.isEmpty)
+                                              return const SizedBox.shrink();
+
+                                            return Column(
+                                              children: [
+                                                ListTile(
+                                                  leading: const Icon(
+                                                    Icons
+                                                        .admin_panel_settings_outlined,
+                                                  ),
+                                                  title: Text(
+                                                    AppLanguage.tr(
+                                                      context,
+                                                      'Žádosti do skupin',
+                                                      'Group requests',
+                                                    ),
+                                                  ),
+                                                  subtitle: Text(
+                                                    '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
+                                                  ),
+                                                ),
+                                                ...items.map((item) {
+                                                  final groupId =
+                                                      (item['groupId'] ?? '')
+                                                          .toString();
+                                                  final targetLogin =
+                                                      (item['targetLogin'] ??
+                                                              '')
+                                                          .toString();
+                                                  final requestedBy =
+                                                      (item['requestedByGithub'] ??
+                                                              '')
+                                                          .toString();
+                                                  return StreamBuilder<
+                                                    DatabaseEvent
+                                                  >(
+                                                    stream: (groupId.isEmpty)
+                                                        ? null
+                                                        : rtdb()
+                                                              .ref(
+                                                                'groups/$groupId',
+                                                              )
+                                                              .onValue,
+                                                    builder: (context, gSnap) {
+                                                      final gv = gSnap
+                                                          .data
+                                                          ?.snapshot
+                                                          .value;
+                                                      final gm = (gv is Map)
+                                                          ? gv
+                                                          : null;
+                                                      if (gm == null)
+                                                        return const SizedBox.shrink();
+                                                      final title =
+                                                          (gm['title'] ?? '')
+                                                              .toString();
+                                                      return ListTile(
+                                                        leading: const Icon(
+                                                          Icons.group,
+                                                        ),
+                                                        title: Text(title),
+                                                        subtitle: Text(
+                                                          '${AppLanguage.tr(context, 'Přidat', 'Add')}: @${targetLogin.isEmpty ? AppLanguage.tr(context, 'uživatel', 'user') : targetLogin}${requestedBy.isNotEmpty ? ' • ${AppLanguage.tr(context, 'od', 'by')} @$requestedBy' : ''}',
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                        ),
+                                                        trailing: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: [
+                                                            IconButton(
+                                                              icon: const Icon(
+                                                                Icons.close,
+                                                              ),
+                                                              onPressed: () =>
+                                                                  _reject(item),
+                                                            ),
+                                                            IconButton(
+                                                              icon: const Icon(
+                                                                Icons.check,
+                                                              ),
+                                                              onPressed: () =>
+                                                                  _approve(
+                                                                    item,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      );
+                                                    },
+                                                  );
+                                                }),
+                                                const Divider(height: 1),
+                                              ],
+                                            );
+                                          },
+                                        ),
+
+                                        // DM žádosti (priváty) – notifikace nahoře v přehledu Chaty
+                                        StreamBuilder<DatabaseEvent>(
+                                          stream: rtdb()
+                                              .ref('dmRequests/${current.uid}')
+                                              .onValue,
+                                          builder: (context, reqSnap) {
+                                            final v =
+                                                reqSnap.data?.snapshot.value;
+                                            final m = (v is Map) ? v : null;
+
+                                            final items =
+                                                <Map<String, dynamic>>[];
+                                            if (m != null) {
+                                              for (final e in m.entries) {
+                                                if (e.value is! Map) continue;
+                                                final mm =
+                                                    Map<String, dynamic>.from(
+                                                      e.value as Map,
+                                                    );
+                                                mm['__key'] = e.key.toString();
+                                                items.add(mm);
+                                              }
+                                              items.sort((a, b) {
+                                                final at =
+                                                    (a['createdAt'] is int)
+                                                    ? a['createdAt'] as int
+                                                    : 0;
+                                                final bt =
+                                                    (b['createdAt'] is int)
+                                                    ? b['createdAt'] as int
+                                                    : 0;
+                                                return bt.compareTo(at);
+                                              });
+                                            }
+
+                                            if (items.isEmpty)
+                                              return const SizedBox.shrink();
+
+                                            Future<void> accept(
+                                              Map<String, dynamic> req,
+                                            ) async {
+                                              final fromLogin =
+                                                  (req['fromLogin'] ?? '')
+                                                      .toString();
+                                              if (fromLogin.trim().isEmpty)
+                                                return;
+                                              try {
+                                                await _acceptDmRequest(
+                                                  myUid: current.uid,
+                                                  otherLogin: fromLogin,
+                                                );
+                                              } catch (e) {
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                            }
+
+                                            Future<void> reject(
+                                              Map<String, dynamic> req,
+                                            ) async {
+                                              final fromLogin =
+                                                  (req['fromLogin'] ?? '')
+                                                      .toString();
+                                              if (fromLogin.trim().isEmpty)
+                                                return;
+                                              try {
+                                                await _rejectDmRequest(
+                                                  myUid: current.uid,
+                                                  otherLogin: fromLogin,
+                                                );
+                                              } catch (e) {
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                            }
+
+                                            return Column(
+                                              children: [
+                                                ListTile(
+                                                  leading: const Icon(
+                                                    Icons.mail_lock_outlined,
+                                                  ),
+                                                  title: Text(
+                                                    AppLanguage.tr(
+                                                      context,
+                                                      'Žádosti o chat',
+                                                      'Chat requests',
+                                                    ),
+                                                  ),
+                                                  subtitle: Text(
+                                                    '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
+                                                  ),
+                                                ),
+                                                ...items.map((req) {
+                                                  final fromLogin =
+                                                      (req['fromLogin'] ?? '')
+                                                          .toString();
+                                                  final fromUid =
+                                                      (req['fromUid'] ?? '')
+                                                          .toString();
+                                                  final fromAvatar =
+                                                      (req['fromAvatarUrl'] ??
+                                                              '')
+                                                          .toString();
+                                                  final hasEncryptedText =
+                                                      ((req['ciphertext'] ??
+                                                              req['ct'] ??
+                                                              req['cipher'])
+                                                          ?.toString()
+                                                          .isNotEmpty ??
+                                                      false);
+                                                  return ListTile(
+                                                    leading: fromUid.isNotEmpty
+                                                        ? _AvatarWithPresenceDot(
+                                                            uid: fromUid,
+                                                            avatarUrl:
+                                                                fromAvatar,
+                                                            radius: 18,
+                                                          )
+                                                        : CircleAvatar(
+                                                            radius: 18,
+                                                            backgroundImage:
+                                                                fromAvatar
+                                                                    .isNotEmpty
+                                                                ? NetworkImage(
+                                                                    fromAvatar,
+                                                                  )
+                                                                : null,
+                                                            child:
+                                                                fromAvatar
+                                                                    .isEmpty
+                                                                ? const Icon(
+                                                                    Icons
+                                                                        .person,
+                                                                    size: 18,
+                                                                  )
+                                                                : null,
+                                                          ),
+                                                    title: Text('@$fromLogin'),
+                                                    subtitle: hasEncryptedText
+                                                        ? Text(
+                                                            AppLanguage.tr(
+                                                              context,
+                                                              'Zpráva: 🔒 (šifrovaně)',
+                                                              'Message: 🔒 (encrypted)',
+                                                            ),
+                                                          )
+                                                        : Text(
+                                                            AppLanguage.tr(
+                                                              context,
+                                                              'Invajt do privátu',
+                                                              'Private chat invite',
+                                                            ),
+                                                          ),
+                                                    trailing: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        IconButton(
+                                                          icon: const Icon(
+                                                            Icons.close,
+                                                          ),
+                                                          onPressed: () =>
+                                                              reject(req),
+                                                        ),
+                                                        IconButton(
+                                                          icon: const Icon(
+                                                            Icons.check,
+                                                          ),
+                                                          onPressed: () =>
+                                                              accept(req),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                }),
+                                                const Divider(height: 1),
+                                              ],
+                                            );
+                                          },
+                                        ),
+
+                                        // Přepínače: Priváty / Skupiny / Složky
+                                        Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            16,
+                                            8,
+                                            16,
+                                            8,
+                                          ),
+                                          child: GestureDetector(
+                                            behavior:
+                                                HitTestBehavior.deferToChild,
+                                            onHorizontalDragStart:
+                                                _startOverviewSwipe,
+                                            onHorizontalDragUpdate:
+                                                _updateOverviewSwipe,
+                                            onHorizontalDragEnd:
+                                                _endOverviewSwipe,
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: Theme.of(
+                                                  context,
+                                                ).colorScheme.surface,
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                border: Border.all(
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.outlineVariant,
+                                                ),
+                                              ),
+                                              padding: const EdgeInsets.all(5),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: _JobsTabButton(
+                                                      label: AppLanguage.tr(
+                                                        context,
+                                                        'Priváty',
+                                                        'Private',
+                                                      ),
+                                                      selected:
+                                                          _overviewMode == 0,
+                                                      onTap: () =>
+                                                          _setOverviewMode(0),
+                                                    ),
+                                                  ),
+                                                  Expanded(
+                                                    child: _JobsTabButton(
+                                                      label: AppLanguage.tr(
+                                                        context,
+                                                        'Skupiny',
+                                                        'Groups',
+                                                      ),
+                                                      selected:
+                                                          _overviewMode == 1,
+                                                      onTap: () =>
+                                                          _setOverviewMode(1),
+                                                    ),
+                                                  ),
+                                                  Expanded(
+                                                    child: _JobsTabButton(
+                                                      label: AppLanguage.tr(
+                                                        context,
+                                                        'Složky',
+                                                        'Folders',
+                                                      ),
+                                                      selected:
+                                                          _overviewMode == 2,
+                                                      onTap: () =>
+                                                          _setOverviewMode(2),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+
+                                        if (isModerator) ...[
+                                          Padding(
+                                            padding: EdgeInsets.fromLTRB(
+                                              16,
+                                              12,
+                                              16,
+                                              8,
+                                            ),
+                                            child: Text(
+                                              AppLanguage.tr(
+                                                context,
+                                                'Žádosti o ověření',
+                                                'Verification requests',
+                                              ),
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                          if (pendingReqs.isEmpty)
+                                            Padding(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                                vertical: 8,
+                                              ),
+                                              child: Text(
+                                                AppLanguage.tr(
+                                                  context,
+                                                  'Žádné čekající žádosti.',
+                                                  'No pending requests.',
+                                                ),
+                                              ),
+                                            )
+                                          else
+                                            ...pendingReqs.map((r) {
+                                              final uid = (r['uid'] ?? '')
+                                                  .toString();
+                                              final gh =
+                                                  (r['githubUsername'] ?? '')
+                                                      .toString();
+                                              final reason = (r['reason'] ?? '')
+                                                  .toString();
+                                              final avatar =
+                                                  (r['avatarUrl'] ?? '')
+                                                      .toString();
+                                              return ListTile(
+                                                leading: _AvatarWithPresenceDot(
+                                                  uid: uid,
+                                                  avatarUrl: avatar,
+                                                  radius: 20,
+                                                ),
+                                                title: Text('@$gh'),
+                                                subtitle: Text(
+                                                  reason,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                                onTap: () {
+                                                  _hapticSelect();
+                                                  setState(() {
+                                                    _activeVerifiedUid = uid;
+                                                    _activeVerifiedGithub = gh;
+                                                    _moderatorAnonymous = true;
+                                                  });
+                                                },
+                                              );
+                                            }),
+                                          const Divider(height: 1),
+                                        ],
+
+                                        if (_overviewMode == 0) ...[
+                                          if (rows.isEmpty)
+                                            Padding(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                                vertical: 12,
+                                              ),
+                                              child: Text(
+                                                AppLanguage.tr(
+                                                  context,
+                                                  'Zatím žádné chaty. Napiš někomu zprávu.',
+                                                  'No chats yet. Send someone a message.',
+                                                ),
+                                              ),
+                                            )
+                                          else
+                                            ...rows.map((r) {
+                                              final login = (r['login'] ?? '')
+                                                  .toString();
+                                              final avatarUrl =
+                                                  (r['avatarUrl'] ?? '')
+                                                      .toString();
+                                              final lastText =
+                                                  (r['lastText'] ?? '')
+                                                      .toString();
+                                              final status =
+                                                  (r['status'] ?? 'accepted')
+                                                      .toString();
+                                              final unreadCount =
+                                                  (r['unreadCount'] as int?) ??
+                                                  0;
+                                              return ListTile(
+                                                leading: _ChatLoginAvatar(
+                                                  login: login,
+                                                  avatarUrl: avatarUrl,
+                                                  radius: 20,
+                                                ),
+                                                title: Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text('@$login'),
+                                                    ),
+                                                    if (status.startsWith(
+                                                      'pending',
+                                                    ))
+                                                      const Icon(
+                                                        Icons.lock_outline,
+                                                        size: 16,
+                                                      ),
+                                                  ],
+                                                ),
+                                                trailing: unreadCount > 0
+                                                    ? _unreadBadge(unreadCount)
+                                                    : null,
+                                                subtitle: lastText.isNotEmpty
+                                                    ? Text(
+                                                        lastText,
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      )
+                                                    : null,
+                                                onLongPress: () {
+                                                  _hapticMedium();
+                                                  _moveChatToFolder(
+                                                    myUid: current.uid,
+                                                    login: login,
+                                                  );
+                                                },
+                                                onTap: () {
+                                                  _hapticSelect();
+                                                  setState(() {
+                                                    _activeLogin = login;
+                                                    _activeAvatarUrl =
+                                                        avatarUrl;
+                                                  });
+                                                },
+                                              );
+                                            }),
+                                        ] else if (_overviewMode == 1) ...[
                                           ListTile(
                                             leading: const Icon(
                                               Icons.group_add,
@@ -18730,1416 +19967,413 @@ class _ChatsTabState extends State<_ChatsTab>
                                             title: Text(
                                               AppLanguage.tr(
                                                 context,
-                                                'Pozvánky do skupin',
-                                                'Group invites',
+                                                'Vytvořit skupinu',
+                                                'Create group',
                                               ),
                                             ),
-                                            subtitle: Text(
-                                              '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${invites.length}',
-                                            ),
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                              16,
-                                              0,
-                                              16,
-                                              8,
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Expanded(
-                                                  child: OutlinedButton(
-                                                    onPressed: acceptAll,
-                                                    child: Text(
-                                                      AppLanguage.tr(
-                                                        context,
-                                                        'Přijmout všechny',
-                                                        'Accept all',
-                                                      ),
+                                            onTap: () async {
+                                              _hapticSelect();
+                                              final created =
+                                                  await Navigator.of(
+                                                    context,
+                                                  ).push<String>(
+                                                    MaterialPageRoute(
+                                                      builder: (_) =>
+                                                          _CreateGroupPage(
+                                                            myGithubUsername:
+                                                                myGithub,
+                                                          ),
                                                     ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 12),
-                                                Expanded(
-                                                  child: OutlinedButton(
-                                                    onPressed: declineAll,
-                                                    child: Text(
-                                                      AppLanguage.tr(
-                                                        context,
-                                                        'Odmítnout všechny',
-                                                        'Decline all',
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          ...invites.map((inv) {
-                                            final key = (inv['__key'] ?? '')
-                                                .toString();
-                                            final groupTitle =
-                                                (inv['groupTitle'] ??
-                                                        AppLanguage.tr(
-                                                          context,
-                                                          'Skupina',
-                                                          'Group',
-                                                        ))
-                                                    .toString();
-                                            final groupId =
-                                                (inv['groupId'] ?? '')
-                                                    .toString();
-                                            final invitedBy =
-                                                (inv['invitedByGithub'] ?? '')
-                                                    .toString();
-                                            final groupLogo =
-                                                (inv['groupLogoUrl'] ?? '')
-                                                    .toString();
-                                            final groupLogoEmoji =
-                                                (inv['groupLogoEmoji'] ?? '')
-                                                    .toString()
-                                                    .trim();
-                                            return ListTile(
-                                              leading: CircleAvatar(
-                                                radius: 18,
-                                                backgroundImage:
-                                                    groupLogo.isNotEmpty
-                                                    ? NetworkImage(groupLogo)
-                                                    : null,
-                                                child: groupLogo.isEmpty
-                                                    ? (groupLogoEmoji.isNotEmpty
-                                                          ? Text(
-                                                              groupLogoEmoji,
-                                                            )
-                                                          : const Icon(
-                                                              Icons.group,
-                                                            ))
-                                                    : null,
-                                              ),
-                                              title: Text(groupTitle),
-                                              subtitle: invitedBy.isNotEmpty
-                                                  ? Text(
-                                                      '${AppLanguage.tr(context, 'Pozval', 'Invited by')}: @$invitedBy',
-                                                    )
-                                                  : (groupId.isNotEmpty
-                                                        ? Text(groupId)
-                                                        : null),
-                                              trailing: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  IconButton(
-                                                    icon: const Icon(
-                                                      Icons.close,
-                                                    ),
-                                                    onPressed: () =>
-                                                        declineInvite(key),
-                                                  ),
-                                                  IconButton(
-                                                    icon: const Icon(
-                                                      Icons.check,
-                                                    ),
-                                                    onPressed: () =>
-                                                        acceptInvite(key, inv),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                          }),
-                                          const Divider(height: 1),
-                                        ],
-                                      );
-                                    },
-                                  ),
-
-                                  // Inbox pro adminy skupin: žádosti od členů na přidání lidí
-                                  StreamBuilder<DatabaseEvent>(
-                                    stream: rtdb()
-                                        .ref('groupAdminInbox/${current.uid}')
-                                        .onValue,
-                                    builder: (context, inboxSnap) {
-                                      final iv = inboxSnap.data?.snapshot.value;
-                                      final im = (iv is Map) ? iv : null;
-                                      final items = <Map<String, dynamic>>[];
-                                      if (im != null) {
-                                        for (final e in im.entries) {
-                                          if (e.value is! Map) continue;
-                                          final m = Map<String, dynamic>.from(
-                                            e.value as Map,
-                                          );
-                                          m['__key'] = e.key.toString();
-                                          items.add(m);
-                                        }
-                                        items.sort((a, b) {
-                                          final at = (a['createdAt'] is int)
-                                              ? a['createdAt'] as int
-                                              : 0;
-                                          final bt = (b['createdAt'] is int)
-                                              ? b['createdAt'] as int
-                                              : 0;
-                                          return bt.compareTo(at);
-                                        });
-                                      }
-
-                                      Future<void> _cleanupAllAdmins({
-                                        required String groupId,
-                                        required String targetLower,
-                                      }) async {
-                                        final membersSnap = await rtdb()
-                                            .ref('groupMembers/$groupId')
-                                            .get();
-                                        final mv = membersSnap.value;
-                                        final m = (mv is Map) ? mv : null;
-                                        if (m != null) {
-                                          for (final e in m.entries) {
-                                            if (e.value is! Map) continue;
-                                            final mm =
-                                                Map<String, dynamic>.from(
-                                                  e.value as Map,
-                                                );
-                                            final role =
-                                                (mm['role'] ?? 'member')
-                                                    .toString();
-                                            if (role != 'admin') continue;
-                                            final adminUid = e.key.toString();
-                                            await rtdb()
-                                                .ref(
-                                                  'groupAdminInbox/$adminUid/${groupId}~$targetLower',
-                                                )
-                                                .remove();
-                                          }
-                                        }
-                                      }
-
-                                      Future<void> _approve(
-                                        Map<String, dynamic> item,
-                                      ) async {
-                                        final key = (item['__key'] ?? '')
-                                            .toString();
-                                        final groupId = (item['groupId'] ?? '')
-                                            .toString();
-                                        final targetLower =
-                                            (item['targetLower'] ?? '')
-                                                .toString();
-                                        final targetLogin =
-                                            (item['targetLogin'] ?? '')
-                                                .toString();
-                                        if (groupId.isEmpty ||
-                                            targetLower.isEmpty)
-                                          return;
-
-                                        final uidSnap = await rtdb()
-                                            .ref('usernames/$targetLower')
-                                            .get();
-                                        final targetUid = uidSnap.value
-                                            ?.toString();
-                                        if (targetUid == null ||
-                                            targetUid.isEmpty) {
-                                          await _cleanupAllAdmins(
-                                            groupId: groupId,
-                                            targetLower: targetLower,
-                                          );
-                                          await rtdb()
-                                              .ref(
-                                                'groupJoinRequests/$groupId/$targetLower',
-                                              )
-                                              .remove();
-                                          return;
-                                        }
-
-                                        final gSnap = await rtdb()
-                                            .ref('groups/$groupId')
-                                            .get();
-                                        final gv = gSnap.value;
-                                        final gm = (gv is Map) ? gv : null;
-                                        final title = (gm?['title'] ?? '')
-                                            .toString();
-                                        final logo = (gm?['logoUrl'] ?? '')
-                                            .toString();
-                                        final logoEmoji =
-                                          (gm?['logoEmoji'] ?? '')
-                                            .toString()
-                                            .trim();
-
-                                        await rtdb()
-                                            .ref(
-                                              'groupInvites/$targetUid/$groupId',
-                                            )
-                                            .set({
-                                              'groupId': groupId,
-                                              'groupTitle': title,
-                                              if (logo.isNotEmpty)
-                                                'groupLogoUrl': logo,
-                                              if (logoEmoji.isNotEmpty)
-                                                'groupLogoEmoji': logoEmoji,
-                                              'invitedByUid': current.uid,
-                                              'invitedByGithub': myGithub,
-                                              'createdAt':
-                                                  ServerValue.timestamp,
-                                              'via': 'member_request',
-                                              if (targetLogin.isNotEmpty)
-                                                'targetLogin': targetLogin,
-                                            });
-
-                                        await _cleanupAllAdmins(
-                                          groupId: groupId,
-                                          targetLower: targetLower,
-                                        );
-                                        await rtdb()
-                                            .ref(
-                                              'groupJoinRequests/$groupId/$targetLower',
-                                            )
-                                            .remove();
-                                        await rtdb()
-                                            .ref(
-                                              'groupAdminInbox/${current.uid}/$key',
-                                            )
-                                            .remove();
-                                      }
-
-                                      Future<void> _reject(
-                                        Map<String, dynamic> item,
-                                      ) async {
-                                        final key = (item['__key'] ?? '')
-                                            .toString();
-                                        final groupId = (item['groupId'] ?? '')
-                                            .toString();
-                                        final targetLower =
-                                            (item['targetLower'] ?? '')
-                                                .toString();
-                                        if (groupId.isEmpty ||
-                                            targetLower.isEmpty)
-                                          return;
-                                        await _cleanupAllAdmins(
-                                          groupId: groupId,
-                                          targetLower: targetLower,
-                                        );
-                                        await rtdb()
-                                            .ref(
-                                              'groupJoinRequests/$groupId/$targetLower',
-                                            )
-                                            .remove();
-                                        await rtdb()
-                                            .ref(
-                                              'groupAdminInbox/${current.uid}/$key',
-                                            )
-                                            .remove();
-                                      }
-
-                                      if (items.isEmpty)
-                                        return const SizedBox.shrink();
-
-                                      return Column(
-                                        children: [
-                                          ListTile(
-                                            leading: const Icon(
-                                              Icons
-                                                  .admin_panel_settings_outlined,
-                                            ),
-                                            title: Text(
-                                              AppLanguage.tr(
-                                                context,
-                                                'Žádosti do skupin',
-                                                'Group requests',
-                                              ),
-                                            ),
-                                            subtitle: Text(
-                                              '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
-                                            ),
-                                          ),
-                                          ...items.map((item) {
-                                            final groupId =
-                                                (item['groupId'] ?? '')
-                                                    .toString();
-                                            final targetLogin =
-                                                (item['targetLogin'] ?? '')
-                                                    .toString();
-                                            final requestedBy =
-                                                (item['requestedByGithub'] ??
-                                                        '')
-                                                    .toString();
-                                            return StreamBuilder<DatabaseEvent>(
-                                              stream: (groupId.isEmpty)
-                                                  ? null
-                                                  : rtdb()
-                                                        .ref('groups/$groupId')
-                                                        .onValue,
-                                              builder: (context, gSnap) {
-                                                final gv =
-                                                    gSnap.data?.snapshot.value;
-                                                final gm = (gv is Map)
-                                                    ? gv
-                                                    : null;
-                                                if (gm == null)
-                                                  return const SizedBox.shrink();
-                                                final title =
-                                                    (gm['title'] ?? '')
-                                                        .toString();
-                                                return ListTile(
-                                                  leading: const Icon(
-                                                    Icons.group,
-                                                  ),
-                                                  title: Text(title),
-                                                  subtitle: Text(
-                                                    '${AppLanguage.tr(context, 'Přidat', 'Add')}: @${targetLogin.isEmpty ? AppLanguage.tr(context, 'uživatel', 'user') : targetLogin}${requestedBy.isNotEmpty ? ' • ${AppLanguage.tr(context, 'od', 'by')} @$requestedBy' : ''}',
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                  trailing: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      IconButton(
-                                                        icon: const Icon(
-                                                          Icons.close,
-                                                        ),
-                                                        onPressed: () =>
-                                                            _reject(item),
-                                                      ),
-                                                      IconButton(
-                                                        icon: const Icon(
-                                                          Icons.check,
-                                                        ),
-                                                        onPressed: () =>
-                                                            _approve(item),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                );
-                                              },
-                                            );
-                                          }),
-                                          const Divider(height: 1),
-                                        ],
-                                      );
-                                    },
-                                  ),
-
-                                  // DM žádosti (priváty) – notifikace nahoře v přehledu Chaty
-                                  StreamBuilder<DatabaseEvent>(
-                                    stream: rtdb()
-                                        .ref('dmRequests/${current.uid}')
-                                        .onValue,
-                                    builder: (context, reqSnap) {
-                                      final v = reqSnap.data?.snapshot.value;
-                                      final m = (v is Map) ? v : null;
-
-                                      final items = <Map<String, dynamic>>[];
-                                      if (m != null) {
-                                        for (final e in m.entries) {
-                                          if (e.value is! Map) continue;
-                                          final mm = Map<String, dynamic>.from(
-                                            e.value as Map,
-                                          );
-                                          mm['__key'] = e.key.toString();
-                                          items.add(mm);
-                                        }
-                                        items.sort((a, b) {
-                                          final at = (a['createdAt'] is int)
-                                              ? a['createdAt'] as int
-                                              : 0;
-                                          final bt = (b['createdAt'] is int)
-                                              ? b['createdAt'] as int
-                                              : 0;
-                                          return bt.compareTo(at);
-                                        });
-                                      }
-
-                                      if (items.isEmpty)
-                                        return const SizedBox.shrink();
-
-                                      Future<void> accept(
-                                        Map<String, dynamic> req,
-                                      ) async {
-                                        final fromLogin =
-                                            (req['fromLogin'] ?? '').toString();
-                                        if (fromLogin.trim().isEmpty) return;
-                                        try {
-                                          await _acceptDmRequest(
-                                            myUid: current.uid,
-                                            otherLogin: fromLogin,
-                                          );
-                                        } catch (e) {
-                                          if (mounted) {
-                                            ScaffoldMessenger.of(
-                                              context,
-                                            ).showSnackBar(
-                                              SnackBar(
-                                                content: Text(
-                                                  '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        }
-                                      }
-
-                                      Future<void> reject(
-                                        Map<String, dynamic> req,
-                                      ) async {
-                                        final fromLogin =
-                                            (req['fromLogin'] ?? '').toString();
-                                        if (fromLogin.trim().isEmpty) return;
-                                        try {
-                                          await _rejectDmRequest(
-                                            myUid: current.uid,
-                                            otherLogin: fromLogin,
-                                          );
-                                        } catch (e) {
-                                          if (mounted) {
-                                            ScaffoldMessenger.of(
-                                              context,
-                                            ).showSnackBar(
-                                              SnackBar(
-                                                content: Text(
-                                                  '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        }
-                                      }
-
-                                      return Column(
-                                        children: [
-                                          ListTile(
-                                            leading: const Icon(
-                                              Icons.mail_lock_outlined,
-                                            ),
-                                            title: Text(
-                                              AppLanguage.tr(
-                                                context,
-                                                'Žádosti o chat',
-                                                'Chat requests',
-                                              ),
-                                            ),
-                                            subtitle: Text(
-                                              '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
-                                            ),
-                                          ),
-                                          ...items.map((req) {
-                                            final fromLogin =
-                                                (req['fromLogin'] ?? '')
-                                                    .toString();
-                                            final fromUid =
-                                                (req['fromUid'] ?? '')
-                                                    .toString();
-                                            final fromAvatar =
-                                                (req['fromAvatarUrl'] ?? '')
-                                                    .toString();
-                                            final hasEncryptedText =
-                                                ((req['ciphertext'] ??
-                                                        req['ct'] ??
-                                                        req['cipher'])
-                                                    ?.toString()
-                                                    .isNotEmpty ??
-                                                false);
-                                            return ListTile(
-                                              leading: fromUid.isNotEmpty
-                                                  ? _AvatarWithPresenceDot(
-                                                      uid: fromUid,
-                                                      avatarUrl: fromAvatar,
-                                                      radius: 18,
-                                                    )
-                                                  : CircleAvatar(
-                                                      radius: 18,
-                                                      backgroundImage:
-                                                          fromAvatar.isNotEmpty
-                                                          ? NetworkImage(
-                                                              fromAvatar,
-                                                            )
-                                                          : null,
-                                                      child: fromAvatar.isEmpty
-                                                          ? const Icon(
-                                                              Icons.person,
-                                                              size: 18,
-                                                            )
-                                                          : null,
-                                                    ),
-                                              title: Text('@$fromLogin'),
-                                              subtitle: hasEncryptedText
-                                                  ? Text(
-                                                      AppLanguage.tr(
-                                                        context,
-                                                        'Zpráva: 🔒 (šifrovaně)',
-                                                        'Message: 🔒 (encrypted)',
-                                                      ),
-                                                    )
-                                                  : Text(
-                                                      AppLanguage.tr(
-                                                        context,
-                                                        'Invajt do privátu',
-                                                        'Private chat invite',
-                                                      ),
-                                                    ),
-                                              trailing: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  IconButton(
-                                                    icon: const Icon(
-                                                      Icons.close,
-                                                    ),
-                                                    onPressed: () =>
-                                                        reject(req),
-                                                  ),
-                                                  IconButton(
-                                                    icon: const Icon(
-                                                      Icons.check,
-                                                    ),
-                                                    onPressed: () =>
-                                                        accept(req),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                          }),
-                                          const Divider(height: 1),
-                                        ],
-                                      );
-                                    },
-                                  ),
-
-                                  // Přepínače: Priváty / Skupiny / Složky
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      8,
-                                      16,
-                                      8,
-                                    ),
-                                    child: Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        ChoiceChip(
-                                          label: Text(
-                                            AppLanguage.tr(
-                                              context,
-                                              'Priváty',
-                                              'Private',
-                                            ),
-                                          ),
-                                          selected: _overviewMode == 0,
-                                          onSelected: (_) => setState(() {
-                                            _overviewMode = 0;
-                                            _activeFolderId = null;
-                                          }),
-                                        ),
-                                        ChoiceChip(
-                                          label: Text(
-                                            AppLanguage.tr(
-                                              context,
-                                              'Skupiny',
-                                              'Groups',
-                                            ),
-                                          ),
-                                          selected: _overviewMode == 1,
-                                          onSelected: (_) => setState(() {
-                                            _overviewMode = 1;
-                                            _activeFolderId = null;
-                                          }),
-                                        ),
-                                        ChoiceChip(
-                                          label: Text(
-                                            AppLanguage.tr(
-                                              context,
-                                              'Složky',
-                                              'Folders',
-                                            ),
-                                          ),
-                                          selected: _overviewMode == 2,
-                                          onSelected: (_) => setState(() {
-                                            _overviewMode = 2;
-                                            _activeFolderId = null;
-                                          }),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-
-                                  if (isModerator) ...[
-                                    Padding(
-                                      padding: EdgeInsets.fromLTRB(
-                                        16,
-                                        12,
-                                        16,
-                                        8,
-                                      ),
-                                      child: Text(
-                                        AppLanguage.tr(
-                                          context,
-                                          'Žádosti o ověření',
-                                          'Verification requests',
-                                        ),
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    if (pendingReqs.isEmpty)
-                                      Padding(
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                          vertical: 8,
-                                        ),
-                                        child: Text(
-                                          AppLanguage.tr(
-                                            context,
-                                            'Žádné čekající žádosti.',
-                                            'No pending requests.',
-                                          ),
-                                        ),
-                                      )
-                                    else
-                                      ...pendingReqs.map((r) {
-                                        final uid = (r['uid'] ?? '').toString();
-                                        final gh = (r['githubUsername'] ?? '')
-                                            .toString();
-                                        final reason = (r['reason'] ?? '')
-                                            .toString();
-                                        final avatar = (r['avatarUrl'] ?? '')
-                                            .toString();
-                                        return ListTile(
-                                          leading: _AvatarWithPresenceDot(
-                                            uid: uid,
-                                            avatarUrl: avatar,
-                                            radius: 20,
-                                          ),
-                                          title: Text('@$gh'),
-                                          subtitle: Text(
-                                            reason,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          onTap: () {
-                                            _hapticSelect();
-                                            setState(() {
-                                              _activeVerifiedUid = uid;
-                                              _activeVerifiedGithub = gh;
-                                              _moderatorAnonymous = true;
-                                            });
-                                          },
-                                        );
-                                      }),
-                                    const Divider(height: 1),
-                                  ],
-
-                                  if (_overviewMode == 0) ...[
-                                    if (rows.isEmpty)
-                                      Padding(
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                          vertical: 12,
-                                        ),
-                                        child: Text(
-                                          AppLanguage.tr(
-                                            context,
-                                            'Zatím žádné chaty. Napiš někomu zprávu.',
-                                            'No chats yet. Send someone a message.',
-                                          ),
-                                        ),
-                                      )
-                                    else
-                                      ...rows.map((r) {
-                                        final login = (r['login'] ?? '')
-                                            .toString();
-                                        final avatarUrl = (r['avatarUrl'] ?? '')
-                                            .toString();
-                                        final lastText = (r['lastText'] ?? '')
-                                            .toString();
-                                        final status =
-                                            (r['status'] ?? 'accepted')
-                                                .toString();
-                                        final unreadCount =
-                                          (r['unreadCount'] as int?) ?? 0;
-                                        return ListTile(
-                                          leading: _ChatLoginAvatar(
-                                            login: login,
-                                            avatarUrl: avatarUrl,
-                                            radius: 20,
-                                          ),
-                                          title: Row(
-                                            children: [
-                                              Expanded(child: Text('@$login')),
-                                              if (status.startsWith('pending'))
-                                                const Icon(
-                                                  Icons.lock_outline,
-                                                  size: 16,
-                                                ),
-                                            ],
-                                          ),
-                                          trailing: unreadCount > 0
-                                              ? _unreadBadge(unreadCount)
-                                              : null,
-                                          subtitle: lastText.isNotEmpty
-                                              ? Text(
-                                                  lastText,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                )
-                                              : null,
-                                          onLongPress: () {
-                                            _hapticMedium();
-                                            _moveChatToFolder(
-                                              myUid: current.uid,
-                                              login: login,
-                                            );
-                                          },
-                                          onTap: () {
-                                            _hapticSelect();
-                                            setState(() {
-                                              _activeLogin = login;
-                                              _activeAvatarUrl = avatarUrl;
-                                            });
-                                          },
-                                        );
-                                      }),
-                                  ] else if (_overviewMode == 1) ...[
-                                    ListTile(
-                                      leading: const Icon(Icons.group_add),
-                                      title: Text(
-                                        AppLanguage.tr(
-                                          context,
-                                          'Vytvořit skupinu',
-                                          'Create group',
-                                        ),
-                                      ),
-                                      onTap: () async {
-                                        _hapticSelect();
-                                        final created =
-                                            await Navigator.of(
-                                              context,
-                                            ).push<String>(
-                                              MaterialPageRoute(
-                                                builder: (_) =>
-                                                    _CreateGroupPage(
-                                                      myGithubUsername:
-                                                          myGithub,
-                                                    ),
-                                              ),
-                                            );
-                                        if (!mounted) return;
-                                        if (created != null &&
-                                            created.isNotEmpty) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                AppLanguage.tr(
+                                                  );
+                                              if (!mounted) return;
+                                              if (created != null &&
+                                                  created.isNotEmpty) {
+                                                ScaffoldMessenger.of(
                                                   context,
-                                                  'Skupina vytvořena.',
-                                                  'Group created.',
-                                                ),
-                                              ),
+                                                ).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      AppLanguage.tr(
+                                                        context,
+                                                        'Skupina vytvořena.',
+                                                        'Group created.',
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                          ),
+                                          ListTile(
+                                            leading: const Icon(
+                                              Icons.qr_code_scanner,
                                             ),
-                                          );
-                                        }
-                                      },
-                                    ),
-                                    ListTile(
-                                      leading: const Icon(
-                                        Icons.qr_code_scanner,
-                                      ),
-                                      title: Text(
-                                        AppLanguage.tr(
-                                          context,
-                                          'Připojit se přes link / QR',
-                                          'Join via link / QR',
-                                        ),
-                                      ),
-                                      onTap: () async {
-                                        _hapticSelect();
-                                        final joined =
-                                            await Navigator.of(
-                                              context,
-                                            ).push<String>(
-                                              MaterialPageRoute(
-                                                builder: (_) =>
-                                                    const JoinGroupViaLinkQrPage(),
-                                              ),
-                                            );
-                                        if (!mounted) return;
-                                        if (joined != null &&
-                                            joined.isNotEmpty) {
-                                          setState(() {
-                                            _activeGroupId = joined;
-                                            _activeLogin = null;
-                                            _activeVerifiedUid = null;
-                                          });
-                                        }
-                                      },
-                                    ),
-                                    const Divider(height: 1),
-                                    StreamBuilder<DatabaseEvent>(
-                                      stream: userGroupsRef.onValue,
-                                      builder: (context, gSnap) {
-                                        final gv = gSnap.data?.snapshot.value;
-                                        final gmap = (gv is Map) ? gv : null;
-                                        final groupIds = <String>[];
-                                        if (gmap != null) {
-                                          for (final e in gmap.entries) {
-                                            if (e.value == true)
-                                              groupIds.add(e.key.toString());
-                                          }
-                                        }
-                                        if (groupIds.isEmpty) {
-                                          return Padding(
-                                            padding: EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 12,
-                                            ),
-                                            child: Text(
+                                            title: Text(
                                               AppLanguage.tr(
                                                 context,
-                                                'Zatím nejsi v žádné skupině.',
-                                                'You are not in any group yet.',
+                                                'Připojit se přes link / QR',
+                                                'Join via link / QR',
                                               ),
                                             ),
-                                          );
-                                        }
-
-                                        return Column(
-                                          children: groupIds
-                                              .map((gid) {
-                                                final gref = groupsRef.child(
-                                                  gid,
-                                                );
-                                                return StreamBuilder<
-                                                  DatabaseEvent
-                                                >(
-                                                  stream: gref.onValue,
-                                                  builder: (context, meta) {
-                                                    final v = meta
-                                                        .data
-                                                        ?.snapshot
-                                                        .value;
-                                                    final m = (v is Map)
-                                                        ? v
-                                                        : null;
-                                                    if (m == null)
-                                                      return const SizedBox.shrink();
-                                                    final title =
-                                                        (m['title'] ?? '')
-                                                            .toString();
-                                                    final desc =
-                                                        (m['description'] ?? '')
-                                                            .toString();
-                                                    final logo =
-                                                        (m['logoUrl'] ?? '')
-                                                            .toString();
-                                                    final logoEmoji =
-                                                        (m['logoEmoji'] ?? '')
-                                                            .toString()
-                                                            .trim();
-                                                    return StreamBuilder<
-                                                      DatabaseEvent
-                                                    >(
-                                                      stream: rtdb()
-                                                          .ref(
-                                                            'groupReadState/${current.uid}/$gid/lastReadAt',
-                                                          )
-                                                          .onValue,
-                                                      builder: (context, rs) {
-                                                        final readAtRaw = rs
-                                                            .data
-                                                            ?.snapshot
-                                                            .value;
-                                                        final readAt =
-                                                            (readAtRaw is int)
-                                                            ? readAtRaw
-                                                            : int.tryParse(
-                                                                '$readAtRaw',
-                                                              ) ??
-                                                                  0;
-
-                                                        return StreamBuilder<
-                                                          DatabaseEvent
-                                                        >(
-                                                          stream: rtdb()
-                                                              .ref(
-                                                                'groupMessages/$gid',
-                                                              )
-                                                              .onValue,
-                                                          builder: (
-                                                            context,
-                                                            ms,
-                                                          ) {
-                                                            final mv = ms
-                                                                .data
-                                                                ?.snapshot
-                                                                .value;
-                                                            final mmap =
-                                                                (mv is Map)
-                                                                ? mv
-                                                                : null;
-                                                            var unreadCount = 0;
-                                                            var latestAt = 0;
-                                                            if (mmap != null) {
-                                                              for (final e
-                                                                  in mmap
-                                                                      .entries) {
-                                                                if (e.value
-                                                                    is! Map) {
-                                                                  continue;
-                                                                }
-                                                                final mm =
-                                                                    Map<String, dynamic>.from(
-                                                                      e.value
-                                                                          as Map,
-                                                                    );
-                                                                final createdAt =
-                                                                    (mm['createdAt']
-                                                                            is int)
-                                                                    ? mm['createdAt']
-                                                                          as int
-                                                                    : 0;
-                                                                if (createdAt >
-                                                                    latestAt) {
-                                                                  latestAt =
-                                                                      createdAt;
-                                                                }
-                                                                final fromUid =
-                                                                    (mm['fromUid'] ?? '')
-                                                                        .toString();
-                                                                if (fromUid !=
-                                                                        current.uid &&
-                                                                    createdAt >
-                                                                        readAt) {
-                                                                  unreadCount++;
-                                                                }
-                                                              }
-                                                            }
-
-                                                            return ListTile(
-                                                              leading: CircleAvatar(
-                                                                radius: 18,
-                                                                backgroundImage:
-                                                                    logo.isNotEmpty
-                                                                    ? NetworkImage(
-                                                                        logo,
-                                                                      )
-                                                                    : null,
-                                                                child: logo
-                                                                        .isEmpty
-                                                                    ? (logoEmoji
-                                                                              .isNotEmpty
-                                                                          ? Text(
-                                                                              logoEmoji,
-                                                                            )
-                                                                          : const Icon(
-                                                                              Icons.group,
-                                                                            ))
-                                                                    : null,
-                                                              ),
-                                                              title: Text(title),
-                                                              trailing:
-                                                                  unreadCount > 0
-                                                                  ? _unreadBadge(
-                                                                      unreadCount,
-                                                                    )
-                                                                  : null,
-                                                              subtitle:
-                                                                  desc.isNotEmpty
-                                                                  ? Text(
-                                                                      desc,
-                                                                      maxLines: 1,
-                                                                      overflow:
-                                                                          TextOverflow
-                                                                              .ellipsis,
-                                                                    )
-                                                                  : null,
-                                                              onTap: () {
-                                                                if (latestAt > 0) {
-                                                                  _syncGroupReadCursor(
-                                                                    groupId: gid,
-                                                                    myUid:
-                                                                        current
-                                                                            .uid,
-                                                                    latestAt:
-                                                                        latestAt,
-                                                                  );
-                                                                }
-                                                                setState(() {
-                                                                  _activeGroupId =
-                                                                      gid;
-                                                                  _activeLogin =
-                                                                      null;
-                                                                  _activeVerifiedUid =
-                                                                      null;
-                                                                });
-                                                              },
-                                                            );
-                                                          },
-                                                        );
-                                                      },
+                                            onTap: () async {
+                                              _hapticSelect();
+                                              final joined =
+                                                  await Navigator.of(
+                                                    context,
+                                                  ).push<String>(
+                                                    MaterialPageRoute(
+                                                      builder: (_) =>
+                                                          const JoinGroupViaLinkQrPage(),
+                                                    ),
+                                                  );
+                                              if (!mounted) return;
+                                              if (joined != null &&
+                                                  joined.isNotEmpty) {
+                                                setState(() {
+                                                  _activeGroupId = joined;
+                                                  _activeLogin = null;
+                                                  _activeVerifiedUid = null;
+                                                });
+                                              }
+                                            },
+                                          ),
+                                          const Divider(height: 1),
+                                          StreamBuilder<DatabaseEvent>(
+                                            stream: userGroupsRef.onValue,
+                                            builder: (context, gSnap) {
+                                              final gv =
+                                                  gSnap.data?.snapshot.value;
+                                              final gmap = (gv is Map)
+                                                  ? gv
+                                                  : null;
+                                              final groupIds = <String>[];
+                                              if (gmap != null) {
+                                                for (final e in gmap.entries) {
+                                                  if (e.value == true)
+                                                    groupIds.add(
+                                                      e.key.toString(),
                                                     );
-                                                  },
-                                                );
-                                              })
-                                              .toList(growable: false),
-                                        );
-                                      },
-                                    ),
-                                  ] else ...[
-                                    StreamBuilder<DatabaseEvent>(
-                                      stream: rtdb()
-                                          .ref('folders/${current.uid}')
-                                          .onValue,
-                                      builder: (context, fSnap) {
-                                        final fv = fSnap.data?.snapshot.value;
-                                        final fm = (fv is Map) ? fv : null;
-                                        final folders =
-                                            <Map<String, dynamic>>[];
-                                        if (fm != null) {
-                                          for (final e in fm.entries) {
-                                            if (e.value is! Map) continue;
-                                            final mm =
-                                                Map<String, dynamic>.from(
-                                                  e.value as Map,
-                                                );
-                                            final name = (mm['name'] ?? '')
-                                                .toString();
-                                            if (name.trim().isEmpty) continue;
-                                            folders.add({
-                                              'id': e.key.toString(),
-                                              'name': name,
-                                            });
-                                          }
-                                          folders.sort(
-                                            (a, b) => (a['name'] as String)
-                                                .compareTo(b['name'] as String),
-                                          );
-                                        }
-
-                                        return StreamBuilder<DatabaseEvent>(
-                                          stream: rtdb()
-                                              .ref('chatFolders/${current.uid}')
-                                              .onValue,
-                                          builder: (context, cfSnap) {
-                                            final cv =
-                                                cfSnap.data?.snapshot.value;
-                                            final cfm = (cv is Map) ? cv : null;
-
-                                            return StreamBuilder<DatabaseEvent>(
-                                              stream: rtdb()
-                                                  .ref(
-                                                    'userGroups/${current.uid}',
-                                                  )
-                                                  .onValue,
-                                              builder: (context, ugSnap) {
-                                                final ugv =
-                                                    ugSnap.data?.snapshot.value;
-                                                final ugm = (ugv is Map)
-                                                    ? ugv
-                                                    : null;
-                                                final allGroupIds = <String>[];
-                                                if (ugm != null) {
-                                                  for (final e in ugm.entries) {
-                                                    if (e.value == true)
-                                                      allGroupIds.add(
-                                                        e.key.toString(),
-                                                      );
-                                                  }
                                                 }
+                                              }
+                                              if (groupIds.isEmpty) {
+                                                return Padding(
+                                                  padding: EdgeInsets.symmetric(
+                                                    horizontal: 16,
+                                                    vertical: 12,
+                                                  ),
+                                                  child: Text(
+                                                    AppLanguage.tr(
+                                                      context,
+                                                      'Zatím nejsi v žádné skupině.',
+                                                      'You are not in any group yet.',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
 
-                                                return StreamBuilder<
-                                                  DatabaseEvent
-                                                >(
-                                                  stream: rtdb()
-                                                      .ref(
-                                                        'groupFolders/${current.uid}',
-                                                      )
-                                                      .onValue,
-                                                  builder: (context, gfSnap) {
-                                                    final gfv = gfSnap
-                                                        .data
-                                                        ?.snapshot
-                                                        .value;
-                                                    final gfm = (gfv is Map)
-                                                        ? gfv
-                                                        : null;
+                                              return Column(
+                                                children: groupIds
+                                                    .map((gid) {
+                                                      final gref = groupsRef
+                                                          .child(gid);
+                                                      return StreamBuilder<
+                                                        DatabaseEvent
+                                                      >(
+                                                        stream: gref.onValue,
+                                                        builder: (context, meta) {
+                                                          final v = meta
+                                                              .data
+                                                              ?.snapshot
+                                                              .value;
+                                                          final m = (v is Map)
+                                                              ? v
+                                                              : null;
+                                                          if (m == null)
+                                                            return const SizedBox.shrink();
+                                                          final title =
+                                                              (m['title'] ?? '')
+                                                                  .toString();
+                                                          final desc =
+                                                              (m['description'] ??
+                                                                      '')
+                                                                  .toString();
+                                                          final logo =
+                                                              (m['logoUrl'] ??
+                                                                      '')
+                                                                  .toString();
+                                                          final logoEmoji =
+                                                              (m['logoEmoji'] ??
+                                                                      '')
+                                                                  .toString()
+                                                                  .trim();
+                                                          return StreamBuilder<
+                                                            DatabaseEvent
+                                                          >(
+                                                            stream: rtdb()
+                                                                .ref(
+                                                                  'groupReadState/${current.uid}/$gid/lastReadAt',
+                                                                )
+                                                                .onValue,
+                                                            builder: (context, rs) {
+                                                              final readAtRaw =
+                                                                  rs
+                                                                      .data
+                                                                      ?.snapshot
+                                                                      .value;
+                                                              final readAt =
+                                                                  (readAtRaw
+                                                                      is int)
+                                                                  ? readAtRaw
+                                                                  : int.tryParse(
+                                                                          '$readAtRaw',
+                                                                        ) ??
+                                                                        0;
 
-                                                    int countChatsForFolder(
-                                                      String? folderId,
-                                                    ) {
-                                                      var c = 0;
-                                                      for (final r in rows) {
-                                                        final login =
-                                                            (r['login'] ?? '')
-                                                                .toString();
-                                                        final key = login
-                                                            .trim()
-                                                            .toLowerCase();
-                                                        final mapped = cfm?[key]
-                                                            ?.toString();
-                                                        if (folderId == null) {
-                                                          if (mapped == null ||
-                                                              mapped.isEmpty)
-                                                            c++;
-                                                        } else {
-                                                          if (mapped ==
-                                                              folderId)
-                                                            c++;
-                                                        }
-                                                      }
-                                                      return c;
-                                                    }
+                                                              return StreamBuilder<
+                                                                DatabaseEvent
+                                                              >(
+                                                                stream: rtdb()
+                                                                    .ref(
+                                                                      'groupMessages/$gid',
+                                                                    )
+                                                                    .onValue,
+                                                                builder: (context, ms) {
+                                                                  final mv = ms
+                                                                      .data
+                                                                      ?.snapshot
+                                                                      .value;
+                                                                  final mmap =
+                                                                      (mv is Map)
+                                                                      ? mv
+                                                                      : null;
+                                                                  var unreadCount =
+                                                                      0;
+                                                                  var latestAt =
+                                                                      0;
+                                                                  if (mmap !=
+                                                                      null) {
+                                                                    for (final e
+                                                                        in mmap
+                                                                            .entries) {
+                                                                      if (e.value
+                                                                          is! Map) {
+                                                                        continue;
+                                                                      }
+                                                                      final mm =
+                                                                          Map<
+                                                                            String,
+                                                                            dynamic
+                                                                          >.from(
+                                                                            e.value
+                                                                                as Map,
+                                                                          );
+                                                                      final createdAt =
+                                                                          (mm['createdAt']
+                                                                              is int)
+                                                                          ? mm['createdAt']
+                                                                                as int
+                                                                          : 0;
+                                                                      if (createdAt >
+                                                                          latestAt) {
+                                                                        latestAt =
+                                                                            createdAt;
+                                                                      }
+                                                                      final fromUid =
+                                                                          (mm['fromUid'] ??
+                                                                                  '')
+                                                                              .toString();
+                                                                      if (fromUid !=
+                                                                              current.uid &&
+                                                                          createdAt >
+                                                                              readAt) {
+                                                                        unreadCount++;
+                                                                      }
+                                                                    }
+                                                                  }
 
-                                                    int countGroupsForFolder(
-                                                      String? folderId,
-                                                    ) {
-                                                      if (folderId == null)
-                                                        return 0;
-                                                      var c = 0;
-                                                      for (final gid
-                                                          in allGroupIds) {
-                                                        final mapped = gfm?[gid]
-                                                            ?.toString();
-                                                        if (mapped == folderId)
-                                                          c++;
-                                                      }
-                                                      return c;
-                                                    }
-
-                                                    Future<void>
-                                                    createFolder() async {
-                                                      final ctrl =
-                                                          TextEditingController();
-                                                      final name = await showDialog<String>(
-                                                        context: context,
-                                                        builder: (context) {
-                                                          return AlertDialog(
-                                                            title: Text(
-                                                              AppLanguage.tr(
-                                                                context,
-                                                                'Nová složka',
-                                                                'New folder',
-                                                              ),
-                                                            ),
-                                                            content: TextField(
-                                                              controller: ctrl,
-                                                              decoration: InputDecoration(
-                                                                labelText:
-                                                                    AppLanguage.tr(
-                                                                      context,
-                                                                      'Název',
-                                                                      'Name',
+                                                                  return ListTile(
+                                                                    leading: CircleAvatar(
+                                                                      radius:
+                                                                          18,
+                                                                      backgroundImage:
+                                                                          logo.isNotEmpty
+                                                                          ? NetworkImage(
+                                                                              logo,
+                                                                            )
+                                                                          : null,
+                                                                      child:
+                                                                          logo.isEmpty
+                                                                          ? (logoEmoji.isNotEmpty
+                                                                                ? Text(
+                                                                                    logoEmoji,
+                                                                                  )
+                                                                                : const Icon(
+                                                                                    Icons.group,
+                                                                                  ))
+                                                                          : null,
                                                                     ),
-                                                              ),
-                                                            ),
-                                                            actions: [
-                                                              TextButton(
-                                                                onPressed: () =>
-                                                                    Navigator.of(
-                                                                      context,
-                                                                    ).pop(),
-                                                                child: Text(
-                                                                  AppLanguage.tr(
-                                                                    context,
-                                                                    'Zrušit',
-                                                                    'Cancel',
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              FilledButton(
-                                                                onPressed: () =>
-                                                                    Navigator.of(
-                                                                      context,
-                                                                    ).pop(
-                                                                      ctrl.text
-                                                                          .trim(),
+                                                                    title: Text(
+                                                                      title,
                                                                     ),
-                                                                child: Text(
-                                                                  AppLanguage.tr(
-                                                                    context,
-                                                                    'Vytvořit',
-                                                                    'Create',
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ],
+                                                                    trailing:
+                                                                        unreadCount >
+                                                                            0
+                                                                        ? _unreadBadge(
+                                                                            unreadCount,
+                                                                          )
+                                                                        : null,
+                                                                    subtitle:
+                                                                        desc.isNotEmpty
+                                                                        ? Text(
+                                                                            desc,
+                                                                            maxLines:
+                                                                                1,
+                                                                            overflow:
+                                                                                TextOverflow.ellipsis,
+                                                                          )
+                                                                        : null,
+                                                                    onTap: () {
+                                                                      if (latestAt >
+                                                                          0) {
+                                                                        _syncGroupReadCursor(
+                                                                          groupId:
+                                                                              gid,
+                                                                          myUid:
+                                                                              current.uid,
+                                                                          latestAt:
+                                                                              latestAt,
+                                                                        );
+                                                                      }
+                                                                      setState(() {
+                                                                        _activeGroupId =
+                                                                            gid;
+                                                                        _activeLogin =
+                                                                            null;
+                                                                        _activeVerifiedUid =
+                                                                            null;
+                                                                      });
+                                                                    },
+                                                                  );
+                                                                },
+                                                              );
+                                                            },
                                                           );
                                                         },
                                                       );
-                                                      final n = (name ?? '')
-                                                          .trim();
-                                                      if (n.isEmpty) return;
-                                                      final push = rtdb()
-                                                          .ref(
-                                                            'folders/${current.uid}',
-                                                          )
-                                                          .push();
-                                                      await push.set({
-                                                        'name': n,
-                                                        'createdAt': ServerValue
-                                                            .timestamp,
-                                                      });
-                                                    }
-
-                                                    Future<void> deleteFolder(
-                                                      String folderId, {
-                                                      required String
-                                                      folderName,
-                                                    }) async {
-                                                      final ok = await showDialog<bool>(
-                                                        context: context,
-                                                        builder: (context) => AlertDialog(
-                                                          title: Text(
-                                                            AppLanguage.tr(
-                                                              context,
-                                                              'Smazat složku?',
-                                                              'Delete folder?',
-                                                            ),
-                                                          ),
-                                                          content: Text(
-                                                            AppLanguage.tr(
-                                                              context,
-                                                              'Složka "$folderName" se smaže a všechny položky se vrátí zpět do privátů/skupin.',
-                                                              'Folder "$folderName" will be deleted and all items will be moved back to private chats/groups.',
-                                                            ),
-                                                          ),
-                                                          actions: [
-                                                            TextButton(
-                                                              onPressed: () =>
-                                                                  Navigator.pop(
-                                                                    context,
-                                                                    false,
-                                                                  ),
-                                                              child: Text(
-                                                                AppLanguage.tr(
-                                                                  context,
-                                                                  'Zrušit',
-                                                                  'Cancel',
-                                                                ),
-                                                              ),
-                                                            ),
-                                                            FilledButton(
-                                                              onPressed: () =>
-                                                                  Navigator.pop(
-                                                                    context,
-                                                                    true,
-                                                                  ),
-                                                              child: Text(
-                                                                AppLanguage.tr(
-                                                                  context,
-                                                                  'Smazat',
-                                                                  'Delete',
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ],
-                                                        ),
+                                                    })
+                                                    .toList(growable: false),
+                                              );
+                                            },
+                                          ),
+                                        ] else ...[
+                                          StreamBuilder<DatabaseEvent>(
+                                            stream: rtdb()
+                                                .ref('folders/${current.uid}')
+                                                .onValue,
+                                            builder: (context, fSnap) {
+                                              final fv =
+                                                  fSnap.data?.snapshot.value;
+                                              final fm = (fv is Map)
+                                                  ? fv
+                                                  : null;
+                                              final folders =
+                                                  <Map<String, dynamic>>[];
+                                              if (fm != null) {
+                                                for (final e in fm.entries) {
+                                                  if (e.value is! Map) continue;
+                                                  final mm =
+                                                      Map<String, dynamic>.from(
+                                                        e.value as Map,
                                                       );
-                                                      if (ok != true) return;
+                                                  final name =
+                                                      (mm['name'] ?? '')
+                                                          .toString();
+                                                  if (name.trim().isEmpty)
+                                                    continue;
+                                                  folders.add({
+                                                    'id': e.key.toString(),
+                                                    'name': name,
+                                                  });
+                                                }
+                                                folders.sort(
+                                                  (a, b) =>
+                                                      (a['name'] as String)
+                                                          .compareTo(
+                                                            b['name'] as String,
+                                                          ),
+                                                );
+                                              }
 
-                                                      final updates =
-                                                          <String, Object?>{};
-                                                      updates['folders/${current.uid}/$folderId'] =
-                                                          null;
+                                              return StreamBuilder<
+                                                DatabaseEvent
+                                              >(
+                                                stream: rtdb()
+                                                    .ref(
+                                                      'chatFolders/${current.uid}',
+                                                    )
+                                                    .onValue,
+                                                builder: (context, cfSnap) {
+                                                  final cv = cfSnap
+                                                      .data
+                                                      ?.snapshot
+                                                      .value;
+                                                  final cfm = (cv is Map)
+                                                      ? cv
+                                                      : null;
 
-                                                      if (cfm != null) {
+                                                  return StreamBuilder<
+                                                    DatabaseEvent
+                                                  >(
+                                                    stream: rtdb()
+                                                        .ref(
+                                                          'userGroups/${current.uid}',
+                                                        )
+                                                        .onValue,
+                                                    builder: (context, ugSnap) {
+                                                      final ugv = ugSnap
+                                                          .data
+                                                          ?.snapshot
+                                                          .value;
+                                                      final ugm = (ugv is Map)
+                                                          ? ugv
+                                                          : null;
+                                                      final allGroupIds =
+                                                          <String>[];
+                                                      if (ugm != null) {
                                                         for (final e
-                                                            in cfm.entries) {
-                                                          final key = e.key
-                                                              .toString();
-                                                          final mapped = e.value
-                                                              ?.toString();
-                                                          if (mapped ==
-                                                              folderId) {
-                                                            updates['chatFolders/${current.uid}/$key'] =
-                                                                null;
-                                                          }
-                                                        }
-                                                      }
-                                                      if (gfm != null) {
-                                                        for (final e
-                                                            in gfm.entries) {
-                                                          final gid = e.key
-                                                              .toString();
-                                                          final mapped = e.value
-                                                              ?.toString();
-                                                          if (mapped ==
-                                                              folderId) {
-                                                            updates['groupFolders/${current.uid}/$gid'] =
-                                                                null;
-                                                          }
+                                                            in ugm.entries) {
+                                                          if (e.value == true)
+                                                            allGroupIds.add(
+                                                              e.key.toString(),
+                                                            );
                                                         }
                                                       }
 
-                                                      await rtdb().ref().update(
-                                                        updates,
-                                                      );
-                                                      if (mounted) {
-                                                        setState(
-                                                          () =>
-                                                              _activeFolderId =
-                                                                  null,
-                                                        );
-                                                      }
-                                                    }
+                                                      return StreamBuilder<
+                                                        DatabaseEvent
+                                                      >(
+                                                        stream: rtdb()
+                                                            .ref(
+                                                              'groupFolders/${current.uid}',
+                                                            )
+                                                            .onValue,
+                                                        builder: (context, gfSnap) {
+                                                          final gfv = gfSnap
+                                                              .data
+                                                              ?.snapshot
+                                                              .value;
+                                                          final gfm =
+                                                              (gfv is Map)
+                                                              ? gfv
+                                                              : null;
 
-                                                    Future<void> addToFolder(
-                                                      String folderId,
-                                                    ) async {
-                                                      final kind = await showModalBottomSheet<String>(
-                                                        context: context,
-                                                        builder: (context) {
-                                                          return SafeArea(
-                                                            child: ListView(
-                                                              shrinkWrap: true,
-                                                              children: [
-                                                                ListTile(
-                                                                  leading:
-                                                                      const Icon(
-                                                                        Icons
-                                                                            .person_add_alt_1,
-                                                                      ),
-                                                                  title: Text(
-                                                                    AppLanguage.tr(
-                                                                      context,
-                                                                      'Přidat privát',
-                                                                      'Add private chat',
-                                                                    ),
-                                                                  ),
-                                                                  onTap: () =>
-                                                                      Navigator.of(
-                                                                        context,
-                                                                      ).pop(
-                                                                        'chat',
-                                                                      ),
-                                                                ),
-                                                                ListTile(
-                                                                  leading:
-                                                                      const Icon(
-                                                                        Icons
-                                                                            .group_add,
-                                                                      ),
-                                                                  title: Text(
-                                                                    AppLanguage.tr(
-                                                                      context,
-                                                                      'Přidat skupinu',
-                                                                      'Add group',
-                                                                    ),
-                                                                  ),
-                                                                  onTap: () =>
-                                                                      Navigator.of(
-                                                                        context,
-                                                                      ).pop(
-                                                                        'group',
-                                                                      ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          );
-                                                        },
-                                                      );
-                                                      if (kind == null) return;
-
-                                                      if (kind == 'chat') {
-                                                        final candidates = rows
-                                                            .where((r) {
+                                                          int
+                                                          countChatsForFolder(
+                                                            String? folderId,
+                                                          ) {
+                                                            var c = 0;
+                                                            for (final r
+                                                                in rows) {
                                                               final login =
                                                                   (r['login'] ??
                                                                           '')
@@ -20150,127 +20384,772 @@ class _ChatsTabState extends State<_ChatsTab>
                                                               final mapped =
                                                                   cfm?[key]
                                                                       ?.toString();
-                                                              return mapped !=
-                                                                  folderId;
-                                                            })
-                                                            .toList(
-                                                              growable: false,
-                                                            );
+                                                              if (folderId ==
+                                                                  null) {
+                                                                if (mapped ==
+                                                                        null ||
+                                                                    mapped
+                                                                        .isEmpty)
+                                                                  c++;
+                                                              } else {
+                                                                if (mapped ==
+                                                                    folderId)
+                                                                  c++;
+                                                              }
+                                                            }
+                                                            return c;
+                                                          }
 
-                                                        final pickedLogin = await showModalBottomSheet<String>(
-                                                          context: context,
-                                                          isScrollControlled:
-                                                              true,
-                                                          builder: (context) {
-                                                            return SafeArea(
-                                                              child: ListView(
-                                                                shrinkWrap:
-                                                                    true,
-                                                                children: [
-                                                                  ListTile(
-                                                                    title: Text(
-                                                                      AppLanguage.tr(
+                                                          int
+                                                          countGroupsForFolder(
+                                                            String? folderId,
+                                                          ) {
+                                                            if (folderId ==
+                                                                null)
+                                                              return 0;
+                                                            var c = 0;
+                                                            for (final gid
+                                                                in allGroupIds) {
+                                                              final mapped =
+                                                                  gfm?[gid]
+                                                                      ?.toString();
+                                                              if (mapped ==
+                                                                  folderId)
+                                                                c++;
+                                                            }
+                                                            return c;
+                                                          }
+
+                                                          Future<void>
+                                                          createFolder() async {
+                                                            final ctrl =
+                                                                TextEditingController();
+                                                            final name = await showDialog<String>(
+                                                              context: context,
+                                                              builder: (context) {
+                                                                return AlertDialog(
+                                                                  title: Text(
+                                                                    AppLanguage.tr(
+                                                                      context,
+                                                                      'Nová složka',
+                                                                      'New folder',
+                                                                    ),
+                                                                  ),
+                                                                  content: TextField(
+                                                                    controller:
+                                                                        ctrl,
+                                                                    decoration: InputDecoration(
+                                                                      labelText: AppLanguage.tr(
                                                                         context,
-                                                                        'Vyber privát',
-                                                                        'Select private chat',
-                                                                      ),
-                                                                      style: const TextStyle(
-                                                                        fontWeight:
-                                                                            FontWeight.w700,
+                                                                        'Název',
+                                                                        'Name',
                                                                       ),
                                                                     ),
                                                                   ),
-                                                                  const Divider(
-                                                                    height: 1,
+                                                                  actions: [
+                                                                    TextButton(
+                                                                      onPressed: () =>
+                                                                          Navigator.of(
+                                                                            context,
+                                                                          ).pop(),
+                                                                      child: Text(
+                                                                        AppLanguage.tr(
+                                                                          context,
+                                                                          'Zrušit',
+                                                                          'Cancel',
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                    FilledButton(
+                                                                      onPressed: () =>
+                                                                          Navigator.of(
+                                                                            context,
+                                                                          ).pop(
+                                                                            ctrl.text.trim(),
+                                                                          ),
+                                                                      child: Text(
+                                                                        AppLanguage.tr(
+                                                                          context,
+                                                                          'Vytvořit',
+                                                                          'Create',
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                );
+                                                              },
+                                                            );
+                                                            final n =
+                                                                (name ?? '')
+                                                                    .trim();
+                                                            if (n.isEmpty)
+                                                              return;
+                                                            final push = rtdb()
+                                                                .ref(
+                                                                  'folders/${current.uid}',
+                                                                )
+                                                                .push();
+                                                            await push.set({
+                                                              'name': n,
+                                                              'createdAt':
+                                                                  ServerValue
+                                                                      .timestamp,
+                                                            });
+                                                          }
+
+                                                          Future<void>
+                                                          deleteFolder(
+                                                            String folderId, {
+                                                            required String
+                                                            folderName,
+                                                          }) async {
+                                                            final ok = await showDialog<bool>(
+                                                              context: context,
+                                                              builder: (context) => AlertDialog(
+                                                                title: Text(
+                                                                  AppLanguage.tr(
+                                                                    context,
+                                                                    'Smazat složku?',
+                                                                    'Delete folder?',
                                                                   ),
-                                                                  ...candidates.map((
-                                                                    r,
-                                                                  ) {
+                                                                ),
+                                                                content: Text(
+                                                                  AppLanguage.tr(
+                                                                    context,
+                                                                    'Složka "$folderName" se smaže a všechny položky se vrátí zpět do privátů/skupin.',
+                                                                    'Folder "$folderName" will be deleted and all items will be moved back to private chats/groups.',
+                                                                  ),
+                                                                ),
+                                                                actions: [
+                                                                  TextButton(
+                                                                    onPressed: () =>
+                                                                        Navigator.pop(
+                                                                          context,
+                                                                          false,
+                                                                        ),
+                                                                    child: Text(
+                                                                      AppLanguage.tr(
+                                                                        context,
+                                                                        'Zrušit',
+                                                                        'Cancel',
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                  FilledButton(
+                                                                    onPressed: () =>
+                                                                        Navigator.pop(
+                                                                          context,
+                                                                          true,
+                                                                        ),
+                                                                    child: Text(
+                                                                      AppLanguage.tr(
+                                                                        context,
+                                                                        'Smazat',
+                                                                        'Delete',
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            );
+                                                            if (ok != true)
+                                                              return;
+
+                                                            final updates =
+                                                                <
+                                                                  String,
+                                                                  Object?
+                                                                >{};
+                                                            updates['folders/${current.uid}/$folderId'] =
+                                                                null;
+
+                                                            if (cfm != null) {
+                                                              for (final e
+                                                                  in cfm
+                                                                      .entries) {
+                                                                final key = e
+                                                                    .key
+                                                                    .toString();
+                                                                final mapped = e
+                                                                    .value
+                                                                    ?.toString();
+                                                                if (mapped ==
+                                                                    folderId) {
+                                                                  updates['chatFolders/${current.uid}/$key'] =
+                                                                      null;
+                                                                }
+                                                              }
+                                                            }
+                                                            if (gfm != null) {
+                                                              for (final e
+                                                                  in gfm
+                                                                      .entries) {
+                                                                final gid = e
+                                                                    .key
+                                                                    .toString();
+                                                                final mapped = e
+                                                                    .value
+                                                                    ?.toString();
+                                                                if (mapped ==
+                                                                    folderId) {
+                                                                  updates['groupFolders/${current.uid}/$gid'] =
+                                                                      null;
+                                                                }
+                                                              }
+                                                            }
+
+                                                            await rtdb()
+                                                                .ref()
+                                                                .update(
+                                                                  updates,
+                                                                );
+                                                            if (mounted) {
+                                                              setState(
+                                                                () =>
+                                                                    _activeFolderId =
+                                                                        null,
+                                                              );
+                                                            }
+                                                          }
+
+                                                          Future<void>
+                                                          addToFolder(
+                                                            String folderId,
+                                                          ) async {
+                                                            final kind = await showModalBottomSheet<String>(
+                                                              context: context,
+                                                              builder: (context) {
+                                                                return SafeArea(
+                                                                  child: ListView(
+                                                                    shrinkWrap:
+                                                                        true,
+                                                                    children: [
+                                                                      ListTile(
+                                                                        leading:
+                                                                            const Icon(
+                                                                              Icons.person_add_alt_1,
+                                                                            ),
+                                                                        title: Text(
+                                                                          AppLanguage.tr(
+                                                                            context,
+                                                                            'Přidat privát',
+                                                                            'Add private chat',
+                                                                          ),
+                                                                        ),
+                                                                        onTap: () =>
+                                                                            Navigator.of(
+                                                                              context,
+                                                                            ).pop(
+                                                                              'chat',
+                                                                            ),
+                                                                      ),
+                                                                      ListTile(
+                                                                        leading:
+                                                                            const Icon(
+                                                                              Icons.group_add,
+                                                                            ),
+                                                                        title: Text(
+                                                                          AppLanguage.tr(
+                                                                            context,
+                                                                            'Přidat skupinu',
+                                                                            'Add group',
+                                                                          ),
+                                                                        ),
+                                                                        onTap: () =>
+                                                                            Navigator.of(
+                                                                              context,
+                                                                            ).pop(
+                                                                              'group',
+                                                                            ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                );
+                                                              },
+                                                            );
+                                                            if (kind == null)
+                                                              return;
+
+                                                            if (kind ==
+                                                                'chat') {
+                                                              final candidates = rows
+                                                                  .where((r) {
                                                                     final login =
                                                                         (r['login'] ??
                                                                                 '')
                                                                             .toString();
-                                                                    final avatarUrl =
-                                                                        (r['avatarUrl'] ??
-                                                                                '')
-                                                                            .toString();
-                                                                    return ListTile(
-                                                                      leading: _ChatLoginAvatar(
-                                                                        login:
-                                                                            login,
-                                                                        avatarUrl:
-                                                                            avatarUrl,
-                                                                        radius:
-                                                                            18,
-                                                                      ),
-                                                                      title: Text(
-                                                                        '@$login',
-                                                                      ),
-                                                                      onTap: () =>
-                                                                          Navigator.of(
-                                                                            context,
-                                                                          ).pop(
-                                                                            login,
-                                                                          ),
-                                                                    );
-                                                                  }),
-                                                                ],
-                                                              ),
-                                                            );
-                                                          },
-                                                        );
-                                                        if (pickedLogin ==
-                                                                null ||
-                                                            pickedLogin.isEmpty)
-                                                          return;
-                                                        final key = pickedLogin
-                                                            .trim()
-                                                            .toLowerCase();
-                                                        await rtdb()
-                                                            .ref(
-                                                              'chatFolders/${current.uid}/$key',
-                                                            )
-                                                            .set(folderId);
-                                                      } else {
-                                                        final candidates = allGroupIds
-                                                            .where((gid) {
-                                                              final mapped =
-                                                                  gfm?[gid]
-                                                                      ?.toString();
-                                                              return mapped !=
-                                                                  folderId;
-                                                            })
-                                                            .toList(
-                                                              growable: false,
-                                                            );
+                                                                    final key = login
+                                                                        .trim()
+                                                                        .toLowerCase();
+                                                                    final mapped =
+                                                                        cfm?[key]
+                                                                            ?.toString();
+                                                                    return mapped !=
+                                                                        folderId;
+                                                                  })
+                                                                  .toList(
+                                                                    growable:
+                                                                        false,
+                                                                  );
 
-                                                        final pickedGid = await showModalBottomSheet<String>(
-                                                          context: context,
-                                                          isScrollControlled:
-                                                              true,
-                                                          builder: (context) {
-                                                            return SafeArea(
-                                                              child: ListView(
-                                                                shrinkWrap:
+                                                              final pickedLogin = await showModalBottomSheet<String>(
+                                                                context:
+                                                                    context,
+                                                                isScrollControlled:
                                                                     true,
-                                                                children: [
-                                                                  ListTile(
-                                                                    title: Text(
+                                                                builder: (context) {
+                                                                  return SafeArea(
+                                                                    child: ListView(
+                                                                      shrinkWrap:
+                                                                          true,
+                                                                      children: [
+                                                                        ListTile(
+                                                                          title: Text(
+                                                                            AppLanguage.tr(
+                                                                              context,
+                                                                              'Vyber privát',
+                                                                              'Select private chat',
+                                                                            ),
+                                                                            style: const TextStyle(
+                                                                              fontWeight: FontWeight.w700,
+                                                                            ),
+                                                                          ),
+                                                                        ),
+                                                                        const Divider(
+                                                                          height:
+                                                                              1,
+                                                                        ),
+                                                                        ...candidates.map((
+                                                                          r,
+                                                                        ) {
+                                                                          final login =
+                                                                              (r['login'] ??
+                                                                                      '')
+                                                                                  .toString();
+                                                                          final avatarUrl =
+                                                                              (r['avatarUrl'] ??
+                                                                                      '')
+                                                                                  .toString();
+                                                                          return ListTile(
+                                                                            leading: _ChatLoginAvatar(
+                                                                              login: login,
+                                                                              avatarUrl: avatarUrl,
+                                                                              radius: 18,
+                                                                            ),
+                                                                            title: Text(
+                                                                              '@$login',
+                                                                            ),
+                                                                            onTap: () =>
+                                                                                Navigator.of(
+                                                                                  context,
+                                                                                ).pop(
+                                                                                  login,
+                                                                                ),
+                                                                          );
+                                                                        }),
+                                                                      ],
+                                                                    ),
+                                                                  );
+                                                                },
+                                                              );
+                                                              if (pickedLogin ==
+                                                                      null ||
+                                                                  pickedLogin
+                                                                      .isEmpty)
+                                                                return;
+                                                              final key =
+                                                                  pickedLogin
+                                                                      .trim()
+                                                                      .toLowerCase();
+                                                              await rtdb()
+                                                                  .ref(
+                                                                    'chatFolders/${current.uid}/$key',
+                                                                  )
+                                                                  .set(
+                                                                    folderId,
+                                                                  );
+                                                            } else {
+                                                              final candidates = allGroupIds
+                                                                  .where((gid) {
+                                                                    final mapped =
+                                                                        gfm?[gid]
+                                                                            ?.toString();
+                                                                    return mapped !=
+                                                                        folderId;
+                                                                  })
+                                                                  .toList(
+                                                                    growable:
+                                                                        false,
+                                                                  );
+
+                                                              final pickedGid = await showModalBottomSheet<String>(
+                                                                context:
+                                                                    context,
+                                                                isScrollControlled:
+                                                                    true,
+                                                                builder: (context) {
+                                                                  return SafeArea(
+                                                                    child: ListView(
+                                                                      shrinkWrap:
+                                                                          true,
+                                                                      children: [
+                                                                        ListTile(
+                                                                          title: Text(
+                                                                            AppLanguage.tr(
+                                                                              context,
+                                                                              'Vyber skupinu',
+                                                                              'Select group',
+                                                                            ),
+                                                                            style: const TextStyle(
+                                                                              fontWeight: FontWeight.w700,
+                                                                            ),
+                                                                          ),
+                                                                        ),
+                                                                        const Divider(
+                                                                          height:
+                                                                              1,
+                                                                        ),
+                                                                        ...candidates.map((
+                                                                          gid,
+                                                                        ) {
+                                                                          return StreamBuilder<
+                                                                            DatabaseEvent
+                                                                          >(
+                                                                            stream: rtdb()
+                                                                                .ref(
+                                                                                  'groups/$gid',
+                                                                                )
+                                                                                .onValue,
+                                                                            builder:
+                                                                                (
+                                                                                  context,
+                                                                                  snap,
+                                                                                ) {
+                                                                                  final v = snap.data?.snapshot.value;
+                                                                                  final m =
+                                                                                      (v
+                                                                                          is Map)
+                                                                                      ? v
+                                                                                      : null;
+                                                                                  if (m ==
+                                                                                      null)
+                                                                                    return const SizedBox.shrink();
+                                                                                  final title =
+                                                                                      (m['title'] ??
+                                                                                              '')
+                                                                                          .toString();
+                                                                                  final logo =
+                                                                                      (m['logoUrl'] ??
+                                                                                              '')
+                                                                                          .toString();
+                                                                                  return ListTile(
+                                                                                    leading: CircleAvatar(
+                                                                                      radius: 18,
+                                                                                      backgroundImage: logo.isNotEmpty
+                                                                                          ? NetworkImage(
+                                                                                              logo,
+                                                                                            )
+                                                                                          : null,
+                                                                                      child: logo.isEmpty
+                                                                                          ? const Icon(
+                                                                                              Icons.group,
+                                                                                            )
+                                                                                          : null,
+                                                                                    ),
+                                                                                    title: Text(
+                                                                                      title,
+                                                                                    ),
+                                                                                    subtitle: Text(
+                                                                                      gid,
+                                                                                      maxLines: 1,
+                                                                                      overflow: TextOverflow.ellipsis,
+                                                                                    ),
+                                                                                    onTap: () =>
+                                                                                        Navigator.of(
+                                                                                          context,
+                                                                                        ).pop(
+                                                                                          gid,
+                                                                                        ),
+                                                                                  );
+                                                                                },
+                                                                          );
+                                                                        }),
+                                                                      ],
+                                                                    ),
+                                                                  );
+                                                                },
+                                                              );
+                                                              if (pickedGid ==
+                                                                      null ||
+                                                                  pickedGid
+                                                                      .isEmpty)
+                                                                return;
+                                                              await rtdb()
+                                                                  .ref(
+                                                                    'groupFolders/${current.uid}/$pickedGid',
+                                                                  )
+                                                                  .set(
+                                                                    folderId,
+                                                                  );
+                                                            }
+                                                          }
+
+                                                          Widget
+                                                          buildFolderView(
+                                                            String fid,
+                                                          ) {
+                                                            final folderName =
+                                                                (fid ==
+                                                                    '__privates__')
+                                                                ? AppLanguage.tr(
+                                                                    context,
+                                                                    'Priváty',
+                                                                    'Private',
+                                                                  )
+                                                                : (folders.firstWhere(
+                                                                        (e) =>
+                                                                            e['id'] ==
+                                                                            fid,
+                                                                        orElse: () => {
+                                                                          'name': AppLanguage.tr(
+                                                                            context,
+                                                                            'Složka',
+                                                                            'Folder',
+                                                                          ),
+                                                                        },
+                                                                      )['name']
+                                                                      as String);
+
+                                                            final filteredChats = rows
+                                                                .where((r) {
+                                                                  final login =
+                                                                      (r['login'] ??
+                                                                              '')
+                                                                          .toString();
+                                                                  final key = login
+                                                                      .trim()
+                                                                      .toLowerCase();
+                                                                  final mapped =
+                                                                      cfm?[key]
+                                                                          ?.toString();
+                                                                  if (fid ==
+                                                                      '__privates__') {
+                                                                    return mapped ==
+                                                                            null ||
+                                                                        mapped
+                                                                            .isEmpty;
+                                                                  }
+                                                                  return mapped ==
+                                                                      fid;
+                                                                })
+                                                                .toList(
+                                                                  growable:
+                                                                      false,
+                                                                );
+
+                                                            final filteredGroups =
+                                                                (fid ==
+                                                                    '__privates__')
+                                                                ? const <
+                                                                    String
+                                                                  >[]
+                                                                : allGroupIds
+                                                                      .where(
+                                                                        (gid) =>
+                                                                            (gfm?[gid]?.toString() ==
+                                                                            fid),
+                                                                      )
+                                                                      .toList(
+                                                                        growable:
+                                                                            false,
+                                                                      );
+
+                                                            return Column(
+                                                              key: ValueKey(
+                                                                'folder:$fid',
+                                                              ),
+                                                              children: [
+                                                                ListTile(
+                                                                  leading: IconButton(
+                                                                    icon: const Icon(
+                                                                      Icons
+                                                                          .arrow_back,
+                                                                    ),
+                                                                    onPressed: () {
+                                                                      _hapticSelect();
+                                                                      setState(
+                                                                        () => _activeFolderId =
+                                                                            null,
+                                                                      );
+                                                                    },
+                                                                  ),
+                                                                  title: Text(
+                                                                    folderName,
+                                                                  ),
+                                                                  subtitle: Text(
+                                                                    fid ==
+                                                                            '__privates__'
+                                                                        ? '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${filteredChats.length}'
+                                                                        : '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${filteredChats.length} • ${AppLanguage.tr(context, 'Skupiny', 'Groups')}: ${filteredGroups.length}',
+                                                                  ),
+                                                                  trailing:
+                                                                      (fid ==
+                                                                          '__privates__')
+                                                                      ? null
+                                                                      : Row(
+                                                                          mainAxisSize:
+                                                                              MainAxisSize.min,
+                                                                          children: [
+                                                                            IconButton(
+                                                                              tooltip: AppLanguage.tr(
+                                                                                context,
+                                                                                'Přidat',
+                                                                                'Add',
+                                                                              ),
+                                                                              icon: const Icon(
+                                                                                Icons.add,
+                                                                              ),
+                                                                              onPressed: () {
+                                                                                _hapticSelect();
+                                                                                addToFolder(
+                                                                                  fid,
+                                                                                );
+                                                                              },
+                                                                            ),
+                                                                            IconButton(
+                                                                              tooltip: AppLanguage.tr(
+                                                                                context,
+                                                                                'Smazat složku',
+                                                                                'Delete folder',
+                                                                              ),
+                                                                              icon: const Icon(
+                                                                                Icons.delete_outline,
+                                                                              ),
+                                                                              onPressed: () {
+                                                                                _hapticMedium();
+                                                                                deleteFolder(
+                                                                                  fid,
+                                                                                  folderName: folderName,
+                                                                                );
+                                                                              },
+                                                                            ),
+                                                                          ],
+                                                                        ),
+                                                                ),
+                                                                const Divider(
+                                                                  height: 1,
+                                                                ),
+
+                                                                if (filteredChats
+                                                                        .isEmpty &&
+                                                                    filteredGroups
+                                                                        .isEmpty)
+                                                                  Padding(
+                                                                    padding: EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          16,
+                                                                      vertical:
+                                                                          12,
+                                                                    ),
+                                                                    child: Text(
                                                                       AppLanguage.tr(
                                                                         context,
-                                                                        'Vyber skupinu',
-                                                                        'Select group',
-                                                                      ),
-                                                                      style: const TextStyle(
-                                                                        fontWeight:
-                                                                            FontWeight.w700,
+                                                                        'Ve složce zatím nic není.',
+                                                                        'Folder is empty.',
                                                                       ),
                                                                     ),
                                                                   ),
+
+                                                                ...filteredChats.map((
+                                                                  r,
+                                                                ) {
+                                                                  final login =
+                                                                      (r['login'] ??
+                                                                              '')
+                                                                          .toString();
+                                                                  final avatarUrl =
+                                                                      (r['avatarUrl'] ??
+                                                                              '')
+                                                                          .toString();
+                                                                  final lastText =
+                                                                      (r['lastText'] ??
+                                                                              '')
+                                                                          .toString();
+                                                                  return ListTile(
+                                                                    leading: _ChatLoginAvatar(
+                                                                      login:
+                                                                          login,
+                                                                      avatarUrl:
+                                                                          avatarUrl,
+                                                                      radius:
+                                                                          20,
+                                                                    ),
+                                                                    title: Text(
+                                                                      '@$login',
+                                                                    ),
+                                                                    subtitle:
+                                                                        lastText
+                                                                            .isNotEmpty
+                                                                        ? Text(
+                                                                            lastText,
+                                                                            maxLines:
+                                                                                1,
+                                                                            overflow:
+                                                                                TextOverflow.ellipsis,
+                                                                          )
+                                                                        : null,
+                                                                    onLongPress: () {
+                                                                      _hapticMedium();
+                                                                      _moveChatToFolder(
+                                                                        myUid: current
+                                                                            .uid,
+                                                                        login:
+                                                                            login,
+                                                                      );
+                                                                    },
+                                                                    onTap: () {
+                                                                      _hapticSelect();
+                                                                      setState(() {
+                                                                        _activeLogin =
+                                                                            login;
+                                                                        _activeAvatarUrl =
+                                                                            avatarUrl;
+                                                                      });
+                                                                    },
+                                                                  );
+                                                                }),
+
+                                                                if (filteredGroups
+                                                                    .isNotEmpty) ...[
                                                                   const Divider(
                                                                     height: 1,
                                                                   ),
-                                                                  ...candidates.map((
+                                                                  Padding(
+                                                                    padding:
+                                                                        EdgeInsets.fromLTRB(
+                                                                          16,
+                                                                          12,
+                                                                          16,
+                                                                          8,
+                                                                        ),
+                                                                    child: Align(
+                                                                      alignment:
+                                                                          Alignment
+                                                                              .centerLeft,
+                                                                      child: Text(
+                                                                        AppLanguage.tr(
+                                                                          context,
+                                                                          'Skupiny',
+                                                                          'Groups',
+                                                                        ),
+                                                                        style: const TextStyle(
+                                                                          fontWeight:
+                                                                              FontWeight.w700,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                  ...filteredGroups.map((
                                                                     gid,
                                                                   ) {
                                                                     return StreamBuilder<
@@ -20304,6 +21183,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                                 (m['logoUrl'] ??
                                                                                         '')
                                                                                     .toString();
+                                                                            final desc =
+                                                                                (m['description'] ??
+                                                                                        '')
+                                                                                    .toString();
                                                                             return ListTile(
                                                                               leading: CircleAvatar(
                                                                                 radius: 18,
@@ -20321,165 +21204,131 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                               title: Text(
                                                                                 title,
                                                                               ),
-                                                                              subtitle: Text(
-                                                                                gid,
-                                                                                maxLines: 1,
-                                                                                overflow: TextOverflow.ellipsis,
-                                                                              ),
-                                                                              onTap: () =>
-                                                                                  Navigator.of(
-                                                                                    context,
-                                                                                  ).pop(
-                                                                                    gid,
-                                                                                  ),
+                                                                              subtitle: desc.isNotEmpty
+                                                                                  ? Text(
+                                                                                      desc,
+                                                                                      maxLines: 1,
+                                                                                      overflow: TextOverflow.ellipsis,
+                                                                                    )
+                                                                                  : null,
+                                                                              onTap: () {
+                                                                                _hapticSelect();
+                                                                                setState(
+                                                                                  () {
+                                                                                    _activeGroupId = gid;
+                                                                                    _activeLogin = null;
+                                                                                    _activeVerifiedUid = null;
+                                                                                  },
+                                                                                );
+                                                                              },
                                                                             );
                                                                           },
                                                                     );
                                                                   }),
                                                                 ],
-                                                              ),
+                                                              ],
                                                             );
-                                                          },
-                                                        );
-                                                        if (pickedGid == null ||
-                                                            pickedGid.isEmpty)
-                                                          return;
-                                                        await rtdb()
-                                                            .ref(
-                                                              'groupFolders/${current.uid}/$pickedGid',
-                                                            )
-                                                            .set(folderId);
-                                                      }
-                                                    }
+                                                          }
 
-                                                    Widget buildFolderView(
-                                                      String fid,
-                                                    ) {
-                                                      final folderName =
-                                                          (fid ==
-                                                              '__privates__')
-                                                          ? AppLanguage.tr(
-                                                              context,
-                                                              'Priváty',
-                                                              'Private',
-                                                            )
-                                                          : (folders.firstWhere(
-                                                                  (e) =>
-                                                                      e['id'] ==
-                                                                      fid,
-                                                                  orElse: () => {
-                                                                    'name': AppLanguage.tr(
-                                                                      context,
-                                                                      'Složka',
-                                                                      'Folder',
-                                                                    ),
-                                                                  },
-                                                                )['name']
-                                                                as String);
-
-                                                      final filteredChats = rows
-                                                          .where((r) {
-                                                            final login =
-                                                                (r['login'] ??
-                                                                        '')
-                                                                    .toString();
-                                                            final key = login
-                                                                .trim()
-                                                                .toLowerCase();
-                                                            final mapped =
-                                                                cfm?[key]
-                                                                    ?.toString();
-                                                            if (fid ==
-                                                                '__privates__') {
-                                                              return mapped ==
-                                                                      null ||
-                                                                  mapped
-                                                                      .isEmpty;
-                                                            }
-                                                            return mapped ==
-                                                                fid;
-                                                          })
-                                                          .toList(
-                                                            growable: false,
-                                                          );
-
-                                                      final filteredGroups =
-                                                          (fid ==
-                                                              '__privates__')
-                                                          ? const <String>[]
-                                                          : allGroupIds
-                                                                .where(
-                                                                  (gid) =>
-                                                                      (gfm?[gid]
-                                                                          ?.toString() ==
-                                                                      fid),
-                                                                )
-                                                                .toList(
-                                                                  growable:
-                                                                      false,
-                                                                );
-
-                                                      return Column(
-                                                        key: ValueKey(
-                                                          'folder:$fid',
-                                                        ),
-                                                        children: [
-                                                          ListTile(
-                                                            leading: IconButton(
-                                                              icon: const Icon(
-                                                                Icons
-                                                                    .arrow_back,
+                                                          Widget
+                                                          buildFolderList() {
+                                                            return Column(
+                                                              key: const ValueKey(
+                                                                'folders:list',
                                                               ),
-                                                              onPressed: () {
-                                                                _hapticSelect();
-                                                                setState(
-                                                                  () =>
-                                                                      _activeFolderId =
-                                                                          null,
-                                                                );
-                                                              },
-                                                            ),
-                                                            title: Text(
-                                                              folderName,
-                                                            ),
-                                                            subtitle: Text(
-                                                              fid ==
-                                                                      '__privates__'
-                                                                  ? '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${filteredChats.length}'
-                                                                  : '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${filteredChats.length} • ${AppLanguage.tr(context, 'Skupiny', 'Groups')}: ${filteredGroups.length}',
-                                                            ),
-                                                            trailing:
-                                                                (fid ==
-                                                                    '__privates__')
-                                                                ? null
-                                                                : Row(
-                                                                    mainAxisSize:
-                                                                        MainAxisSize
-                                                                            .min,
-                                                                    children: [
-                                                                      IconButton(
-                                                                        tooltip: AppLanguage.tr(
-                                                                          context,
-                                                                          'Přidat',
-                                                                          'Add',
-                                                                        ),
-                                                                        icon: const Icon(
-                                                                          Icons
-                                                                              .add,
-                                                                        ),
-                                                                        onPressed: () {
-                                                                          _hapticSelect();
-                                                                          addToFolder(
-                                                                            fid,
-                                                                          );
-                                                                        },
+                                                              children: [
+                                                                ListTile(
+                                                                  leading:
+                                                                      const Icon(
+                                                                        Icons
+                                                                            .create_new_folder_outlined,
                                                                       ),
-                                                                      IconButton(
-                                                                        tooltip: AppLanguage.tr(
-                                                                          context,
-                                                                          'Smazat složku',
-                                                                          'Delete folder',
-                                                                        ),
+                                                                  title: Text(
+                                                                    AppLanguage.tr(
+                                                                      context,
+                                                                      'Vytvořit složku',
+                                                                      'Create folder',
+                                                                    ),
+                                                                  ),
+                                                                  onTap: () {
+                                                                    _hapticSelect();
+                                                                    createFolder();
+                                                                  },
+                                                                ),
+                                                                ListTile(
+                                                                  leading:
+                                                                      const Icon(
+                                                                        Icons
+                                                                            .inbox_outlined,
+                                                                      ),
+                                                                  title: Text(
+                                                                    AppLanguage.tr(
+                                                                      context,
+                                                                      'Priváty',
+                                                                      'Private',
+                                                                    ),
+                                                                  ),
+                                                                  subtitle: Text(
+                                                                    '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${countChatsForFolder(null)}',
+                                                                  ),
+                                                                  onTap: () {
+                                                                    _hapticSelect();
+                                                                    setState(
+                                                                      () => _activeFolderId =
+                                                                          '__privates__',
+                                                                    );
+                                                                  },
+                                                                ),
+                                                                const Divider(
+                                                                  height: 1,
+                                                                ),
+                                                                if (folders
+                                                                    .isEmpty)
+                                                                  Padding(
+                                                                    padding: EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          16,
+                                                                      vertical:
+                                                                          12,
+                                                                    ),
+                                                                    child: Text(
+                                                                      AppLanguage.tr(
+                                                                        context,
+                                                                        'Zatím nemáš žádné složky.',
+                                                                        'You have no folders yet.',
+                                                                      ),
+                                                                    ),
+                                                                  )
+                                                                else
+                                                                  ...folders.map((
+                                                                    f,
+                                                                  ) {
+                                                                    final fid =
+                                                                        (f['id'] ??
+                                                                                '')
+                                                                            .toString();
+                                                                    final name =
+                                                                        (f['name'] ??
+                                                                                AppLanguage.tr(
+                                                                                  context,
+                                                                                  'Složka',
+                                                                                  'Folder',
+                                                                                ))
+                                                                            .toString();
+                                                                    return ListTile(
+                                                                      leading:
+                                                                          const Icon(
+                                                                            Icons.folder_outlined,
+                                                                          ),
+                                                                      title:
+                                                                          Text(
+                                                                            name,
+                                                                          ),
+                                                                      subtitle:
+                                                                          Text(
+                                                                            '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${countChatsForFolder(fid)} • ${AppLanguage.tr(context, 'Skupiny', 'Groups')}: ${countGroupsForFolder(fid)}',
+                                                                          ),
+                                                                      trailing: IconButton(
                                                                         icon: const Icon(
                                                                           Icons
                                                                               .delete_outline,
@@ -20489,373 +21338,71 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                           deleteFolder(
                                                                             fid,
                                                                             folderName:
-                                                                                folderName,
+                                                                                name,
                                                                           );
                                                                         },
                                                                       ),
-                                                                    ],
-                                                                  ),
-                                                          ),
-                                                          const Divider(
-                                                            height: 1,
-                                                          ),
-
-                                                          if (filteredChats
-                                                                  .isEmpty &&
-                                                              filteredGroups
-                                                                  .isEmpty)
-                                                            Padding(
-                                                              padding:
-                                                                  EdgeInsets.symmetric(
-                                                                    horizontal:
-                                                                        16,
-                                                                    vertical:
-                                                                        12,
-                                                                  ),
-                                                              child: Text(
-                                                                AppLanguage.tr(
-                                                                  context,
-                                                                  'Ve složce zatím nic není.',
-                                                                  'Folder is empty.',
-                                                                ),
-                                                              ),
-                                                            ),
-
-                                                          ...filteredChats.map((
-                                                            r,
-                                                          ) {
-                                                            final login =
-                                                                (r['login'] ??
-                                                                        '')
-                                                                    .toString();
-                                                            final avatarUrl =
-                                                                (r['avatarUrl'] ??
-                                                                        '')
-                                                                    .toString();
-                                                            final lastText =
-                                                                (r['lastText'] ??
-                                                                        '')
-                                                                    .toString();
-                                                            return ListTile(
-                                                              leading:
-                                                                  _ChatLoginAvatar(
-                                                                    login:
-                                                                        login,
-                                                                    avatarUrl:
-                                                                        avatarUrl,
-                                                                    radius: 20,
-                                                                  ),
-                                                              title: Text(
-                                                                '@$login',
-                                                              ),
-                                                              subtitle:
-                                                                  lastText
-                                                                      .isNotEmpty
-                                                                  ? Text(
-                                                                      lastText,
-                                                                      maxLines:
-                                                                          1,
-                                                                      overflow:
-                                                                          TextOverflow
-                                                                              .ellipsis,
-                                                                    )
-                                                                  : null,
-                                                              onLongPress: () {
-                                                                _hapticMedium();
-                                                                _moveChatToFolder(
-                                                                  myUid: current
-                                                                      .uid,
-                                                                  login: login,
-                                                                );
-                                                              },
-                                                              onTap: () {
-                                                                _hapticSelect();
-                                                                setState(() {
-                                                                  _activeLogin =
-                                                                      login;
-                                                                  _activeAvatarUrl =
-                                                                      avatarUrl;
-                                                                });
-                                                              },
-                                                            );
-                                                          }),
-
-                                                          if (filteredGroups
-                                                              .isNotEmpty) ...[
-                                                            const Divider(
-                                                              height: 1,
-                                                            ),
-                                                            Padding(
-                                                              padding:
-                                                                  EdgeInsets.fromLTRB(
-                                                                    16,
-                                                                    12,
-                                                                    16,
-                                                                    8,
-                                                                  ),
-                                                              child: Align(
-                                                                alignment: Alignment
-                                                                    .centerLeft,
-                                                                child: Text(
-                                                                  AppLanguage.tr(
-                                                                    context,
-                                                                    'Skupiny',
-                                                                    'Groups',
-                                                                  ),
-                                                                  style: const TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w700,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ),
-                                                            ...filteredGroups.map((
-                                                              gid,
-                                                            ) {
-                                                              return StreamBuilder<
-                                                                DatabaseEvent
-                                                              >(
-                                                                stream: rtdb()
-                                                                    .ref(
-                                                                      'groups/$gid',
-                                                                    )
-                                                                    .onValue,
-                                                                builder: (context, snap) {
-                                                                  final v = snap
-                                                                      .data
-                                                                      ?.snapshot
-                                                                      .value;
-                                                                  final m =
-                                                                      (v is Map)
-                                                                      ? v
-                                                                      : null;
-                                                                  if (m == null)
-                                                                    return const SizedBox.shrink();
-                                                                  final title =
-                                                                      (m['title'] ??
-                                                                              '')
-                                                                          .toString();
-                                                                  final logo =
-                                                                      (m['logoUrl'] ??
-                                                                              '')
-                                                                          .toString();
-                                                                  final desc =
-                                                                      (m['description'] ??
-                                                                              '')
-                                                                          .toString();
-                                                                  return ListTile(
-                                                                    leading: CircleAvatar(
-                                                                      radius:
-                                                                          18,
-                                                                      backgroundImage:
-                                                                          logo.isNotEmpty
-                                                                          ? NetworkImage(
-                                                                              logo,
-                                                                            )
-                                                                          : null,
-                                                                      child:
-                                                                          logo.isEmpty
-                                                                          ? const Icon(
-                                                                              Icons.group,
-                                                                            )
-                                                                          : null,
-                                                                    ),
-                                                                    title: Text(
-                                                                      title,
-                                                                    ),
-                                                                    subtitle:
-                                                                        desc.isNotEmpty
-                                                                        ? Text(
-                                                                            desc,
-                                                                            maxLines:
-                                                                                1,
-                                                                            overflow:
-                                                                                TextOverflow.ellipsis,
-                                                                          )
-                                                                        : null,
-                                                                    onTap: () {
-                                                                      _hapticSelect();
-                                                                      setState(() {
-                                                                        _activeGroupId =
-                                                                            gid;
-                                                                        _activeLogin =
-                                                                            null;
-                                                                        _activeVerifiedUid =
-                                                                            null;
-                                                                      });
-                                                                    },
-                                                                  );
-                                                                },
-                                                              );
-                                                            }),
-                                                          ],
-                                                        ],
-                                                      );
-                                                    }
-
-                                                    Widget buildFolderList() {
-                                                      return Column(
-                                                        key: const ValueKey(
-                                                          'folders:list',
-                                                        ),
-                                                        children: [
-                                                          ListTile(
-                                                            leading: const Icon(
-                                                              Icons
-                                                                  .create_new_folder_outlined,
-                                                            ),
-                                                            title: Text(
-                                                              AppLanguage.tr(
-                                                                context,
-                                                                'Vytvořit složku',
-                                                                'Create folder',
-                                                              ),
-                                                            ),
-                                                            onTap: () {
-                                                              _hapticSelect();
-                                                              createFolder();
-                                                            },
-                                                          ),
-                                                          ListTile(
-                                                            leading: const Icon(
-                                                              Icons
-                                                                  .inbox_outlined,
-                                                            ),
-                                                            title: Text(
-                                                              AppLanguage.tr(
-                                                                context,
-                                                                'Priváty',
-                                                                'Private',
-                                                              ),
-                                                            ),
-                                                            subtitle: Text(
-                                                              '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${countChatsForFolder(null)}',
-                                                            ),
-                                                            onTap: () {
-                                                              _hapticSelect();
-                                                              setState(
-                                                                () => _activeFolderId =
-                                                                    '__privates__',
-                                                              );
-                                                            },
-                                                          ),
-                                                          const Divider(
-                                                            height: 1,
-                                                          ),
-                                                          if (folders.isEmpty)
-                                                            Padding(
-                                                              padding:
-                                                                  EdgeInsets.symmetric(
-                                                                    horizontal:
-                                                                        16,
-                                                                    vertical:
-                                                                        12,
-                                                                  ),
-                                                              child: Text(
-                                                                AppLanguage.tr(
-                                                                  context,
-                                                                  'Zatím nemáš žádné složky.',
-                                                                  'You have no folders yet.',
-                                                                ),
-                                                              ),
-                                                            )
-                                                          else
-                                                            ...folders.map((f) {
-                                                              final fid =
-                                                                  (f['id'] ??
-                                                                          '')
-                                                                      .toString();
-                                                              final name =
-                                                                  (f['name'] ??
-                                                                          AppLanguage.tr(
-                                                                            context,
-                                                                            'Složka',
-                                                                            'Folder',
-                                                                          ))
-                                                                      .toString();
-                                                              return ListTile(
-                                                                leading: const Icon(
-                                                                  Icons
-                                                                      .folder_outlined,
-                                                                ),
-                                                                title: Text(
-                                                                  name,
-                                                                ),
-                                                                subtitle: Text(
-                                                                  '${AppLanguage.tr(context, 'Chaty', 'Chats')}: ${countChatsForFolder(fid)} • ${AppLanguage.tr(context, 'Skupiny', 'Groups')}: ${countGroupsForFolder(fid)}',
-                                                                ),
-                                                                trailing: IconButton(
-                                                                  icon: const Icon(
-                                                                    Icons
-                                                                        .delete_outline,
-                                                                  ),
-                                                                  onPressed: () {
-                                                                    _hapticMedium();
-                                                                    deleteFolder(
-                                                                      fid,
-                                                                      folderName:
-                                                                          name,
+                                                                      onTap: () {
+                                                                        _hapticSelect();
+                                                                        setState(
+                                                                          () => _activeFolderId =
+                                                                              fid,
+                                                                        );
+                                                                      },
                                                                     );
-                                                                  },
+                                                                  }),
+                                                              ],
+                                                            );
+                                                          }
+
+                                                          final body =
+                                                              (_activeFolderId !=
+                                                                  null)
+                                                              ? buildFolderView(
+                                                                  _activeFolderId!,
+                                                                )
+                                                              : buildFolderList();
+
+                                                          return AnimatedSwitcher(
+                                                            duration:
+                                                                const Duration(
+                                                                  milliseconds:
+                                                                      220,
                                                                 ),
-                                                                onTap: () {
-                                                                  _hapticSelect();
-                                                                  setState(
-                                                                    () =>
-                                                                        _activeFolderId =
-                                                                            fid,
+                                                            switchInCurve:
+                                                                Curves.easeOut,
+                                                            switchOutCurve:
+                                                                Curves.easeIn,
+                                                            transitionBuilder:
+                                                                (child, anim) {
+                                                                  return SizeTransition(
+                                                                    sizeFactor:
+                                                                        anim,
+                                                                    axisAlignment:
+                                                                        -1,
+                                                                    child: FadeTransition(
+                                                                      opacity:
+                                                                          anim,
+                                                                      child:
+                                                                          child,
+                                                                    ),
                                                                   );
                                                                 },
-                                                              );
-                                                            }),
-                                                        ],
+                                                            child: body,
+                                                          );
+                                                        },
                                                       );
-                                                    }
-
-                                                    final body =
-                                                        (_activeFolderId !=
-                                                            null)
-                                                        ? buildFolderView(
-                                                            _activeFolderId!,
-                                                          )
-                                                        : buildFolderList();
-
-                                                    return AnimatedSwitcher(
-                                                      duration: const Duration(
-                                                        milliseconds: 220,
-                                                      ),
-                                                      switchInCurve:
-                                                          Curves.easeOut,
-                                                      switchOutCurve:
-                                                          Curves.easeIn,
-                                                      transitionBuilder:
-                                                          (child, anim) {
-                                                            return SizeTransition(
-                                                              sizeFactor: anim,
-                                                              axisAlignment: -1,
-                                                              child:
-                                                                  FadeTransition(
-                                                                    opacity:
-                                                                        anim,
-                                                                    child:
-                                                                        child,
-                                                                  ),
-                                                            );
-                                                          },
-                                                      child: body,
-                                                    );
-                                                  },
-                                                );
-                                              },
-                                            );
-                                          },
-                                        );
-                                      },
+                                                    },
+                                                  );
+                                                },
+                                              );
+                                            },
+                                          ),
+                                        ],
+                                      ],
                                     ),
-                                  ],
-                                  ],
-                                ),
+                                  );
+                                },
                               );
                             },
                           );
@@ -20866,9 +21413,9 @@ class _ChatsTabState extends State<_ChatsTab>
                 },
               );
             },
-          );
-        },
-      ));
+          ),
+        ),
+      );
     }
 
     // Verified chat view
@@ -21287,11 +21834,11 @@ class _ChatsTabState extends State<_ChatsTab>
 
                     final nowMs = DateTime.now().millisecondsSinceEpoch;
                     final oneShotBurn = inlineTtl?.burnAfterRead == true
-                      ? true
-                      : _oneShotBurnAfterRead;
+                        ? true
+                        : _oneShotBurnAfterRead;
                     final oneShotTtlSeconds = inlineTtl != null
-                      ? inlineTtl.ttlSeconds
-                      : _oneShotTtlSeconds;
+                        ? inlineTtl.ttlSeconds
+                        : _oneShotTtlSeconds;
                     if (mounted && (oneShotBurn || oneShotTtlSeconds != null)) {
                       setState(() {
                         _oneShotBurnAfterRead = false;
@@ -21306,13 +21853,13 @@ class _ChatsTabState extends State<_ChatsTab>
                         ? 0
                         : (oneShotTtlSeconds ??
                               switch (_dmTtlMode) {
-                      0 => widget.settings.autoDeleteSeconds,
-                      1 => 0,
-                      2 => 60,
-                      3 => 60 * 60,
-                      4 => 60 * 60 * 24,
-                      _ => widget.settings.autoDeleteSeconds,
-                    });
+                                0 => widget.settings.autoDeleteSeconds,
+                                1 => 0,
+                                2 => 60,
+                                3 => 60 * 60,
+                                4 => 60 * 60 * 24,
+                                _ => widget.settings.autoDeleteSeconds,
+                              });
                     final expiresAt = (!burnAfterRead && ttlSeconds > 0)
                         ? (nowMs + (ttlSeconds * 1000))
                         : null;
@@ -21443,953 +21990,161 @@ class _ChatsTabState extends State<_ChatsTab>
                     }
                   }
 
-                  return _withCallOverlay(Column(
-                    children: [
-                      if (_outgoingGroupCallRinging && _outgoingGroupId == groupId)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF132A1C),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF2EA043)),
-                            ),
-                            child: Row(
-                              children: [
-                                AnimatedBuilder(
-                                  animation: _typingAnim,
-                                  builder: (_, child) {
-                                    final scale = 1.0 + (_typingAnim.value * 0.12);
-                                    return Transform.scale(scale: scale, child: child);
-                                  },
-                                  child: const Icon(
-                                    Icons.groups,
-                                    color: Color(0xFF3FB950),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    (_outgoingGroupTitle ?? '').trim().isNotEmpty
-                                      ? '${AppLanguage.tr(context, 'Volám skupinu', 'Calling group')} ${_outgoingGroupTitle!.trim()}...'
-                                        : AppLanguage.tr(
-                                            context,
-                                            'Calling group... čeká na přijetí',
-                                            'Calling group... waiting for answer',
-                                          ),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () => openActiveGroupCallAction(),
-                                  child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      if (_callConnected && _outgoingGroupId == groupId)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0E4429),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF3FB950)),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.call, color: Color(0xFF3FB950)),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        AppLanguage.tr(
-                                          context,
-                                          'Skupinový hovor probíhá',
-                                          'Group call in progress',
-                                        ),
-                                        style: const TextStyle(fontWeight: FontWeight.w700),
-                                      ),
-                                      Text(_callDurationLabel(_callElapsedSeconds)),
-                                    ],
-                                  ),
-                                ),
-                                IconButton(
-                                  tooltip: AppLanguage.tr(
-                                    context,
-                                    'Mikrofon',
-                                    'Microphone',
-                                  ),
-                                  onPressed: () => _toggleDmMic(),
-                                  icon: Icon(
-                                    _dmMicEnabled ? Icons.mic : Icons.mic_off,
-                                  ),
-                                ),
-                                IconButton(
-                                  tooltip: AppLanguage.tr(
-                                    context,
-                                    'Reproduktor',
-                                    'Speaker',
-                                  ),
-                                  onPressed: () => _toggleDmSpeaker(),
-                                  icon: Icon(
-                                    _dmSpeakerEnabled
-                                        ? Icons.volume_up
-                                        : Icons.hearing_disabled,
-                                  ),
-                                ),
-                                FilledButton.tonalIcon(
-                                  onPressed: () => openActiveGroupCallAction(),
-                                  icon: const Icon(Icons.call_end),
-                                  label: Text(AppLanguage.tr(context, 'Ukončit', 'End')),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      if (_chatFindQuery.isNotEmpty)
-                        Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surface,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: Theme.of(context).colorScheme.outlineVariant,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.search, size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  '${AppLanguage.tr(context, 'Filtr', 'Filter')}: $_chatFindQuery',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                  return _withCallOverlay(
+                    Column(
+                      children: [
+                        if (_outgoingGroupCallRinging &&
+                            _outgoingGroupId == groupId)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF132A1C),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFF2EA043),
                                 ),
                               ),
-                              IconButton(
-                                tooltip: AppLanguage.tr(
-                                  context,
-                                  'Vyčistit filtr',
-                                  'Clear filter',
-                                ),
-                                onPressed: () {
-                                  setState(() => _chatFindQuery = '');
-                                },
-                                icon: const Icon(Icons.close, size: 18),
-                              ),
-                            ],
-                          ),
-                        ),
-                      Expanded(
-                        child: StreamBuilder<DatabaseEvent>(
-                          stream: msgsRef.onValue,
-                          builder: (context, msgSnap) {
-                            final v = msgSnap.data?.snapshot.value;
-                            if (v is! Map) {
-                              return Center(
-                                child: Text(
-                                  AppLanguage.tr(
-                                    context,
-                                    'Zatím žádné zprávy.',
-                                    'No messages yet.',
-                                  ),
-                                ),
-                              );
-                            }
-                            final now = DateTime.now().millisecondsSinceEpoch;
-                            final items = <Map<String, dynamic>>[];
-                            for (final e in v.entries) {
-                              if (e.value is! Map) continue;
-                              final m = Map<String, dynamic>.from(
-                                e.value as Map,
-                              );
-                              m['__key'] = e.key.toString();
-                              final expiresAt = (m['expiresAt'] is int)
-                                  ? m['expiresAt'] as int
-                                  : null;
-                              final deletedFor = (m['deletedFor'] is Map)
-                                  ? (m['deletedFor'] as Map)
-                                  : null;
-                              if (deletedFor?.containsKey(current.uid) ==
-                                  true) {
-                                continue;
-                              }
-                              if (expiresAt != null && expiresAt <= now) {
-                                final k = (m['__key'] ?? '').toString();
-                                final delKey = 'g:$groupId:$k';
-                                if (k.isNotEmpty &&
-                                    !_ttlDeleting.contains(delKey)) {
-                                  _ttlDeleting.add(delKey);
-                                  () async {
-                                    try {
-                                      await msgsRef.child(k).remove();
-                                    } catch (_) {
-                                      // ignore
-                                    } finally {
-                                      _ttlDeleting.remove(delKey);
-                                    }
-                                  }();
-                                }
-                                continue;
-                              }
-                              items.add(m);
-                            }
-                            items.sort((a, b) {
-                              final at = (a['createdAt'] is int)
-                                  ? a['createdAt'] as int
-                                  : 0;
-                              final bt = (b['createdAt'] is int)
-                                  ? b['createdAt'] as int
-                                  : 0;
-                              return at.compareTo(bt);
-                            });
-
-                            var latestGroupMessageAt = 0;
-                            for (final m in items) {
-                              final at = (m['createdAt'] is int)
-                                  ? m['createdAt'] as int
-                                  : 0;
-                              if (at > latestGroupMessageAt) {
-                                latestGroupMessageAt = at;
-                              }
-                            }
-                            if (latestGroupMessageAt > 0) {
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                _syncGroupReadCursor(
-                                  groupId: groupId,
-                                  myUid: current.uid,
-                                  latestAt: latestGroupMessageAt,
-                                );
-                              });
-                            }
-
-                            final displayItems = <Map<String, dynamic>>[
-                              ...items,
-                              ..._localNotesForChat(
-                                isGroup: true,
-                                chatId: groupId,
-                              ),
-                            ];
-                            displayItems.sort((a, b) {
-                              final at = (a['createdAt'] is int)
-                                  ? a['createdAt'] as int
-                                  : 0;
-                              final bt = (b['createdAt'] is int)
-                                  ? b['createdAt'] as int
-                                  : 0;
-                              return at.compareTo(bt);
-                            });
-
-                            final filteredItems = displayItems
-                                .where(
-                                  (m) => _messageMatchesFind(
-                                    message: m,
-                                    isGroup: true,
-                                    chatId: groupId,
-                                    dmLoginLower: '',
-                                  ),
-                                )
-                                .toList(growable: false);
-
-                            // After the list rebuilds, scroll to bottom so newest message is visible.
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              _autoScrollForChatView(
-                                controller: _groupScrollController,
-                                chatViewKey: 'group:$groupId',
-                              );
-                            });
-
-                            // Best-effort migration: encrypt old plaintext group messages.
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              for (final msg in items.take(30)) {
-                                final k = (msg['__key'] ?? '').toString();
-                                if (k.isEmpty) continue;
-                                if (_migrating.contains('g:$groupId:$k'))
-                                  continue;
-                                final pt = (msg['text'] ?? '').toString();
-                                final hasC =
-                                    ((msg['ciphertext'] ??
-                                            msg['ct'] ??
-                                            msg['cipher'])
-                                        ?.toString()
-                                        .isNotEmpty ??
-                                    false);
-                                if (pt.isEmpty || hasC) continue;
-
-                                _migrating.add('g:$groupId:$k');
-                                () async {
-                                  try {
-                                    SecretKey? gk = _groupKeyCache[groupId];
-                                    gk ??= await E2ee.fetchGroupKey(
-                                      groupId: groupId,
-                                      myUid: current.uid,
-                                    );
-                                    if (gk == null) return;
-                                    _groupKeyCache[groupId] = gk;
-                                    final enc = await E2ee.encryptForGroup(
-                                      groupKey: gk,
-                                      plaintext: pt,
-                                    );
-                                    await msgsRef.child(k).update({
-                                      ...enc,
-                                      'text': null,
-                                    });
-                                    if (!mounted) return;
-                                    setState(
-                                      () =>
-                                          _decryptedCache['g:$groupId:$k'] = pt,
-                                    );
-                                    PlaintextCache.putGroup(
-                                      groupId: groupId,
-                                      messageKey: k,
-                                      plaintext: pt,
-                                    );
-                                  } catch (_) {
-                                    // ignore
-                                  } finally {
-                                    _migrating.remove('g:$groupId:$k');
-                                  }
-                                }();
-                              }
-                            });
-
-                            // Background warm-up: decrypt & persist ciphertext messages.
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              _warmupGroupDecryptAll(
-                                items: items,
-                                groupId: groupId,
-                                myUid: current.uid,
-                              );
-                            });
-
-                            return ListView.builder(
-                              controller: _groupScrollController,
-                              padding: const EdgeInsets.all(12),
-                              itemCount: filteredItems.length,
-                              itemBuilder: (context, i) {
-                                final m = filteredItems[i];
-                                final prev = i > 0 ? filteredItems[i - 1] : null;
-                                final isLocalSystem = m['__localSystem'] == true;
-                                final key = (m['__key'] ?? '').toString();
-                                final messageScopedKey = _scopedMessageKey(
-                                  isGroup: true,
-                                  chatScope: groupId,
-                                  messageKey: key,
-                                );
-                                final messageItemKey = _messageItemGlobalKey(
-                                  isGroup: true,
-                                  chatScope: groupId,
-                                  messageKey: key,
-                                );
-                                final isFlashTarget =
-                                    _flashMessageScopedKey == messageScopedKey;
-                                final plaintext = (m['text'] ?? '').toString();
-                                final fromUid = (m['fromUid'] ?? '').toString();
-                                final fromGh = (m['fromGithub'] ?? '')
-                                    .toString();
-                                final isMe = !isLocalSystem && fromUid == current.uid;
-                                final burnAfterRead =
-                                    m['burnAfterRead'] == true;
-                                final expiresAt = (m['expiresAt'] is int)
-                                  ? m['expiresAt'] as int
-                                  : null;
-                                final hasTtlMarker =
-                                  burnAfterRead || expiresAt != null;
-                                final createdAt = (m['createdAt'] is int)
-                                    ? m['createdAt'] as int
-                                    : null;
-                                final timeLabel = _formatShortTime(createdAt);
-                                final prevCreatedAt = (prev?['createdAt'] is int)
-                                  ? prev!['createdAt'] as int
-                                  : null;
-                                final showDayDivider =
-                                  createdAt != null &&
-                                  !_isSameCalendarDay(createdAt, prevCreatedAt);
-
-                                final hasCipher =
-                                    ((m['ciphertext'] ?? m['ct'] ?? m['cipher'])
-                                        ?.toString()
-                                        .isNotEmpty ??
-                                    false);
-                                final cacheKey = 'g:$groupId:$key';
-                                String text = plaintext;
-                                if (text.isEmpty && hasCipher) {
-                                  final persisted = PlaintextCache.tryGetGroup(
-                                    groupId: groupId,
-                                    messageKey: key,
-                                  );
-                                  if (persisted != null &&
-                                      persisted.isNotEmpty) {
-                                    text = persisted;
-                                    _decryptedCache[cacheKey] ??= persisted;
-                                  } else {
-                                    text = _decryptedCache[cacheKey] ?? '🔒 …';
-                                  }
-
-                                  if (persisted == null &&
-                                      _decryptedCache[cacheKey] == null &&
-                                      !_decrypting.contains(cacheKey)) {
-                                    _decrypting.add(cacheKey);
-                                    () async {
-                                      try {
-                                        SecretKey? gk = _groupKeyCache[groupId];
-                                        gk ??= await E2ee.fetchGroupKey(
-                                          groupId: groupId,
-                                          myUid: current.uid,
-                                        );
-                                        if (gk != null)
-                                          _groupKeyCache[groupId] = gk;
-                                        final plain =
-                                            await E2ee.decryptGroupMessage(
-                                              groupId: groupId,
-                                              myUid: current.uid,
-                                              groupKey: gk,
-                                              message: m,
-                                            );
-                                        if (!mounted) return;
-                                        setState(
-                                          () =>
-                                              _decryptedCache[cacheKey] = plain,
-                                        );
-                                        PlaintextCache.putGroup(
-                                          groupId: groupId,
-                                          messageKey: key,
-                                          plaintext: plain,
-                                        );
-
-                                        if (burnAfterRead && !isMe) {
-                                          final delKey = 'g:$groupId:$key';
-                                          if (key.isNotEmpty &&
-                                              !_ttlDeleting.contains(delKey)) {
-                                            _ttlDeleting.add(delKey);
-                                            () async {
-                                              try {
-                                                await msgsRef
-                                                    .child(key)
-                                                    .remove();
-                                              } catch (_) {
-                                                // ignore
-                                              } finally {
-                                                _ttlDeleting.remove(delKey);
-                                              }
-                                            }();
-                                          }
-                                        }
-                                      } catch (_) {
-                                        // keep placeholder
-                                      } finally {
-                                        _decrypting.remove(cacheKey);
-                                      }
-                                    }();
-                                  }
-                                }
-
-                                if (burnAfterRead &&
-                                    !isMe &&
-                                    text.isNotEmpty &&
-                                    !hasCipher) {
-                                  // Old plaintext message: treat first render as "read".
-                                  final delKey = 'g:$groupId:$key';
-                                  if (key.isNotEmpty &&
-                                      !_ttlDeleting.contains(delKey)) {
-                                    _ttlDeleting.add(delKey);
-                                    () async {
-                                      try {
-                                        await msgsRef.child(key).remove();
-                                      } catch (_) {
-                                        // ignore
-                                      } finally {
-                                        _ttlDeleting.remove(delKey);
-                                      }
-                                    }();
-                                  }
-                                }
-
-                                final attachment = _AttachmentPayload.tryParse(
-                                  text,
-                                );
-                                final isAttachment = attachment != null;
-                                final codePayload =
-                                    _CodeMessagePayload.tryParse(text);
-                                final isCode = codePayload != null;
-                                if (attachment != null) {
-                                  if (!_attachmentCache.containsKey(cacheKey)) {
-                                    _ensureAttachmentCached(
-                                      cacheKey: cacheKey,
-                                      payload: attachment,
-                                    );
-                                  }
-                                }
-
-                                final mentioned =
-                                  !isLocalSystem &&
-                                    !isAttachment &&
-                                    !isCode &&
-                                    myGithubLower.isNotEmpty &&
-                                    _mentionsMyHandle(text, myGithubLower);
-
-                                final replyToFrom = (m['replyToFrom'] ?? '')
-                                    .toString()
-                                    .trim();
-                                final replyToKey = (m['replyToKey'] ?? '')
-                                  .toString()
-                                  .trim();
-                                final replyToPreview =
-                                    (m['replyToPreview'] ?? '')
-                                        .toString()
-                                        .trim();
-                                final hasReply =
-                                  replyToKey.isNotEmpty &&
-                                    replyToPreview.isNotEmpty;
-
-                                final reactions = (m['reactions'] is Map)
-                                    ? (m['reactions'] as Map)
-                                    : null;
-                                final reactionChips = <Widget>[];
-                                if (reactions != null) {
-                                  for (final re in reactions.entries) {
-                                    final emoji = re.key.toString();
-                                    final voters = (re.value is Map)
-                                        ? (re.value as Map)
-                                        : null;
-                                    final count = voters?.length ?? 0;
-                                    if (count > 0) {
-                                      reactionChips.add(
-                                        Container(
-                                          margin: const EdgeInsets.only(
-                                            top: 4,
-                                            right: 6,
-                                          ),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.surface,
-                                            borderRadius: BorderRadius.circular(
-                                              999,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            '$emoji $count',
-                                            style: TextStyle(
-                                              fontSize:
-                                                  widget.settings.chatTextSize -
-                                                  4,
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                }
-
-                                final bubbleKey = isMe ? 'outgoing' : 'incoming';
-                                final bubbleColor = _bubbleColor(
-                                  context,
-                                  bubbleKey,
-                                );
-                                final tcolor = _bubbleTextColor(context, bubbleKey);
-                                final mentionHighlight = mentioned && !isMe;
-                                final effectiveBubbleColor = isLocalSystem
-                                  ? const Color(0xFFDDE1E6)
-                                  : (mentionHighlight
-                                      ? const Color(0x66F2CC60)
-                                      : bubbleColor);
-                                final effectiveTextColor = isLocalSystem
-                                  ? const Color(0xFF30363D)
-                                  : (mentionHighlight
-                                      ? const Color(0xFFFFF5CC)
-                                      : tcolor);
-
-                                return KeyedSubtree(
-                                  key: messageItemKey,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 6,
-                                    ),
-                                    child: Column(
-                                    children: [
-                                      if (showDayDivider)
-                                        _dayDivider(context, createdAt),
-                                      GestureDetector(
-                                        behavior: HitTestBehavior.translucent,
-                                        onLongPress: isLocalSystem
-                                            ? null
-                                            : () => _showMessageActions(
-                                                isGroup: true,
-                                                chatTarget: groupId,
-                                                messageKey: key,
-                                                fromLabel: fromGh.isNotEmpty
-                                                    ? fromGh
-                                                    : (isMe
-                                                          ? myGithub
-                                                          : 'user'),
-                                                text: text,
-                                                rawMessage: m,
-                                                canDeleteForMe: true,
-                                                canDeleteForAll: isAdmin || isMe,
-                                                onDeleteForMe: () => msgsRef
-                                                    .child(key)
-                                                    .child('deletedFor')
-                                                    .child(current.uid)
-                                                    .set(true),
-                                                onDeleteForAll: () =>
-                                                    deleteMessage(key),
-                                              ),
-                                        child: Column(
-                                      crossAxisAlignment: isMe
-                                          ? CrossAxisAlignment.end
-                                          : CrossAxisAlignment.start,
-                                      children: [
-                                        if (isLocalSystem)
-                                          Text(
-                                            AppLanguage.tr(
-                                              context,
-                                              'Jen pro tebe',
-                                              'Only visible to you',
-                                            ),
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: Color(0xFF9CA3AF),
-                                            ),
-                                          )
-                                        else if (fromGh.isNotEmpty)
-                                          Text(
-                                            '@$fromGh',
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.white70,
-                                            ),
-                                          ),
-                                        Align(
-                                          alignment: isMe
-                                              ? Alignment.centerRight
-                                              : Alignment.centerLeft,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: effectiveBubbleColor,
-                                              borderRadius:
-                                                  BorderRadius.circular(
-                                                    14,
-                                                  ),
-                                              border: Border.all(
-                                                color: isFlashTarget
-                                                    ? const Color(0xFF58A6FF)
-                                                    : mentioned
-                                                    ? Colors.amber
-                                                    : (isLocalSystem
-                                                          ? const Color(
-                                                              0xFFB8C0CC,
-                                                            )
-                                                          : const Color(
-                                                              0x5530363D,
-                                                            )),
-                                                width: (isFlashTarget || mentioned)
-                                                    ? 2
-                                                    : 1,
-                                              ),
-                                            ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                if (isMe &&
-                                                    expiresAt != null &&
-                                                    expiresAt > _ttlUiNowMs)
-                                                  Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                          bottom: 6,
-                                                        ),
-                                                    child: Text(
-                                                      'TTL: ${_formatTtlRemaining(expiresAt - _ttlUiNowMs)}',
-                                                      style: TextStyle(
-                                                        fontSize: widget
-                                                                .settings
-                                                                .chatTextSize -
-                                                            3,
-                                                        color: isLocalSystem
-                                                            ? const Color(
-                                                                0xFF5A6472,
-                                                              )
-                                                            : Colors.white70,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                if (hasReply)
-                                                  InkWell(
-                                                    onTap: () =>
-                                                        _jumpToMessageAndFlash(
-                                                          isGroup: true,
-                                                          chatScope: groupId,
-                                                          messageKey: replyToKey,
-                                                        ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          8,
-                                                        ),
-                                                    child: Container(
-                                                      margin:
-                                                          const EdgeInsets.only(
-                                                            bottom: 8,
-                                                          ),
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 8,
-                                                            vertical: 6,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.black26,
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              8,
-                                                            ),
-                                                        border: Border.all(
-                                                          color: Colors.white24,
-                                                        ),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          const Icon(
-                                                            Icons
-                                                                .subdirectory_arrow_right,
-                                                            size: 14,
-                                                            color:
-                                                                Colors.white70,
-                                                          ),
-                                                          const SizedBox(
-                                                            width: 6,
-                                                          ),
-                                                          Flexible(
-                                                            child: Text(
-                                                              '${replyToFrom.isNotEmpty ? '@$replyToFrom' : 'Reply'} • $replyToPreview',
-                                                              maxLines: 2,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                              style: TextStyle(
-                                                                fontSize:
-                                                                    widget
-                                                                        .settings
-                                                                        .chatTextSize -
-                                                                    2,
-                                                                color: mentionHighlight
-                                                                    ? const Color(
-                                                                        0xFFFFF1B8,
-                                                                      )
-                                                                    : Colors.white70,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                if (attachment != null)
-                                                  _attachmentBubble(
-                                                    payload: attachment,
-                                                    cacheKey: cacheKey,
-                                                    maxWidth:
-                                                        MediaQuery.of(
-                                                          context,
-                                                        ).size.width *
-                                                        0.62,
-                                                    radius: 12,
-                                                  )
-                                                else if (codePayload != null)
-                                                  _codePreviewCard(
-                                                    context: context,
-                                                    payload: codePayload,
-                                                    textColor:
-                                                        effectiveTextColor,
-                                                  )
-                                                else
-                                                  _RichMessageText(
-                                                    text: text,
-                                                    fontSize: widget
-                                                        .settings
-                                                        .chatTextSize,
-                                                    textColor: effectiveTextColor,
-                                                    highlightQuery:
-                                                        _chatFindQuery,
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                        if (reactionChips.isNotEmpty)
-                                          Wrap(
-                                            alignment: WrapAlignment.end,
-                                            children: reactionChips,
-                                          ),
-                                        if (timeLabel.isNotEmpty ||
-                                            hasTtlMarker)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 4,
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              mainAxisAlignment: isMe
-                                                  ? MainAxisAlignment.end
-                                                  : MainAxisAlignment.start,
-                                              children: [
-                                                if (hasTtlMarker)
-                                                  Icon(
-                                                    Icons.timer_outlined,
-                                                    size: 12,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurface
-                                                        .withAlpha(
-                                                          (0.65 * 255).round(),
-                                                        ),
-                                                  ),
-                                                if (hasTtlMarker &&
-                                                    timeLabel.isNotEmpty)
-                                                  const SizedBox(width: 4),
-                                                if (timeLabel.isNotEmpty)
-                                                  Text(
-                                                    timeLabel,
-                                                    style: TextStyle(
-                                                      fontSize: 11,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurface
-                                                          .withAlpha(
-                                                            (0.6 * 255)
-                                                                .round(),
-                                                          ),
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                    ],
-                                  ),
-                                ));
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                      StreamBuilder<DatabaseEvent>(
-                        stream: rtdb().ref('typingGroups/$groupId').onValue,
-                        builder: (context, typingSnap) {
-                          final raw = typingSnap.data?.snapshot.value;
-                          final map = (raw is Map) ? raw : null;
-                          if (map == null || map.isEmpty) {
-                            return const SizedBox.shrink();
-                          }
-
-                          final now = DateTime.now().millisecondsSinceEpoch;
-                          final typers = <String>[];
-                          for (final e in map.entries) {
-                            final uid = e.key.toString().trim();
-                            if (uid.isEmpty || uid == current.uid) continue;
-                            if (e.value is! Map) continue;
-
-                            final item = Map<String, dynamic>.from(
-                              e.value as Map,
-                            );
-                            if (item['typing'] != true) continue;
-
-                            final at = (item['at'] is int)
-                                ? item['at'] as int
-                                : int.tryParse((item['at'] ?? '').toString()) ??
-                                      0;
-                            if (at > 0 && (now - at) > 12000) {
-                              // Best-effort cleanup for stale typing entries.
-                              unawaited(
-                                rtdb()
-                                    .ref('typingGroups/$groupId/$uid')
-                                    .remove(),
-                              );
-                              continue;
-                            }
-
-                            final github = (item['github'] ?? '')
-                                .toString()
-                                .trim();
-                            typers.add(github.isNotEmpty ? '@$github' : uid);
-                          }
-
-                          if (typers.isEmpty) return const SizedBox.shrink();
-
-                          final label = typers.length == 1
-                              ? '${typers.first} ${AppLanguage.tr(context, 'píše', 'is typing')}'
-                              : '${typers.take(2).join(', ')}${typers.length > 2 ? ' +' + (typers.length - 2).toString() : ''} ${AppLanguage.tr(context, 'píší', 'are typing')}';
-
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
                               child: Row(
-                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  _typingPill(),
-                                  const SizedBox(width: 8),
-                                  Flexible(
+                                  AnimatedBuilder(
+                                    animation: _typingAnim,
+                                    builder: (_, child) {
+                                      final scale =
+                                          1.0 + (_typingAnim.value * 0.12);
+                                      return Transform.scale(
+                                        scale: scale,
+                                        child: child,
+                                      );
+                                    },
+                                    child: const Icon(
+                                      Icons.groups,
+                                      color: Color(0xFF2A8C63),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
                                     child: Text(
-                                      label,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurface
-                                            .withAlpha((0.6 * 255).round()),
+                                      (_outgoingGroupTitle ?? '')
+                                              .trim()
+                                              .isNotEmpty
+                                          ? '${AppLanguage.tr(context, 'Volám skupinu', 'Calling group')} ${_outgoingGroupTitle!.trim()}...'
+                                          : AppLanguage.tr(
+                                              context,
+                                              'Calling group... čeká na přijetí',
+                                              'Calling group... waiting for answer',
+                                            ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        openActiveGroupCallAction(),
+                                    child: Text(
+                                      AppLanguage.tr(
+                                        context,
+                                        'Zrušit',
+                                        'Cancel',
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          );
-                        },
-                      ),
-                      if (_replyToPreview != null &&
-                          _replyToPreview!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                          child: Container(
+                          ),
+                        if (_callConnected && _outgoingGroupId == groupId)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0E4429),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFF2A8C63),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.call,
+                                    color: Color(0xFF2A8C63),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          AppLanguage.tr(
+                                            context,
+                                            'Skupinový hovor probíhá',
+                                            'Group call in progress',
+                                          ),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        Text(
+                                          _callDurationLabel(
+                                            _callElapsedSeconds,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: AppLanguage.tr(
+                                      context,
+                                      'Mikrofon',
+                                      'Microphone',
+                                    ),
+                                    onPressed: () => _toggleDmMic(),
+                                    icon: Icon(
+                                      _dmMicEnabled ? Icons.mic : Icons.mic_off,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: AppLanguage.tr(
+                                      context,
+                                      'Reproduktor',
+                                      'Speaker',
+                                    ),
+                                    onPressed: () => _toggleDmSpeaker(),
+                                    icon: Icon(
+                                      _dmSpeakerEnabled
+                                          ? Icons.volume_up
+                                          : Icons.hearing_disabled,
+                                    ),
+                                  ),
+                                  FilledButton.tonalIcon(
+                                    onPressed: () =>
+                                        openActiveGroupCallAction(),
+                                    icon: const Icon(Icons.call_end),
+                                    label: Text(
+                                      AppLanguage.tr(context, 'Ukončit', 'End'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        if (_chatFindQuery.isNotEmpty)
+                          Container(
                             width: double.infinity,
+                            margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
+                              horizontal: 12,
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
@@ -22403,199 +22158,1108 @@ class _ChatsTabState extends State<_ChatsTab>
                             ),
                             child: Row(
                               children: [
-                                const Icon(
-                                  Icons.subdirectory_arrow_right,
-                                  size: 16,
-                                ),
+                                const Icon(Icons.search, size: 16),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    '@${_replyToFrom ?? ''} • ${_replyToPreview ?? ''}',
-                                    maxLines: 2,
+                                    '${AppLanguage.tr(context, 'Filtr', 'Filter')}: $_chatFindQuery',
+                                    maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
                                   ),
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.close, size: 18),
-                                  onPressed: _clearReplyTarget,
                                   tooltip: AppLanguage.tr(
                                     context,
-                                    'Zrušit odpověď',
-                                    'Cancel reply',
+                                    'Vyčistit filtr',
+                                    'Clear filter',
                                   ),
+                                  onPressed: () {
+                                    setState(() => _chatFindQuery = '');
+                                  },
+                                  icon: const Icon(Icons.close, size: 18),
+                                ),
+                              ],
+                            ),
+                          ),
+                        Expanded(
+                          child: StreamBuilder<DatabaseEvent>(
+                            stream: msgsRef.onValue,
+                            builder: (context, msgSnap) {
+                              final v = msgSnap.data?.snapshot.value;
+                              if (v is! Map) {
+                                return Center(
+                                  child: Text(
+                                    AppLanguage.tr(
+                                      context,
+                                      'Zatím žádné zprávy.',
+                                      'No messages yet.',
+                                    ),
+                                  ),
+                                );
+                              }
+                              final now = DateTime.now().millisecondsSinceEpoch;
+                              final items = <Map<String, dynamic>>[];
+                              for (final e in v.entries) {
+                                if (e.value is! Map) continue;
+                                final m = Map<String, dynamic>.from(
+                                  e.value as Map,
+                                );
+                                m['__key'] = e.key.toString();
+                                final expiresAt = (m['expiresAt'] is int)
+                                    ? m['expiresAt'] as int
+                                    : null;
+                                final deletedFor = (m['deletedFor'] is Map)
+                                    ? (m['deletedFor'] as Map)
+                                    : null;
+                                if (deletedFor?.containsKey(current.uid) ==
+                                    true) {
+                                  continue;
+                                }
+                                if (expiresAt != null && expiresAt <= now) {
+                                  final k = (m['__key'] ?? '').toString();
+                                  final delKey = 'g:$groupId:$k';
+                                  if (k.isNotEmpty &&
+                                      !_ttlDeleting.contains(delKey)) {
+                                    _ttlDeleting.add(delKey);
+                                    () async {
+                                      try {
+                                        await msgsRef.child(k).remove();
+                                      } catch (_) {
+                                        // ignore
+                                      } finally {
+                                        _ttlDeleting.remove(delKey);
+                                      }
+                                    }();
+                                  }
+                                  continue;
+                                }
+                                items.add(m);
+                              }
+                              items.sort((a, b) {
+                                final at = (a['createdAt'] is int)
+                                    ? a['createdAt'] as int
+                                    : 0;
+                                final bt = (b['createdAt'] is int)
+                                    ? b['createdAt'] as int
+                                    : 0;
+                                return at.compareTo(bt);
+                              });
+
+                              var latestGroupMessageAt = 0;
+                              for (final m in items) {
+                                final at = (m['createdAt'] is int)
+                                    ? m['createdAt'] as int
+                                    : 0;
+                                if (at > latestGroupMessageAt) {
+                                  latestGroupMessageAt = at;
+                                }
+                              }
+                              if (latestGroupMessageAt > 0) {
+                                WidgetsBinding.instance.addPostFrameCallback((
+                                  _,
+                                ) {
+                                  _syncGroupReadCursor(
+                                    groupId: groupId,
+                                    myUid: current.uid,
+                                    latestAt: latestGroupMessageAt,
+                                  );
+                                });
+                              }
+
+                              final displayItems = <Map<String, dynamic>>[
+                                ...items,
+                                ..._localNotesForChat(
+                                  isGroup: true,
+                                  chatId: groupId,
+                                ),
+                              ];
+                              displayItems.sort((a, b) {
+                                final at = (a['createdAt'] is int)
+                                    ? a['createdAt'] as int
+                                    : 0;
+                                final bt = (b['createdAt'] is int)
+                                    ? b['createdAt'] as int
+                                    : 0;
+                                return at.compareTo(bt);
+                              });
+
+                              final filteredItems = displayItems
+                                  .where(
+                                    (m) => _messageMatchesFind(
+                                      message: m,
+                                      isGroup: true,
+                                      chatId: groupId,
+                                      dmLoginLower: '',
+                                    ),
+                                  )
+                                  .toList(growable: false);
+
+                              // After the list rebuilds, scroll to bottom so newest message is visible.
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _autoScrollForChatView(
+                                  controller: _groupScrollController,
+                                  chatViewKey: 'group:$groupId',
+                                );
+                              });
+
+                              // Best-effort migration: encrypt old plaintext group messages.
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                for (final msg in items.take(30)) {
+                                  final k = (msg['__key'] ?? '').toString();
+                                  if (k.isEmpty) continue;
+                                  if (_migrating.contains('g:$groupId:$k'))
+                                    continue;
+                                  final pt = (msg['text'] ?? '').toString();
+                                  final hasC =
+                                      ((msg['ciphertext'] ??
+                                              msg['ct'] ??
+                                              msg['cipher'])
+                                          ?.toString()
+                                          .isNotEmpty ??
+                                      false);
+                                  if (pt.isEmpty || hasC) continue;
+
+                                  _migrating.add('g:$groupId:$k');
+                                  () async {
+                                    try {
+                                      SecretKey? gk = _groupKeyCache[groupId];
+                                      gk ??= await E2ee.fetchGroupKey(
+                                        groupId: groupId,
+                                        myUid: current.uid,
+                                      );
+                                      if (gk == null) return;
+                                      _groupKeyCache[groupId] = gk;
+                                      final enc = await E2ee.encryptForGroup(
+                                        groupKey: gk,
+                                        plaintext: pt,
+                                      );
+                                      await msgsRef.child(k).update({
+                                        ...enc,
+                                        'text': null,
+                                      });
+                                      if (!mounted) return;
+                                      setState(
+                                        () => _decryptedCache['g:$groupId:$k'] =
+                                            pt,
+                                      );
+                                      PlaintextCache.putGroup(
+                                        groupId: groupId,
+                                        messageKey: k,
+                                        plaintext: pt,
+                                      );
+                                    } catch (_) {
+                                      // ignore
+                                    } finally {
+                                      _migrating.remove('g:$groupId:$k');
+                                    }
+                                  }();
+                                }
+                              });
+
+                              // Background warm-up: decrypt & persist ciphertext messages.
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _warmupGroupDecryptAll(
+                                  items: items,
+                                  groupId: groupId,
+                                  myUid: current.uid,
+                                );
+                              });
+
+                              return ListView.builder(
+                                controller: _groupScrollController,
+                                padding: const EdgeInsets.all(12),
+                                itemCount: filteredItems.length,
+                                itemBuilder: (context, i) {
+                                  final m = filteredItems[i];
+                                  final prev = i > 0
+                                      ? filteredItems[i - 1]
+                                      : null;
+                                  final isLocalSystem =
+                                      m['__localSystem'] == true;
+                                  final key = (m['__key'] ?? '').toString();
+                                  final messageScopedKey = _scopedMessageKey(
+                                    isGroup: true,
+                                    chatScope: groupId,
+                                    messageKey: key,
+                                  );
+                                  final messageItemKey = _messageItemGlobalKey(
+                                    isGroup: true,
+                                    chatScope: groupId,
+                                    messageKey: key,
+                                  );
+                                  final isFlashTarget =
+                                      _flashMessageScopedKey ==
+                                      messageScopedKey;
+                                  final plaintext = (m['text'] ?? '')
+                                      .toString();
+                                  final fromUid = (m['fromUid'] ?? '')
+                                      .toString();
+                                  final fromGh = (m['fromGithub'] ?? '')
+                                      .toString();
+                                  final isMe =
+                                      !isLocalSystem && fromUid == current.uid;
+                                  final burnAfterRead =
+                                      m['burnAfterRead'] == true;
+                                  final expiresAt = (m['expiresAt'] is int)
+                                      ? m['expiresAt'] as int
+                                      : null;
+                                  final hasTtlMarker =
+                                      burnAfterRead || expiresAt != null;
+                                  final createdAt = (m['createdAt'] is int)
+                                      ? m['createdAt'] as int
+                                      : null;
+                                  final timeLabel = _formatShortTime(createdAt);
+                                  final prevCreatedAt =
+                                      (prev?['createdAt'] is int)
+                                      ? prev!['createdAt'] as int
+                                      : null;
+                                  final showDayDivider =
+                                      createdAt != null &&
+                                      !_isSameCalendarDay(
+                                        createdAt,
+                                        prevCreatedAt,
+                                      );
+
+                                  final hasCipher =
+                                      ((m['ciphertext'] ??
+                                              m['ct'] ??
+                                              m['cipher'])
+                                          ?.toString()
+                                          .isNotEmpty ??
+                                      false);
+                                  final cacheKey = 'g:$groupId:$key';
+                                  String text = plaintext;
+                                  if (text.isEmpty && hasCipher) {
+                                    final persisted =
+                                        PlaintextCache.tryGetGroup(
+                                          groupId: groupId,
+                                          messageKey: key,
+                                        );
+                                    if (persisted != null &&
+                                        persisted.isNotEmpty) {
+                                      text = persisted;
+                                      _decryptedCache[cacheKey] ??= persisted;
+                                    } else {
+                                      text =
+                                          _decryptedCache[cacheKey] ?? '🔒 …';
+                                    }
+
+                                    if (persisted == null &&
+                                        _decryptedCache[cacheKey] == null &&
+                                        !_decrypting.contains(cacheKey)) {
+                                      _decrypting.add(cacheKey);
+                                      () async {
+                                        try {
+                                          SecretKey? gk =
+                                              _groupKeyCache[groupId];
+                                          gk ??= await E2ee.fetchGroupKey(
+                                            groupId: groupId,
+                                            myUid: current.uid,
+                                          );
+                                          if (gk != null)
+                                            _groupKeyCache[groupId] = gk;
+                                          final plain =
+                                              await E2ee.decryptGroupMessage(
+                                                groupId: groupId,
+                                                myUid: current.uid,
+                                                groupKey: gk,
+                                                message: m,
+                                              );
+                                          if (!mounted) return;
+                                          setState(
+                                            () => _decryptedCache[cacheKey] =
+                                                plain,
+                                          );
+                                          PlaintextCache.putGroup(
+                                            groupId: groupId,
+                                            messageKey: key,
+                                            plaintext: plain,
+                                          );
+
+                                          if (burnAfterRead && !isMe) {
+                                            final delKey = 'g:$groupId:$key';
+                                            if (key.isNotEmpty &&
+                                                !_ttlDeleting.contains(
+                                                  delKey,
+                                                )) {
+                                              _ttlDeleting.add(delKey);
+                                              () async {
+                                                try {
+                                                  await msgsRef
+                                                      .child(key)
+                                                      .remove();
+                                                } catch (_) {
+                                                  // ignore
+                                                } finally {
+                                                  _ttlDeleting.remove(delKey);
+                                                }
+                                              }();
+                                            }
+                                          }
+                                        } catch (_) {
+                                          // keep placeholder
+                                        } finally {
+                                          _decrypting.remove(cacheKey);
+                                        }
+                                      }();
+                                    }
+                                  }
+
+                                  if (burnAfterRead &&
+                                      !isMe &&
+                                      text.isNotEmpty &&
+                                      !hasCipher) {
+                                    // Old plaintext message: treat first render as "read".
+                                    final delKey = 'g:$groupId:$key';
+                                    if (key.isNotEmpty &&
+                                        !_ttlDeleting.contains(delKey)) {
+                                      _ttlDeleting.add(delKey);
+                                      () async {
+                                        try {
+                                          await msgsRef.child(key).remove();
+                                        } catch (_) {
+                                          // ignore
+                                        } finally {
+                                          _ttlDeleting.remove(delKey);
+                                        }
+                                      }();
+                                    }
+                                  }
+
+                                  final attachment =
+                                      _AttachmentPayload.tryParse(text);
+                                  final isAttachment = attachment != null;
+                                  final codePayload =
+                                      _CodeMessagePayload.tryParse(text);
+                                  final isCode = codePayload != null;
+                                  if (attachment != null) {
+                                    if (!_attachmentCache.containsKey(
+                                      cacheKey,
+                                    )) {
+                                      _ensureAttachmentCached(
+                                        cacheKey: cacheKey,
+                                        payload: attachment,
+                                      );
+                                    }
+                                  }
+
+                                  final mentioned =
+                                      !isLocalSystem &&
+                                      !isAttachment &&
+                                      !isCode &&
+                                      myGithubLower.isNotEmpty &&
+                                      _mentionsMyHandle(text, myGithubLower);
+
+                                  final replyToFrom = (m['replyToFrom'] ?? '')
+                                      .toString()
+                                      .trim();
+                                  final replyToKey = (m['replyToKey'] ?? '')
+                                      .toString()
+                                      .trim();
+                                  final replyToPreview =
+                                      (m['replyToPreview'] ?? '')
+                                          .toString()
+                                          .trim();
+                                  final hasReply =
+                                      replyToKey.isNotEmpty &&
+                                      replyToPreview.isNotEmpty;
+
+                                  final reactions = (m['reactions'] is Map)
+                                      ? (m['reactions'] as Map)
+                                      : null;
+                                  final reactionChips = <Widget>[];
+                                  if (reactions != null) {
+                                    for (final re in reactions.entries) {
+                                      final emoji = re.key.toString();
+                                      final voters = (re.value is Map)
+                                          ? (re.value as Map)
+                                          : null;
+                                      final count = voters?.length ?? 0;
+                                      if (count > 0) {
+                                        reactionChips.add(
+                                          Container(
+                                            margin: const EdgeInsets.only(
+                                              top: 4,
+                                              right: 6,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.surface,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              '$emoji $count',
+                                              style: TextStyle(
+                                                fontSize:
+                                                    widget
+                                                        .settings
+                                                        .chatTextSize -
+                                                    4,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  }
+
+                                  final bubbleKey = isMe
+                                      ? 'outgoing'
+                                      : 'incoming';
+                                  final bubbleColor = _bubbleColor(
+                                    context,
+                                    bubbleKey,
+                                  );
+                                  final tcolor = _bubbleTextColor(
+                                    context,
+                                    bubbleKey,
+                                  );
+                                  final mentionHighlight = mentioned && !isMe;
+                                  final effectiveBubbleColor = isLocalSystem
+                                      ? const Color(0xFFDDE1E6)
+                                      : (mentionHighlight
+                                            ? const Color(0x66F2CC60)
+                                            : bubbleColor);
+                                  final effectiveTextColor = isLocalSystem
+                                      ? const Color(0xFF30363D)
+                                      : (mentionHighlight
+                                            ? const Color(0xFFFFF5CC)
+                                            : tcolor);
+
+                                  return KeyedSubtree(
+                                    key: messageItemKey,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 6,
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          if (showDayDivider)
+                                            _dayDivider(context, createdAt),
+                                          GestureDetector(
+                                            behavior:
+                                                HitTestBehavior.translucent,
+                                            onLongPress: isLocalSystem
+                                                ? null
+                                                : () => _showMessageActions(
+                                                    isGroup: true,
+                                                    chatTarget: groupId,
+                                                    messageKey: key,
+                                                    fromLabel: fromGh.isNotEmpty
+                                                        ? fromGh
+                                                        : (isMe
+                                                              ? myGithub
+                                                              : 'user'),
+                                                    text: text,
+                                                    rawMessage: m,
+                                                    canDeleteForMe: true,
+                                                    canDeleteForAll:
+                                                        isAdmin || isMe,
+                                                    onDeleteForMe: () => msgsRef
+                                                        .child(key)
+                                                        .child('deletedFor')
+                                                        .child(current.uid)
+                                                        .set(true),
+                                                    onDeleteForAll: () =>
+                                                        deleteMessage(key),
+                                                  ),
+                                            child: Column(
+                                              crossAxisAlignment: isMe
+                                                  ? CrossAxisAlignment.end
+                                                  : CrossAxisAlignment.start,
+                                              children: [
+                                                if (isLocalSystem)
+                                                  Text(
+                                                    AppLanguage.tr(
+                                                      context,
+                                                      'Jen pro tebe',
+                                                      'Only visible to you',
+                                                    ),
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                      color: Color(0xFF9CA3AF),
+                                                    ),
+                                                  )
+                                                else if (fromGh.isNotEmpty)
+                                                  Text(
+                                                    '@$fromGh',
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                Align(
+                                                  alignment: isMe
+                                                      ? Alignment.centerRight
+                                                      : Alignment.centerLeft,
+                                                  child: Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 12,
+                                                          vertical: 10,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          effectiveBubbleColor,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            14,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: isFlashTarget
+                                                            ? const Color(
+                                                                0xFF58A6FF,
+                                                              )
+                                                            : mentioned
+                                                            ? Colors.amber
+                                                            : (isLocalSystem
+                                                                  ? const Color(
+                                                                      0xFFB8C0CC,
+                                                                    )
+                                                                  : const Color(
+                                                                      0x5530363D,
+                                                                    )),
+                                                        width:
+                                                            (isFlashTarget ||
+                                                                mentioned)
+                                                            ? 2
+                                                            : 1,
+                                                      ),
+                                                    ),
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        if (isMe &&
+                                                            expiresAt != null &&
+                                                            expiresAt >
+                                                                _ttlUiNowMs)
+                                                          Padding(
+                                                            padding:
+                                                                const EdgeInsets.only(
+                                                                  bottom: 6,
+                                                                ),
+                                                            child: Text(
+                                                              'TTL: ${_formatTtlRemaining(expiresAt - _ttlUiNowMs)}',
+                                                              style: TextStyle(
+                                                                fontSize:
+                                                                    widget
+                                                                        .settings
+                                                                        .chatTextSize -
+                                                                    3,
+                                                                color:
+                                                                    isLocalSystem
+                                                                    ? const Color(
+                                                                        0xFF5A6472,
+                                                                      )
+                                                                    : Colors
+                                                                          .white70,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        if (hasReply)
+                                                          InkWell(
+                                                            onTap: () =>
+                                                                _jumpToMessageAndFlash(
+                                                                  isGroup: true,
+                                                                  chatScope:
+                                                                      groupId,
+                                                                  messageKey:
+                                                                      replyToKey,
+                                                                ),
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  8,
+                                                                ),
+                                                            child: Container(
+                                                              margin:
+                                                                  const EdgeInsets.only(
+                                                                    bottom: 8,
+                                                                  ),
+                                                              padding:
+                                                                  const EdgeInsets.symmetric(
+                                                                    horizontal:
+                                                                        8,
+                                                                    vertical: 6,
+                                                                  ),
+                                                              decoration: BoxDecoration(
+                                                                color: Colors
+                                                                    .black26,
+                                                                borderRadius:
+                                                                    BorderRadius.circular(
+                                                                      8,
+                                                                    ),
+                                                                border: Border.all(
+                                                                  color: Colors
+                                                                      .white24,
+                                                                ),
+                                                              ),
+                                                              child: Row(
+                                                                mainAxisSize:
+                                                                    MainAxisSize
+                                                                        .min,
+                                                                children: [
+                                                                  const Icon(
+                                                                    Icons
+                                                                        .subdirectory_arrow_right,
+                                                                    size: 14,
+                                                                    color: Colors
+                                                                        .white70,
+                                                                  ),
+                                                                  const SizedBox(
+                                                                    width: 6,
+                                                                  ),
+                                                                  Flexible(
+                                                                    child: Text(
+                                                                      '${replyToFrom.isNotEmpty ? '@$replyToFrom' : 'Reply'} • $replyToPreview',
+                                                                      maxLines:
+                                                                          2,
+                                                                      overflow:
+                                                                          TextOverflow
+                                                                              .ellipsis,
+                                                                      style: TextStyle(
+                                                                        fontSize:
+                                                                            widget.settings.chatTextSize -
+                                                                            2,
+                                                                        color:
+                                                                            mentionHighlight
+                                                                            ? const Color(
+                                                                                0xFFFFF1B8,
+                                                                              )
+                                                                            : Colors.white70,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        if (attachment != null)
+                                                          _attachmentBubble(
+                                                            payload: attachment,
+                                                            cacheKey: cacheKey,
+                                                            maxWidth:
+                                                                MediaQuery.of(
+                                                                  context,
+                                                                ).size.width *
+                                                                0.62,
+                                                            radius: 12,
+                                                          )
+                                                        else if (codePayload !=
+                                                            null)
+                                                          _codePreviewCard(
+                                                            context: context,
+                                                            payload:
+                                                                codePayload,
+                                                            textColor:
+                                                                effectiveTextColor,
+                                                          )
+                                                        else
+                                                          _RichMessageText(
+                                                            text: text,
+                                                            fontSize: widget
+                                                                .settings
+                                                                .chatTextSize,
+                                                            textColor:
+                                                                effectiveTextColor,
+                                                            highlightQuery:
+                                                                _chatFindQuery,
+                                                          ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (reactionChips.isNotEmpty)
+                                                  Wrap(
+                                                    alignment:
+                                                        WrapAlignment.end,
+                                                    children: reactionChips,
+                                                  ),
+                                                if (timeLabel.isNotEmpty ||
+                                                    hasTtlMarker)
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          top: 4,
+                                                        ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      mainAxisAlignment: isMe
+                                                          ? MainAxisAlignment
+                                                                .end
+                                                          : MainAxisAlignment
+                                                                .start,
+                                                      children: [
+                                                        if (hasTtlMarker)
+                                                          Icon(
+                                                            Icons
+                                                                .timer_outlined,
+                                                            size: 12,
+                                                            color: Theme.of(context)
+                                                                .colorScheme
+                                                                .onSurface
+                                                                .withAlpha(
+                                                                  (0.65 * 255)
+                                                                      .round(),
+                                                                ),
+                                                          ),
+                                                        if (hasTtlMarker &&
+                                                            timeLabel
+                                                                .isNotEmpty)
+                                                          const SizedBox(
+                                                            width: 4,
+                                                          ),
+                                                        if (timeLabel
+                                                            .isNotEmpty)
+                                                          Text(
+                                                            timeLabel,
+                                                            style: TextStyle(
+                                                              fontSize: 11,
+                                                              color: Theme.of(context)
+                                                                  .colorScheme
+                                                                  .onSurface
+                                                                  .withAlpha(
+                                                                    (0.6 * 255)
+                                                                        .round(),
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                        StreamBuilder<DatabaseEvent>(
+                          stream: rtdb().ref('typingGroups/$groupId').onValue,
+                          builder: (context, typingSnap) {
+                            final raw = typingSnap.data?.snapshot.value;
+                            final map = (raw is Map) ? raw : null;
+                            if (map == null || map.isEmpty) {
+                              return const SizedBox.shrink();
+                            }
+
+                            final now = DateTime.now().millisecondsSinceEpoch;
+                            final typers = <String>[];
+                            for (final e in map.entries) {
+                              final uid = e.key.toString().trim();
+                              if (uid.isEmpty || uid == current.uid) continue;
+                              if (e.value is! Map) continue;
+
+                              final item = Map<String, dynamic>.from(
+                                e.value as Map,
+                              );
+                              if (item['typing'] != true) continue;
+
+                              final at = (item['at'] is int)
+                                  ? item['at'] as int
+                                  : int.tryParse(
+                                          (item['at'] ?? '').toString(),
+                                        ) ??
+                                        0;
+                              if (at > 0 && (now - at) > 12000) {
+                                // Best-effort cleanup for stale typing entries.
+                                unawaited(
+                                  rtdb()
+                                      .ref('typingGroups/$groupId/$uid')
+                                      .remove(),
+                                );
+                                continue;
+                              }
+
+                              final github = (item['github'] ?? '')
+                                  .toString()
+                                  .trim();
+                              typers.add(github.isNotEmpty ? '@$github' : uid);
+                            }
+
+                            if (typers.isEmpty) return const SizedBox.shrink();
+
+                            final label = typers.length == 1
+                                ? '${typers.first} ${AppLanguage.tr(context, 'píše', 'is typing')}'
+                                : '${typers.take(2).join(', ')}${typers.length > 2 ? ' +' + (typers.length - 2).toString() : ''} ${AppLanguage.tr(context, 'píší', 'are typing')}';
+
+                            return Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _typingPill(),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withAlpha((0.6 * 255).round()),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        if (_replyToPreview != null &&
+                            _replyToPreview!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.outlineVariant,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.subdirectory_arrow_right,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      '@${_replyToFrom ?? ''} • ${_replyToPreview ?? ''}',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.close, size: 18),
+                                    onPressed: _clearReplyTarget,
+                                    tooltip: AppLanguage.tr(
+                                      context,
+                                      'Zrušit odpověď',
+                                      'Cancel reply',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        if (_groupMentionSuggestions.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.outlineVariant,
+                                ),
+                              ),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxHeight: 180,
+                                ),
+                                child: ListView(
+                                  shrinkWrap: true,
+                                  padding: EdgeInsets.zero,
+                                  children: _groupMentionSuggestions
+                                      .map(
+                                        (login) => ListTile(
+                                          leading: const Icon(
+                                            Icons.alternate_email,
+                                            size: 16,
+                                          ),
+                                          title: Text('@$login'),
+                                          onTap: () =>
+                                              _applyGroupMentionSuggestion(
+                                                login,
+                                              ),
+                                        ),
+                                      )
+                                      .toList(growable: false),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_slashSuggestions.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.outlineVariant,
+                                ),
+                              ),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxHeight: 210,
+                                ),
+                                child: ListView(
+                                  shrinkWrap: true,
+                                  padding: EdgeInsets.zero,
+                                  children: _slashSuggestions
+                                      .map(
+                                        (command) => ListTile(
+                                          leading: const Icon(
+                                            Icons.terminal,
+                                            size: 16,
+                                          ),
+                                          title: Text('/$command'),
+                                          subtitle: Text(
+                                            _slashCommands[command] ?? '',
+                                          ),
+                                          onTap: () =>
+                                              _applySlashSuggestion(command),
+                                        ),
+                                      )
+                                      .toList(growable: false),
+                                ),
+                              ),
+                            ),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF161B22),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0x5530363D),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _messageController,
+                                    decoration: InputDecoration(
+                                      labelText: AppLanguage.tr(
+                                        context,
+                                        'Zpráva / Markdown',
+                                        'Message / Markdown',
+                                      ),
+                                    ),
+                                    enabled: canSend,
+                                    minLines: 1,
+                                    maxLines: 6,
+                                    onSubmitted: (_) => send(),
+                                    onChanged: canSend
+                                        ? (text) {
+                                            if (_pendingCodePayload != null &&
+                                                !text.trim().startsWith(
+                                                  '<> kód',
+                                                )) {
+                                              setState(
+                                                () =>
+                                                    _pendingCodePayload = null,
+                                              );
+                                            }
+                                            _onGroupTypingChanged(
+                                              groupId: groupId,
+                                              text: text,
+                                              myGithub: myGithub,
+                                            );
+                                            _updateSlashSuggestions();
+                                            _scheduleGroupMentionSuggestions(
+                                              groupId: groupId,
+                                            );
+                                          }
+                                        : null,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  tooltip: AppLanguage.tr(
+                                    context,
+                                    'Více',
+                                    'More',
+                                  ),
+                                  onPressed: canSend
+                                      ? () async {
+                                          final value =
+                                              await _showComposerActionsSheet(
+                                                context,
+                                              );
+                                          if (value == null) return;
+                                          if (value == 'image') {
+                                            await _sendImageGroup(
+                                              groupId: groupId,
+                                              current: current,
+                                              myGithub: myGithub,
+                                              canSend: canSend,
+                                            );
+                                            return;
+                                          }
+                                          if (value == 'code') {
+                                            await _insertCodeBlockTemplate();
+                                            return;
+                                          }
+                                          if (value == 'ttl_config') {
+                                            final picked =
+                                                await _showTtlConfigDialog(
+                                                  context: context,
+                                                  currentMode: _dmTtlMode,
+                                                );
+                                            if (picked != null && mounted) {
+                                              setState(
+                                                () => _dmTtlMode = picked,
+                                              );
+                                            }
+                                          }
+                                        }
+                                      : null,
+                                  icon: const Icon(Icons.more_vert),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.send),
+                                  onPressed: canSend ? send : null,
                                 ),
                               ],
                             ),
                           ),
                         ),
-                      if (_groupMentionSuggestions.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.outlineVariant,
-                              ),
-                            ),
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxHeight: 180),
-                              child: ListView(
-                                shrinkWrap: true,
-                                padding: EdgeInsets.zero,
-                                children: _groupMentionSuggestions
-                                    .map(
-                                      (login) => ListTile(
-                                        leading: const Icon(
-                                          Icons.alternate_email,
-                                          size: 16,
-                                        ),
-                                        title: Text('@$login'),
-                                        onTap: () =>
-                                            _applyGroupMentionSuggestion(login),
-                                      ),
-                                    )
-                                    .toList(growable: false),
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (_slashSuggestions.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.outlineVariant,
-                              ),
-                            ),
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxHeight: 210),
-                              child: ListView(
-                                shrinkWrap: true,
-                                padding: EdgeInsets.zero,
-                                children: _slashSuggestions
-                                    .map(
-                                      (command) => ListTile(
-                                        leading: const Icon(
-                                          Icons.terminal,
-                                          size: 16,
-                                        ),
-                                        title: Text('/$command'),
-                                        subtitle: Text(
-                                          _slashCommands[command] ?? '',
-                                        ),
-                                        onTap: () =>
-                                            _applySlashSuggestion(command),
-                                      ),
-                                    )
-                                    .toList(growable: false),
-                              ),
-                            ),
-                          ),
-                        ),
-                      Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF161B22),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0x5530363D)),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                controller: _messageController,
-                                decoration: InputDecoration(
-                                  labelText: AppLanguage.tr(
-                                    context,
-                                    'Zpráva / Markdown',
-                                    'Message / Markdown',
-                                  ),
-                                ),
-                                enabled: canSend,
-                                minLines: 1,
-                                maxLines: 6,
-                                onSubmitted: (_) => send(),
-                                onChanged: canSend
-                                    ? (text) {
-                                        if (_pendingCodePayload != null &&
-                                            !text.trim().startsWith('<> kód')) {
-                                          setState(
-                                            () => _pendingCodePayload = null,
-                                          );
-                                        }
-                                        _onGroupTypingChanged(
-                                          groupId: groupId,
-                                          text: text,
-                                          myGithub: myGithub,
-                                        );
-                                        _updateSlashSuggestions();
-                                        _scheduleGroupMentionSuggestions(
-                                          groupId: groupId,
-                                        );
-                                      }
-                                    : null,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                              tooltip: AppLanguage.tr(context, 'Více', 'More'),
-                              onPressed: canSend
-                                  ? () async {
-                                      final value =
-                                          await _showComposerActionsSheet(
-                                            context,
-                                          );
-                                      if (value == null) return;
-                                if (value == 'image') {
-                                  await _sendImageGroup(
-                                    groupId: groupId,
-                                    current: current,
-                                    myGithub: myGithub,
-                                    canSend: canSend,
-                                  );
-                                  return;
-                                }
-                                if (value == 'code') {
-                                  await _insertCodeBlockTemplate();
-                                  return;
-                                }
-                                if (value == 'ttl_config') {
-                                  final picked = await _showTtlConfigDialog(
-                                    context: context,
-                                    currentMode: _dmTtlMode,
-                                  );
-                                  if (picked != null && mounted) {
-                                    setState(() => _dmTtlMode = picked);
-                                  }
-                                }
-                                    }
-                                  : null,
-                              icon: const Icon(Icons.more_vert),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.send),
-                                onPressed: canSend ? send : null,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ));
+                      ],
+                    ),
+                  );
                 },
               );
             },
@@ -22622,1314 +23286,324 @@ class _ChatsTabState extends State<_ChatsTab>
     );
 
     const bgColor = Color(0xFF0D1117);
-    return _withCallOverlay(StreamBuilder<DatabaseEvent>(
-      stream: currentUserRef.onValue,
-      builder: (context, uSnap) {
-        final uv = uSnap.data?.snapshot.value;
-        final um = (uv is Map) ? uv : null;
-        final myGithub = (um?['githubUsername'] ?? '').toString();
+    return _withCallOverlay(
+      StreamBuilder<DatabaseEvent>(
+        stream: currentUserRef.onValue,
+        builder: (context, uSnap) {
+          final uv = uSnap.data?.snapshot.value;
+          final um = (uv is Map) ? uv : null;
+          final myGithub = (um?['githubUsername'] ?? '').toString();
 
-        return StreamBuilder<DatabaseEvent>(
-          stream: dmContactRef.onValue,
-          builder: (context, cSnap) {
-            final cVal = cSnap.data?.snapshot.value;
-            final dmAccepted = (cVal is bool) ? cVal : (cVal != null);
+          return StreamBuilder<DatabaseEvent>(
+            stream: dmContactRef.onValue,
+            builder: (context, cSnap) {
+              final cVal = cSnap.data?.snapshot.value;
+              final dmAccepted = (cVal is bool) ? cVal : (cVal != null);
 
-            String ttlLabel(int v) {
-              return switch (v) {
-                0 => 'Podle nastavení',
-                1 => 'Nikdy',
-                2 => '1 minuta',
-                3 => '1 hodina',
-                4 => '1 den',
-                5 => 'Po přečtení',
-                _ => 'Podle nastavení',
-              };
-            }
+              String ttlLabel(int v) {
+                return switch (v) {
+                  0 => 'Podle nastavení',
+                  1 => 'Nikdy',
+                  2 => '1 minuta',
+                  3 => '1 hodina',
+                  4 => '1 den',
+                  5 => 'Po přečtení',
+                  _ => 'Podle nastavení',
+                };
+              }
 
-            return Column(
-              children: [
-                const SizedBox(height: 4),
-                if (_outgoingCallRinging &&
-                    (_callPeerLogin ?? '').trim().toLowerCase() ==
-                        loginLower)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF132A1C),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF2EA043)),
-                      ),
-                      child: Row(
-                        children: [
-                          AnimatedBuilder(
-                            animation: _typingAnim,
-                            builder: (_, child) {
-                              final scale = 1.0 + (_typingAnim.value * 0.12);
-                              return Transform.scale(scale: scale, child: child);
-                            },
-                            child: const Icon(
-                              Icons.call,
-                              color: Color(0xFF3FB950),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              AppLanguage.tr(
-                                context,
-                                'Calling... čeká na přijetí',
-                                'Calling... waiting for answer',
-                              ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () => openActiveDmCallAction(),
-                            child: Text(AppLanguage.tr(context, 'Zrušit', 'Cancel')),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (_callConnected && hasActiveDmCall)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0E4429),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF3FB950)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.call, color: Color(0xFF3FB950)),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  AppLanguage.tr(
-                                    context,
-                                    'Hovor probíhá',
-                                    'Call in progress',
-                                  ),
-                                  style: const TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                                Text(_callDurationLabel(_callElapsedSeconds)),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: AppLanguage.tr(
-                              context,
-                              'Mikrofon',
-                              'Microphone',
-                            ),
-                            onPressed: () => _toggleDmMic(),
-                            icon: Icon(
-                              _dmMicEnabled ? Icons.mic : Icons.mic_off,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: AppLanguage.tr(
-                              context,
-                              'Reproduktor',
-                              'Speaker',
-                            ),
-                            onPressed: () => _toggleDmSpeaker(),
-                            icon: Icon(
-                              _dmSpeakerEnabled
-                                  ? Icons.volume_up
-                                  : Icons.hearing_disabled,
-                            ),
-                          ),
-                          FilledButton.tonalIcon(
-                            onPressed: () => openActiveDmCallAction(),
-                            icon: const Icon(Icons.call_end),
-                            label: Text(AppLanguage.tr(context, 'Ukončit', 'End')),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                // DM žádosti – zobrazené i během chatu
-                StreamBuilder<DatabaseEvent>(
-                  stream: rtdb().ref('dmRequests/${current.uid}').onValue,
-                  builder: (context, reqSnap) {
-                    final v = reqSnap.data?.snapshot.value;
-                    final m = (v is Map) ? v : null;
-
-                    final items = <Map<String, dynamic>>[];
-                    if (m != null) {
-                      for (final e in m.entries) {
-                        if (e.value is! Map) continue;
-                        final mm = Map<String, dynamic>.from(e.value as Map);
-                        mm['__key'] = e.key.toString();
-                        items.add(mm);
-                      }
-                      items.sort((a, b) {
-                        final at = (a['createdAt'] is int)
-                            ? a['createdAt'] as int
-                            : 0;
-                        final bt = (b['createdAt'] is int)
-                            ? b['createdAt'] as int
-                            : 0;
-                        return bt.compareTo(at);
-                      });
-                    }
-
-                    if (items.isEmpty) return const SizedBox.shrink();
-
-                    Future<void> accept(Map<String, dynamic> req) async {
-                      final fromLogin = (req['fromLogin'] ?? '').toString();
-                      if (fromLogin.trim().isEmpty) return;
-                      try {
-                        await _acceptDmRequest(
-                          myUid: current.uid,
-                          otherLogin: fromLogin,
-                        );
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
-                              ),
-                            ),
-                          );
-                        }
-                      }
-                    }
-
-                    Future<void> reject(Map<String, dynamic> req) async {
-                      final fromLogin = (req['fromLogin'] ?? '').toString();
-                      if (fromLogin.trim().isEmpty) return;
-                      try {
-                        await _rejectDmRequest(
-                          myUid: current.uid,
-                          otherLogin: fromLogin,
-                        );
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
-                              ),
-                            ),
-                          );
-                        }
-                      }
-                    }
-
-                    return Column(
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.mail_lock_outlined),
-                          title: Text(
-                            AppLanguage.tr(
-                              context,
-                              'Žádosti o chat',
-                              'Chat requests',
-                            ),
-                          ),
-                          subtitle: Text(
-                            '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
-                          ),
+              return Column(
+                children: [
+                  const SizedBox(height: 4),
+                  if (_outgoingCallRinging &&
+                      (_callPeerLogin ?? '').trim().toLowerCase() == loginLower)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
                         ),
-                        ...items.map((req) {
-                          final fromLogin = (req['fromLogin'] ?? '').toString();
-                          final fromUid = (req['fromUid'] ?? '').toString();
-                          final fromAvatar = (req['fromAvatarUrl'] ?? '')
-                              .toString();
-                          final hasEncryptedText =
-                              ((req['ciphertext'] ?? req['ct'] ?? req['cipher'])
-                                  ?.toString()
-                                  .isNotEmpty ??
-                              false);
-                          return ListTile(
-                            leading: fromUid.isNotEmpty
-                                ? _AvatarWithPresenceDot(
-                                    uid: fromUid,
-                                    avatarUrl: fromAvatar,
-                                    radius: 18,
-                                  )
-                                : CircleAvatar(
-                                    radius: 18,
-                                    backgroundImage: fromAvatar.isNotEmpty
-                                        ? NetworkImage(fromAvatar)
-                                        : null,
-                                    child: fromAvatar.isEmpty
-                                        ? const Icon(Icons.person, size: 18)
-                                        : null,
-                                  ),
-                            title: Text('@$fromLogin'),
-                            subtitle: hasEncryptedText
-                                ? Text(
-                                    AppLanguage.tr(
-                                      context,
-                                      'Zpráva: 🔒 (šifrovaně)',
-                                      'Message: 🔒 (encrypted)',
-                                    ),
-                                  )
-                                : Text(
-                                    AppLanguage.tr(
-                                      context,
-                                      'Invajt do privátu',
-                                      'Private chat invite',
-                                    ),
-                                  ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.close),
-                                  onPressed: () => reject(req),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.check),
-                                  onPressed: () => accept(req),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                        const Divider(height: 1),
-                      ],
-                    );
-                  },
-                ),
-                StreamBuilder<DatabaseEvent>(
-                  stream: blockedRef.onValue,
-                  builder: (context, bSnap) {
-                    final blocked = bSnap.data?.snapshot.value == true;
-
-                    final canSend = true;
-
-                    return Expanded(
-                      child: Column(
-                        children: [
-                          if (_chatFindQuery.isNotEmpty)
-                            Container(
-                              width: double.infinity,
-                              margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surface,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.search, size: 16),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      '${AppLanguage.tr(context, 'Filtr', 'Filter')}: $_chatFindQuery',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: AppLanguage.tr(
-                                      context,
-                                      'Vyčistit filtr',
-                                      'Clear filter',
-                                    ),
-                                    onPressed: () {
-                                      setState(() => _chatFindQuery = '');
-                                    },
-                                    icon: const Icon(Icons.close, size: 18),
-                                  ),
-                                ],
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF132A1C),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF2EA043)),
+                        ),
+                        child: Row(
+                          children: [
+                            AnimatedBuilder(
+                              animation: _typingAnim,
+                              builder: (_, child) {
+                                final scale = 1.0 + (_typingAnim.value * 0.12);
+                                return Transform.scale(
+                                  scale: scale,
+                                  child: child,
+                                );
+                              },
+                              child: const Icon(
+                                Icons.call,
+                                color: Color(0xFF2A8C63),
                               ),
                             ),
-                          if (blocked)
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              color: Theme.of(context).colorScheme.surface,
+                            const SizedBox(width: 10),
+                            Expanded(
                               child: Text(
                                 AppLanguage.tr(
                                   context,
-                                  'Uživatel je zablokovaný. Zprávy nelze odesílat.',
-                                  'User is blocked. Messages cannot be sent.',
+                                  'Calling... čeká na přijetí',
+                                  'Calling... waiting for answer',
                                 ),
                               ),
                             ),
-                          Expanded(
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: bgColor,
-                                    ),
-                                    child: StreamBuilder<DatabaseEvent>(
-                                stream: messagesRef.onValue,
-                                builder: (context, snapshot) {
-                                  final value = snapshot.data?.snapshot.value;
-                                  if (value is! Map) {
-                                    return Center(
-                                      child: Text(
-                                        AppLanguage.tr(
-                                          context,
-                                          'Napiš první zprávu.',
-                                          'Write the first message.',
-                                        ),
-                                      ),
-                                    );
-                                  }
-
-                                  if (_activeOtherUid == null ||
-                                      _activeOtherUidLoginLower != loginLower) {
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                          _ensureActiveOtherUid().then((_) {
-                                            if (!mounted) return;
-                                            setState(() {});
-                                          });
-                                        });
-                                  }
-
-                                  final now =
-                                      DateTime.now().millisecondsSinceEpoch;
-                                  final items = <Map<String, dynamic>>[];
-                                  for (final e in value.entries) {
-                                    if (e.value is! Map) continue;
-                                    final msg = Map<String, dynamic>.from(
-                                      e.value as Map,
-                                    );
-                                    msg['__key'] = e.key.toString();
-                                    final expiresAt = (msg['expiresAt'] is int)
-                                        ? msg['expiresAt'] as int
-                                        : null;
-                                    if (expiresAt != null && expiresAt <= now) {
-                                      final k = (msg['__key'] ?? '').toString();
-                                      if (k.isNotEmpty &&
-                                          !_ttlDeleting.contains(k)) {
-                                        _ttlDeleting.add(k);
-                                        () async {
-                                          try {
-                                            final peerUid =
-                                                await _ensureActiveOtherUid();
-                                            final myLogin = myGithub.trim();
-                                            final updates = <String, Object?>{
-                                              'messages/${current.uid}/$login/$k':
-                                                  null,
-                                            };
-                                            if (peerUid != null &&
-                                                peerUid.isNotEmpty &&
-                                                myLogin.isNotEmpty) {
-                                              updates['messages/$peerUid/$myLogin/$k'] =
-                                                  null;
-                                            }
-                                            await rtdb().ref().update(updates);
-                                          } catch (_) {
-                                            try {
-                                              await messagesRef
-                                                  .child(k)
-                                                  .remove();
-                                            } catch (_) {}
-                                          } finally {
-                                            _ttlDeleting.remove(k);
-                                          }
-                                        }();
-                                      }
-                                      continue;
-                                    }
-                                    items.add(msg);
-                                  }
-
-                                  items.sort((a, b) {
-                                    final at = (a['createdAt'] is int)
-                                        ? a['createdAt'] as int
-                                        : 0;
-                                    final bt = (b['createdAt'] is int)
-                                        ? b['createdAt'] as int
-                                        : 0;
-                                    return at.compareTo(bt);
-                                  });
-
-                                  final displayItems = <Map<String, dynamic>>[
-                                    ...items,
-                                    ..._localNotesForChat(
-                                      isGroup: false,
-                                      chatId: login,
-                                    ),
-                                  ];
-                                  displayItems.sort((a, b) {
-                                    final at = (a['createdAt'] is int)
-                                        ? a['createdAt'] as int
-                                        : 0;
-                                    final bt = (b['createdAt'] is int)
-                                        ? b['createdAt'] as int
-                                        : 0;
-                                    return at.compareTo(bt);
-                                  });
-
-                                  final filteredItems = displayItems
-                                      .where(
-                                        (m) => _messageMatchesFind(
-                                          message: m,
-                                          isGroup: false,
-                                          chatId: '',
-                                          dmLoginLower: loginLower,
-                                        ),
-                                      )
-                                      .toList(growable: false);
-
-                                  final latestMessageKey = items.isNotEmpty
-                                      ? (items.last['__key'] ?? '').toString()
-                                      : null;
-                                  _trackChatIncomingForScrollHint(
-                                    chatViewKey: dmChatViewKey,
-                                    totalCount: items.length,
-                                    latestMessageKey: latestMessageKey,
-                                    controller: _dmScrollController,
-                                  );
-
-                                  // After the list rebuilds, scroll to bottom so newest message is visible.
-                                  WidgetsBinding.instance.addPostFrameCallback((
-                                    _,
-                                  ) {
-                                    _autoScrollForChatView(
-                                      controller: _dmScrollController,
-                                      chatViewKey: 'dm:$loginLower',
-                                    );
-                                  });
-
-                                  // Best-effort migration: encrypt old plaintext messages.
-                                  WidgetsBinding.instance.addPostFrameCallback((
-                                    _,
-                                  ) {
-                                    for (final msg in items.take(30)) {
-                                      final k = (msg['__key'] ?? '').toString();
-                                      if (k.isEmpty) continue;
-                                      if (_migrating.contains(k)) continue;
-                                      final pt = (msg['text'] ?? '').toString();
-                                      final hasC =
-                                          ((msg['ciphertext'] ??
-                                                  msg['ct'] ??
-                                                  msg['cipher'])
-                                              ?.toString()
-                                              .isNotEmpty ??
-                                          false);
-                                      final fu = (msg['fromUid'] ?? '')
-                                          .toString();
-                                      if (pt.isEmpty || hasC || fu.isEmpty)
-                                        continue;
-
-                                      _migrating.add(k);
-                                      () async {
-                                        try {
-                                          final otherUid = (fu == current.uid)
-                                              ? (await _ensureActiveOtherUid())
-                                              : fu;
-                                          if (otherUid == null ||
-                                              otherUid.isEmpty)
-                                            return;
-                                          final enc = await E2ee.encryptForUser(
-                                            otherUid: otherUid,
-                                            plaintext: pt,
-                                          );
-                                          await messagesRef.child(k).update({
-                                            ...enc,
-                                            'text': null,
-                                          });
-                                          if (!mounted) return;
-                                          setState(
-                                            () => _decryptedCache[k] = pt,
-                                          );
-                                          PlaintextCache.putDm(
-                                            otherLoginLower: loginLower,
-                                            messageKey: k,
-                                            plaintext: pt,
-                                          );
-                                        } catch (_) {
-                                          // ignore
-                                        } finally {
-                                          _migrating.remove(k);
-                                        }
-                                      }();
-                                    }
-                                  });
-
-                                  // Background warm-up: decrypt & persist ciphertext messages.
-                                  WidgetsBinding.instance.addPostFrameCallback((
-                                    _,
-                                  ) {
-                                    _warmupDmDecryptAll(
-                                      items: items,
-                                      loginLower: loginLower,
-                                      myUid: current.uid,
-                                    );
-                                  });
-
-                                  return ListView.builder(
-                                    controller: _dmScrollController,
-                                    padding: const EdgeInsets.all(12),
-                                    itemCount: filteredItems.length,
-                                    itemBuilder: (context, i) {
-                                      final m = filteredItems[i];
-                                      final prev = i > 0
-                                          ? filteredItems[i - 1]
-                                          : null;
-                                      final isLocalSystem =
-                                        m['__localSystem'] == true;
-                                      final key = (m['__key'] ?? '').toString();
-                                      final messageScopedKey =
-                                          _scopedMessageKey(
-                                            isGroup: false,
-                                            chatScope: loginLower,
-                                            messageKey: key,
-                                          );
-                                      final messageItemKey =
-                                          _messageItemGlobalKey(
-                                            isGroup: false,
-                                            chatScope: loginLower,
-                                            messageKey: key,
-                                          );
-                                      final isFlashTarget =
-                                          _flashMessageScopedKey ==
-                                          messageScopedKey;
-                                      final plaintext = (m['text'] ?? '')
-                                          .toString();
-                                      final fromUid = (m['fromUid'] ?? '')
-                                          .toString();
-                                      final isMe =
-                                        !isLocalSystem && fromUid == current.uid;
-                                      final burnAfterRead =
-                                          m['burnAfterRead'] == true;
-                                        final expiresAt =
-                                          (m['expiresAt'] is int)
-                                          ? m['expiresAt'] as int
-                                          : null;
-                                      final hasTtlMarker =
-                                          burnAfterRead || expiresAt != null;
-                                      final createdAt = (m['createdAt'] is int)
-                                          ? m['createdAt'] as int
-                                          : null;
-                                      final prevCreatedAt =
-                                          (prev?['createdAt'] is int)
-                                          ? prev!['createdAt'] as int
-                                          : null;
-                                      final showDayDivider =
-                                          createdAt != null &&
-                                          !_isSameCalendarDay(
-                                            createdAt,
-                                            prevCreatedAt,
-                                          );
-                                      final timeLabel = _formatShortTime(
-                                        createdAt,
-                                      );
-                                        final otherUid = isMe
-                                          ? (_activeOtherUid ?? '')
-                                          : fromUid;
-                                        if (!isLocalSystem &&
-                                          !isMe &&
-                                          otherUid.isNotEmpty &&
-                                          canSend &&
-                                          !blocked) {
-                                        _markDeliveredRead(
-                                          key: key,
-                                          myUid: current.uid,
-                                          otherUid: otherUid,
-                                          myLogin: myGithub.trim(),
-                                          otherLogin: login,
-                                          markRead: true,
-                                        );
-                                      }
-
-                                      final hasCipher =
-                                          ((m['ciphertext'] ??
-                                                  m['ct'] ??
-                                                  m['cipher'])
-                                              ?.toString()
-                                              .isNotEmpty ??
-                                          false);
-                                      String text = plaintext;
-                                      if (text.isEmpty && hasCipher) {
-                                        final persisted =
-                                            PlaintextCache.tryGetDm(
-                                              otherLoginLower: loginLower,
-                                              messageKey: key,
-                                            );
-                                        if (persisted != null &&
-                                            persisted.isNotEmpty) {
-                                          text = persisted;
-                                          _decryptedCache[key] ??= persisted;
-                                        } else {
-                                          text = _decryptedCache[key] ?? '🔒 …';
-                                        }
-
-                                        if (persisted == null &&
-                                            _decryptedCache[key] == null &&
-                                            !_decrypting.contains(key)) {
-                                          _decrypting.add(key);
-                                          () async {
-                                            try {
-                                              final peerUid =
-                                                  await _ensureActiveOtherUid();
-                                              final otherUid = isMe
-                                                  ? (peerUid ?? '')
-                                                  : (fromUid.isNotEmpty
-                                                        ? fromUid
-                                                        : (peerUid ?? ''));
-                                              if (otherUid.isEmpty) return;
-                                              final plain =
-                                                  await E2ee.decryptFromUser(
-                                                    otherUid: otherUid,
-                                                    message: m,
-                                                  );
-                                              if (!mounted) return;
-                                              setState(
-                                                () => _decryptedCache[key] =
-                                                    plain,
-                                              );
-                                              PlaintextCache.putDm(
-                                                otherLoginLower: loginLower,
-                                                messageKey: key,
-                                                plaintext: plain,
-                                              );
-
-                                              if (burnAfterRead && !isMe) {
-                                                if (key.isNotEmpty &&
-                                                    !_ttlDeleting.contains(
-                                                      key,
-                                                    )) {
-                                                  _ttlDeleting.add(key);
-                                                  () async {
-                                                    try {
-                                                      final peerUid =
-                                                          await _ensureActiveOtherUid();
-                                                      final myLogin = myGithub
-                                                          .trim();
-                                                      final updates =
-                                                          <String, Object?>{
-                                                            'messages/${current.uid}/$login/$key':
-                                                                null,
-                                                          };
-                                                      if (peerUid != null &&
-                                                          peerUid.isNotEmpty &&
-                                                          myLogin.isNotEmpty) {
-                                                        updates['messages/$peerUid/$myLogin/$key'] =
-                                                            null;
-                                                      }
-                                                      await rtdb().ref().update(
-                                                        updates,
-                                                      );
-                                                    } catch (_) {
-                                                      try {
-                                                        await messagesRef
-                                                            .child(key)
-                                                            .remove();
-                                                      } catch (_) {}
-                                                    } finally {
-                                                      _ttlDeleting.remove(key);
-                                                    }
-                                                  }();
-                                                }
-                                              }
-                                            } catch (_) {
-                                              // keep placeholder
-                                            } finally {
-                                              _decrypting.remove(key);
-                                            }
-                                          }();
-                                        }
-                                      }
-
-                                      final attachment =
-                                          _AttachmentPayload.tryParse(text);
-                                      final codePayload =
-                                          _CodeMessagePayload.tryParse(text);
-                                      if (attachment != null) {
-                                        final cacheKey = 'dm:$loginLower:$key';
-                                        if (!_attachmentCache.containsKey(
-                                          cacheKey,
-                                        )) {
-                                          _ensureAttachmentCached(
-                                            cacheKey: cacheKey,
-                                            payload: attachment,
-                                          );
-                                        }
-                                      }
-
-                                      final replyToFrom =
-                                          (m['replyToFrom'] ?? '')
-                                              .toString()
-                                              .trim();
-                                        final replyToKey = (m['replyToKey'] ?? '')
-                                          .toString()
-                                          .trim();
-                                      final replyToPreview =
-                                          (m['replyToPreview'] ?? '')
-                                              .toString()
-                                              .trim();
-                                      final hasReply =
-                                          replyToKey.isNotEmpty &&
-                                          replyToPreview.isNotEmpty;
-
-                                        final bubbleKey = isMe
-                                          ? 'outgoing'
-                                          : 'incoming';
-                                      final color = _bubbleColor(
-                                        context,
-                                        bubbleKey,
-                                      );
-                                      final tcolor = _bubbleTextColor(
-                                        context,
-                                        bubbleKey,
-                                      );
-                                        final effectiveColor = isLocalSystem
-                                            ? const Color(0xFFDDE1E6)
-                                            : color;
-                                        final effectiveTextColor = isLocalSystem
-                                            ? const Color(0xFF30363D)
-                                            : tcolor;
-
-                                      final reactions = (m['reactions'] is Map)
-                                          ? (m['reactions'] as Map)
-                                          : null;
-                                      final reactionChips = <Widget>[];
-                                      if (reactions != null) {
-                                        for (final re in reactions.entries) {
-                                          final emoji = re.key.toString();
-                                          final voters = (re.value is Map)
-                                              ? (re.value as Map)
-                                              : null;
-                                          final count = voters?.length ?? 0;
-                                          if (count > 0) {
-                                            reactionChips.add(
-                                              Container(
-                                                margin: const EdgeInsets.only(
-                                                  top: 4,
-                                                  right: 6,
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Theme.of(
-                                                    context,
-                                                  ).colorScheme.surface,
-                                                  borderRadius:
-                                                      BorderRadius.circular(
-                                                        999,
-                                                      ),
-                                                ),
-                                                child: Text(
-                                                  '$emoji $count',
-                                                  style: TextStyle(
-                                                    fontSize:
-                                                        widget
-                                                            .settings
-                                                            .chatTextSize -
-                                                        4,
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        }
-                                      }
-
-                                      return KeyedSubtree(
-                                        key: messageItemKey,
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 6,
-                                          ),
-                                          child: Column(
-                                          children: [
-                                          if (showDayDivider)
-                                              _dayDivider(context, createdAt),
-                                          GestureDetector(
-                                            behavior:
-                                              HitTestBehavior.translucent,
-                                            onLongPress: (blocked ||
-                                                isLocalSystem)
-                                              ? null
-                                              : () => _showMessageActions(
-                                                isGroup: false,
-                                                chatTarget: login,
-                                                messageKey: key,
-                                                fromLabel: isMe
-                                                  ? myGithub
-                                                  : login,
-                                                text: text,
-                                                rawMessage: m,
-                                                canDeleteForMe: true,
-                                                canDeleteForAll: isMe,
-                                                onDeleteForMe: () async {
-                                                await messagesRef
-                                                  .child(key)
-                                                  .remove();
-                                                },
-                                                onDeleteForAll: isMe
-                                                  ? () async {
-                                                    final peerUid =
-                                                      await _ensureActiveOtherUid();
-                                                    final myLogin =
-                                                      myGithub
-                                                        .trim();
-                                                    final updates =
-                                                      <String, Object?>{
-                                                      'messages/${current.uid}/$login/$key':
-                                                        null,
-                                                      };
-                                                    if (peerUid !=
-                                                        null &&
-                                                      peerUid
-                                                        .isNotEmpty &&
-                                                      myLogin
-                                                        .isNotEmpty) {
-                                                    updates['messages/$peerUid/$myLogin/$key'] =
-                                                      null;
-                                                    }
-                                                    await rtdb()
-                                                      .ref()
-                                                      .update(
-                                                      updates,
-                                                      );
-                                                  }
-                                                  : null,
-                                              ),
-                                            child: Column(
-                                            crossAxisAlignment: isMe
-                                                ? CrossAxisAlignment.end
-                                                : CrossAxisAlignment.start,
-                                            children: [
-                                              if (isLocalSystem)
-                                                Text(
-                                                  AppLanguage.tr(
-                                                    context,
-                                                    'Jen pro tebe',
-                                                    'Only visible to you',
-                                                  ),
-                                                  style: const TextStyle(
-                                                    fontSize: 12,
-                                                    color: Color(0xFF9CA3AF),
-                                                  ),
-                                                ),
-                                              Align(
-                                                alignment: isMe
-                                                    ? Alignment.centerRight
-                                                    : Alignment.centerLeft,
-                                                child: Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 12,
-                                                        vertical: 10,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: effectiveColor,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          14,
-                                                        ),
-                                                    border: Border.all(
-                                                      color: isFlashTarget
-                                                          ? const Color(
-                                                              0xFF58A6FF,
-                                                            )
-                                                          : isLocalSystem
-                                                          ? const Color(
-                                                              0xFFB8C0CC,
-                                                            )
-                                                          : const Color(
-                                                              0x5530363D,
-                                                            ),
-                                                      width: isFlashTarget
-                                                          ? 2
-                                                          : 1,
-                                                    ),
-                                                  ),
-                                                  child: Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      if (isMe &&
-                                                          expiresAt != null &&
-                                                          expiresAt >
-                                                              _ttlUiNowMs)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets.only(
-                                                                bottom: 6,
-                                                              ),
-                                                          child: Text(
-                                                            'TTL: ${_formatTtlRemaining(expiresAt - _ttlUiNowMs)}',
-                                                            style: TextStyle(
-                                                              fontSize: widget
-                                                                      .settings
-                                                                      .chatTextSize -
-                                                                  3,
-                                                              color: isLocalSystem
-                                                                  ? const Color(
-                                                                      0xFF5A6472,
-                                                                    )
-                                                                  : Colors.white70,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w600,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      if (hasReply)
-                                                        InkWell(
-                                                          onTap: () =>
-                                                              _jumpToMessageAndFlash(
-                                                                isGroup: false,
-                                                                chatScope:
-                                                                    loginLower,
-                                                                messageKey:
-                                                                    replyToKey,
-                                                              ),
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                8,
-                                                              ),
-                                                          child: Container(
-                                                            margin:
-                                                                const EdgeInsets.only(
-                                                                  bottom: 8,
-                                                                ),
-                                                            padding:
-                                                                const EdgeInsets.symmetric(
-                                                                  horizontal:
-                                                                      8,
-                                                                  vertical: 6,
-                                                                ),
-                                                            decoration: BoxDecoration(
-                                                              color: Colors
-                                                                  .black26,
-                                                              borderRadius:
-                                                                  BorderRadius.circular(
-                                                                    8,
-                                                                  ),
-                                                              border: Border.all(
-                                                                color: Colors
-                                                                    .white24,
-                                                              ),
-                                                            ),
-                                                            child: Row(
-                                                              mainAxisSize:
-                                                                  MainAxisSize
-                                                                      .min,
-                                                              children: [
-                                                                const Icon(
-                                                                  Icons
-                                                                      .subdirectory_arrow_right,
-                                                                  size: 14,
-                                                                  color: Colors
-                                                                      .white70,
-                                                                ),
-                                                                const SizedBox(
-                                                                  width: 6,
-                                                                ),
-                                                                Flexible(
-                                                                  child: Text(
-                                                                    '${replyToFrom.isNotEmpty ? '@$replyToFrom' : 'Reply'} • $replyToPreview',
-                                                                    maxLines: 2,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                    style: TextStyle(
-                                                                      fontSize:
-                                                                          widget
-                                                                              .settings
-                                                                              .chatTextSize -
-                                                                          2,
-                                                                      color: Colors
-                                                                          .white70,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      if (attachment != null)
-                                                        _attachmentBubble(
-                                                          payload: attachment,
-                                                          cacheKey:
-                                                              'dm:$loginLower:$key',
-                                                          maxWidth:
-                                                              MediaQuery.of(
-                                                                context,
-                                                              ).size.width *
-                                                              0.62,
-                                                            radius: 12,
-                                                        )
-                                                      else if (codePayload !=
-                                                          null)
-                                                        _codePreviewCard(
-                                                          context: context,
-                                                          payload: codePayload,
-                                                          textColor:
-                                                              effectiveTextColor,
-                                                        )
-                                                      else
-                                                        _RichMessageText(
-                                                          text: text,
-                                                          fontSize: widget
-                                                              .settings
-                                                              .chatTextSize,
-                                                          textColor:
-                                                              effectiveTextColor,
-                                                          highlightQuery:
-                                                            _chatFindQuery,
-                                                        ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                              if (reactionChips.isNotEmpty)
-                                                Wrap(
-                                                  alignment: WrapAlignment.end,
-                                                  children: reactionChips,
-                                                ),
-                                              if (timeLabel.isNotEmpty ||
-                                                  isMe ||
-                                                  hasTtlMarker)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                        top: 4,
-                                                      ),
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    mainAxisAlignment: isMe
-                                                        ? MainAxisAlignment.end
-                                                        : MainAxisAlignment
-                                                              .start,
-                                                    children: [
-                                                      if (hasTtlMarker)
-                                                        Icon(
-                                                          Icons
-                                                              .timer_outlined,
-                                                          size: 12,
-                                                          color: Theme.of(
-                                                                context,
-                                                              )
-                                                              .colorScheme
-                                                              .onSurface
-                                                              .withAlpha(
-                                                                (0.65 * 255)
-                                                                    .round(),
-                                                              ),
-                                                        ),
-                                                      if (hasTtlMarker &&
-                                                          timeLabel
-                                                              .isNotEmpty)
-                                                        const SizedBox(
-                                                          width: 4,
-                                                        ),
-                                                      if (timeLabel.isNotEmpty)
-                                                        Text(
-                                                          timeLabel,
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            color: Theme.of(context)
-                                                                .colorScheme
-                                                                .onSurface
-                                                                .withAlpha(
-                                                                  (0.6 * 255)
-                                                                      .round(),
-                                                                ),
-                                                          ),
-                                                        ),
-                                                      if (isMe && !isLocalSystem) ...[
-                                                        if (timeLabel
-                                                            .isNotEmpty)
-                                                          const SizedBox(
-                                                            width: 6,
-                                                          ),
-                                                        _statusChecks(
-                                                          message: m,
-                                                          otherUid:
-                                                              _activeOtherUid,
-                                                          color:
-                                                              Theme.of(context)
-                                                                  .colorScheme
-                                                                  .onSurface
-                                                                  .withAlpha(
-                                                                    (0.7 * 255)
-                                                                        .round(),
-                                                                  ),
-                                                        ),
-                                                      ],
-                                                    ],
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                    },
-                                  );
-                                },
+                            TextButton(
+                              onPressed: () => openActiveDmCallAction(),
+                              child: Text(
+                                AppLanguage.tr(context, 'Zrušit', 'Cancel'),
                               ),
-                                  ),
-                                ),
-                                if ((_pendingNewCountByChat[dmChatViewKey] ??
-                                        0) >
-                                    0)
-                                  Positioned(
-                                    right: 14,
-                                    bottom: 10,
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        borderRadius: BorderRadius.circular(
-                                          999,
-                                        ),
-                                        onTap: () => _scrollToBottomAndClear(
-                                          controller: _dmScrollController,
-                                          chatViewKey: dmChatViewKey,
-                                        ),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 8,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF1F6FEB),
-                                            borderRadius: BorderRadius.circular(
-                                              999,
-                                            ),
-                                            border: Border.all(
-                                              color: const Color(0xFF388BFD),
-                                            ),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              const Icon(
-                                                Icons.keyboard_arrow_down,
-                                                size: 18,
-                                                color: Colors.white,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: const Color(
-                                                    0xFFDA3633,
-                                                  ),
-                                                  borderRadius:
-                                                      BorderRadius.circular(999),
-                                                ),
-                                                child: Text(
-                                                  ((_pendingNewCountByChat[dmChatViewKey] ??
-                                                              0) >
-                                                          99)
-                                                      ? '99+'
-                                                      : '${_pendingNewCountByChat[dmChatViewKey] ?? 0}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_callConnected && hasActiveDmCall)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0E4429),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF2A8C63)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.call, color: Color(0xFF2A8C63)),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    AppLanguage.tr(
+                                      context,
+                                      'Hovor probíhá',
+                                      'Call in progress',
+                                    ),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                              ],
+                                  Text(_callDurationLabel(_callElapsedSeconds)),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: AppLanguage.tr(
+                                context,
+                                'Mikrofon',
+                                'Microphone',
+                              ),
+                              onPressed: () => _toggleDmMic(),
+                              icon: Icon(
+                                _dmMicEnabled ? Icons.mic : Icons.mic_off,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: AppLanguage.tr(
+                                context,
+                                'Reproduktor',
+                                'Speaker',
+                              ),
+                              onPressed: () => _toggleDmSpeaker(),
+                              icon: Icon(
+                                _dmSpeakerEnabled
+                                    ? Icons.volume_up
+                                    : Icons.hearing_disabled,
+                              ),
+                            ),
+                            FilledButton.tonalIcon(
+                              onPressed: () => openActiveDmCallAction(),
+                              icon: const Icon(Icons.call_end),
+                              label: Text(
+                                AppLanguage.tr(context, 'Ukončit', 'End'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // DM žádosti – zobrazené i během chatu
+                  StreamBuilder<DatabaseEvent>(
+                    stream: rtdb().ref('dmRequests/${current.uid}').onValue,
+                    builder: (context, reqSnap) {
+                      final v = reqSnap.data?.snapshot.value;
+                      final m = (v is Map) ? v : null;
+
+                      final items = <Map<String, dynamic>>[];
+                      if (m != null) {
+                        for (final e in m.entries) {
+                          if (e.value is! Map) continue;
+                          final mm = Map<String, dynamic>.from(e.value as Map);
+                          mm['__key'] = e.key.toString();
+                          items.add(mm);
+                        }
+                        items.sort((a, b) {
+                          final at = (a['createdAt'] is int)
+                              ? a['createdAt'] as int
+                              : 0;
+                          final bt = (b['createdAt'] is int)
+                              ? b['createdAt'] as int
+                              : 0;
+                          return bt.compareTo(at);
+                        });
+                      }
+
+                      if (items.isEmpty) return const SizedBox.shrink();
+
+                      Future<void> accept(Map<String, dynamic> req) async {
+                        final fromLogin = (req['fromLogin'] ?? '').toString();
+                        if (fromLogin.trim().isEmpty) return;
+                        try {
+                          await _acceptDmRequest(
+                            myUid: current.uid,
+                            otherLogin: fromLogin,
+                          );
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      }
+
+                      Future<void> reject(Map<String, dynamic> req) async {
+                        final fromLogin = (req['fromLogin'] ?? '').toString();
+                        if (fromLogin.trim().isEmpty) return;
+                        try {
+                          await _rejectDmRequest(
+                            myUid: current.uid,
+                            otherLogin: fromLogin,
+                          );
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      }
+
+                      return Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.mail_lock_outlined),
+                            title: Text(
+                              AppLanguage.tr(
+                                context,
+                                'Žádosti o chat',
+                                'Chat requests',
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${AppLanguage.tr(context, 'Čeká', 'Pending')}: ${items.length}',
                             ),
                           ),
-                          if (!blocked &&
-                              _activeOtherUid != null &&
-                              _activeOtherUid!.isNotEmpty)
-                            ((_activeOtherUid != null && _activeOtherUid != current.uid)
-                                ? StreamBuilder<DatabaseEvent>(
-                                    stream: rtdb()
-                                        .ref(
-                                          'typing/${_activeOtherUid!}/${current.uid}',
-                                        )
-                                        .onValue,
-                                    builder: (context, tSnap) {
-                                      final tval = tSnap.data?.snapshot.value;
-                                      final typing = (tval is Map)
-                                          ? (tval['typing'] == true)
-                                          : false;
-                                      if (!typing) return const SizedBox.shrink();
-                                      return Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                          vertical: 6,
-                                        ),
-                                        child: Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              _typingPill(),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                '${AppLanguage.tr(context, 'Píše', 'Typing')} @$login',
-                                                style: TextStyle(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurface
-                                                      .withAlpha((0.6 * 255).round()),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  )
-                                : const SizedBox.shrink()),
-                          if (_replyToPreview != null &&
-                              _replyToPreview!.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                              child: Container(
+                          ...items.map((req) {
+                            final fromLogin = (req['fromLogin'] ?? '')
+                                .toString();
+                            final fromUid = (req['fromUid'] ?? '').toString();
+                            final fromAvatar = (req['fromAvatarUrl'] ?? '')
+                                .toString();
+                            final hasEncryptedText =
+                                ((req['ciphertext'] ??
+                                        req['ct'] ??
+                                        req['cipher'])
+                                    ?.toString()
+                                    .isNotEmpty ??
+                                false);
+                            return ListTile(
+                              leading: fromUid.isNotEmpty
+                                  ? _AvatarWithPresenceDot(
+                                      uid: fromUid,
+                                      avatarUrl: fromAvatar,
+                                      radius: 18,
+                                    )
+                                  : CircleAvatar(
+                                      radius: 18,
+                                      backgroundImage: fromAvatar.isNotEmpty
+                                          ? NetworkImage(fromAvatar)
+                                          : null,
+                                      child: fromAvatar.isEmpty
+                                          ? const Icon(Icons.person, size: 18)
+                                          : null,
+                                    ),
+                              title: Text('@$fromLogin'),
+                              subtitle: hasEncryptedText
+                                  ? Text(
+                                      AppLanguage.tr(
+                                        context,
+                                        'Zpráva: 🔒 (šifrovaně)',
+                                        'Message: 🔒 (encrypted)',
+                                      ),
+                                    )
+                                  : Text(
+                                      AppLanguage.tr(
+                                        context,
+                                        'Invajt do privátu',
+                                        'Private chat invite',
+                                      ),
+                                    ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.close),
+                                    onPressed: () => reject(req),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.check),
+                                    onPressed: () => accept(req),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                          const Divider(height: 1),
+                        ],
+                      );
+                    },
+                  ),
+                  StreamBuilder<DatabaseEvent>(
+                    stream: blockedRef.onValue,
+                    builder: (context, bSnap) {
+                      final blocked = bSnap.data?.snapshot.value == true;
+
+                      final canSend = true;
+
+                      return Expanded(
+                        child: Column(
+                          children: [
+                            if (_chatFindQuery.isNotEmpty)
+                              Container(
                                 width: double.infinity,
+                                margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
+                                  horizontal: 12,
                                   vertical: 8,
                                 ),
                                 decoration: BoxDecoration(
@@ -23943,279 +23617,1421 @@ class _ChatsTabState extends State<_ChatsTab>
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(
-                                      Icons.subdirectory_arrow_right,
-                                      size: 16,
-                                    ),
+                                    const Icon(Icons.search, size: 16),
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
-                                        '@${_replyToFrom ?? ''} • ${_replyToPreview ?? ''}',
-                                        maxLines: 2,
+                                        '${AppLanguage.tr(context, 'Filtr', 'Filter')}: $_chatFindQuery',
+                                        maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                        ),
                                       ),
                                     ),
                                     IconButton(
-                                      icon: const Icon(Icons.close, size: 18),
-                                      onPressed: _clearReplyTarget,
                                       tooltip: AppLanguage.tr(
                                         context,
-                                        'Zrušit odpověď',
-                                        'Cancel reply',
+                                        'Vyčistit filtr',
+                                        'Clear filter',
                                       ),
+                                      onPressed: () {
+                                        setState(() => _chatFindQuery = '');
+                                      },
+                                      icon: const Icon(Icons.close, size: 18),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (blocked)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                color: Theme.of(context).colorScheme.surface,
+                                child: Text(
+                                  AppLanguage.tr(
+                                    context,
+                                    'Uživatel je zablokovaný. Zprávy nelze odesílat.',
+                                    'User is blocked. Messages cannot be sent.',
+                                  ),
+                                ),
+                              ),
+                            Expanded(
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: Container(
+                                      decoration: BoxDecoration(color: bgColor),
+                                      child: StreamBuilder<DatabaseEvent>(
+                                        stream: messagesRef.onValue,
+                                        builder: (context, snapshot) {
+                                          final value =
+                                              snapshot.data?.snapshot.value;
+                                          if (value is! Map) {
+                                            return Center(
+                                              child: Text(
+                                                AppLanguage.tr(
+                                                  context,
+                                                  'Napiš první zprávu.',
+                                                  'Write the first message.',
+                                                ),
+                                              ),
+                                            );
+                                          }
+
+                                          if (_activeOtherUid == null ||
+                                              _activeOtherUidLoginLower !=
+                                                  loginLower) {
+                                            WidgetsBinding.instance
+                                                .addPostFrameCallback((_) {
+                                                  _ensureActiveOtherUid().then((
+                                                    _,
+                                                  ) {
+                                                    if (!mounted) return;
+                                                    setState(() {});
+                                                  });
+                                                });
+                                          }
+
+                                          final now = DateTime.now()
+                                              .millisecondsSinceEpoch;
+                                          final items =
+                                              <Map<String, dynamic>>[];
+                                          for (final e in value.entries) {
+                                            if (e.value is! Map) continue;
+                                            final msg =
+                                                Map<String, dynamic>.from(
+                                                  e.value as Map,
+                                                );
+                                            msg['__key'] = e.key.toString();
+                                            final expiresAt =
+                                                (msg['expiresAt'] is int)
+                                                ? msg['expiresAt'] as int
+                                                : null;
+                                            if (expiresAt != null &&
+                                                expiresAt <= now) {
+                                              final k = (msg['__key'] ?? '')
+                                                  .toString();
+                                              if (k.isNotEmpty &&
+                                                  !_ttlDeleting.contains(k)) {
+                                                _ttlDeleting.add(k);
+                                                () async {
+                                                  try {
+                                                    final peerUid =
+                                                        await _ensureActiveOtherUid();
+                                                    final myLogin = myGithub
+                                                        .trim();
+                                                    final updates =
+                                                        <String, Object?>{
+                                                          'messages/${current.uid}/$login/$k':
+                                                              null,
+                                                        };
+                                                    if (peerUid != null &&
+                                                        peerUid.isNotEmpty &&
+                                                        myLogin.isNotEmpty) {
+                                                      updates['messages/$peerUid/$myLogin/$k'] =
+                                                          null;
+                                                    }
+                                                    await rtdb().ref().update(
+                                                      updates,
+                                                    );
+                                                  } catch (_) {
+                                                    try {
+                                                      await messagesRef
+                                                          .child(k)
+                                                          .remove();
+                                                    } catch (_) {}
+                                                  } finally {
+                                                    _ttlDeleting.remove(k);
+                                                  }
+                                                }();
+                                              }
+                                              continue;
+                                            }
+                                            items.add(msg);
+                                          }
+
+                                          items.sort((a, b) {
+                                            final at = (a['createdAt'] is int)
+                                                ? a['createdAt'] as int
+                                                : 0;
+                                            final bt = (b['createdAt'] is int)
+                                                ? b['createdAt'] as int
+                                                : 0;
+                                            return at.compareTo(bt);
+                                          });
+
+                                          final displayItems =
+                                              <Map<String, dynamic>>[
+                                                ...items,
+                                                ..._localNotesForChat(
+                                                  isGroup: false,
+                                                  chatId: login,
+                                                ),
+                                              ];
+                                          displayItems.sort((a, b) {
+                                            final at = (a['createdAt'] is int)
+                                                ? a['createdAt'] as int
+                                                : 0;
+                                            final bt = (b['createdAt'] is int)
+                                                ? b['createdAt'] as int
+                                                : 0;
+                                            return at.compareTo(bt);
+                                          });
+
+                                          final filteredItems = displayItems
+                                              .where(
+                                                (m) => _messageMatchesFind(
+                                                  message: m,
+                                                  isGroup: false,
+                                                  chatId: '',
+                                                  dmLoginLower: loginLower,
+                                                ),
+                                              )
+                                              .toList(growable: false);
+
+                                          final latestMessageKey =
+                                              items.isNotEmpty
+                                              ? (items.last['__key'] ?? '')
+                                                    .toString()
+                                              : null;
+                                          _trackChatIncomingForScrollHint(
+                                            chatViewKey: dmChatViewKey,
+                                            totalCount: items.length,
+                                            latestMessageKey: latestMessageKey,
+                                            controller: _dmScrollController,
+                                          );
+
+                                          // After the list rebuilds, scroll to bottom so newest message is visible.
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                                _autoScrollForChatView(
+                                                  controller:
+                                                      _dmScrollController,
+                                                  chatViewKey: 'dm:$loginLower',
+                                                );
+                                              });
+
+                                          // Best-effort migration: encrypt old plaintext messages.
+                                          WidgetsBinding.instance.addPostFrameCallback((
+                                            _,
+                                          ) {
+                                            for (final msg in items.take(30)) {
+                                              final k = (msg['__key'] ?? '')
+                                                  .toString();
+                                              if (k.isEmpty) continue;
+                                              if (_migrating.contains(k))
+                                                continue;
+                                              final pt = (msg['text'] ?? '')
+                                                  .toString();
+                                              final hasC =
+                                                  ((msg['ciphertext'] ??
+                                                          msg['ct'] ??
+                                                          msg['cipher'])
+                                                      ?.toString()
+                                                      .isNotEmpty ??
+                                                  false);
+                                              final fu = (msg['fromUid'] ?? '')
+                                                  .toString();
+                                              if (pt.isEmpty ||
+                                                  hasC ||
+                                                  fu.isEmpty)
+                                                continue;
+
+                                              _migrating.add(k);
+                                              () async {
+                                                try {
+                                                  final otherUid =
+                                                      (fu == current.uid)
+                                                      ? (await _ensureActiveOtherUid())
+                                                      : fu;
+                                                  if (otherUid == null ||
+                                                      otherUid.isEmpty)
+                                                    return;
+                                                  final enc =
+                                                      await E2ee.encryptForUser(
+                                                        otherUid: otherUid,
+                                                        plaintext: pt,
+                                                      );
+                                                  await messagesRef
+                                                      .child(k)
+                                                      .update({
+                                                        ...enc,
+                                                        'text': null,
+                                                      });
+                                                  if (!mounted) return;
+                                                  setState(
+                                                    () =>
+                                                        _decryptedCache[k] = pt,
+                                                  );
+                                                  PlaintextCache.putDm(
+                                                    otherLoginLower: loginLower,
+                                                    messageKey: k,
+                                                    plaintext: pt,
+                                                  );
+                                                } catch (_) {
+                                                  // ignore
+                                                } finally {
+                                                  _migrating.remove(k);
+                                                }
+                                              }();
+                                            }
+                                          });
+
+                                          // Background warm-up: decrypt & persist ciphertext messages.
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                                _warmupDmDecryptAll(
+                                                  items: items,
+                                                  loginLower: loginLower,
+                                                  myUid: current.uid,
+                                                );
+                                              });
+
+                                          return ListView.builder(
+                                            controller: _dmScrollController,
+                                            padding: const EdgeInsets.all(12),
+                                            itemCount: filteredItems.length,
+                                            itemBuilder: (context, i) {
+                                              final m = filteredItems[i];
+                                              final prev = i > 0
+                                                  ? filteredItems[i - 1]
+                                                  : null;
+                                              final isLocalSystem =
+                                                  m['__localSystem'] == true;
+                                              final key = (m['__key'] ?? '')
+                                                  .toString();
+                                              final messageScopedKey =
+                                                  _scopedMessageKey(
+                                                    isGroup: false,
+                                                    chatScope: loginLower,
+                                                    messageKey: key,
+                                                  );
+                                              final messageItemKey =
+                                                  _messageItemGlobalKey(
+                                                    isGroup: false,
+                                                    chatScope: loginLower,
+                                                    messageKey: key,
+                                                  );
+                                              final isFlashTarget =
+                                                  _flashMessageScopedKey ==
+                                                  messageScopedKey;
+                                              final plaintext =
+                                                  (m['text'] ?? '').toString();
+                                              final fromUid =
+                                                  (m['fromUid'] ?? '')
+                                                      .toString();
+                                              final isMe =
+                                                  !isLocalSystem &&
+                                                  fromUid == current.uid;
+                                              final burnAfterRead =
+                                                  m['burnAfterRead'] == true;
+                                              final expiresAt =
+                                                  (m['expiresAt'] is int)
+                                                  ? m['expiresAt'] as int
+                                                  : null;
+                                              final hasTtlMarker =
+                                                  burnAfterRead ||
+                                                  expiresAt != null;
+                                              final createdAt =
+                                                  (m['createdAt'] is int)
+                                                  ? m['createdAt'] as int
+                                                  : null;
+                                              final prevCreatedAt =
+                                                  (prev?['createdAt'] is int)
+                                                  ? prev!['createdAt'] as int
+                                                  : null;
+                                              final showDayDivider =
+                                                  createdAt != null &&
+                                                  !_isSameCalendarDay(
+                                                    createdAt,
+                                                    prevCreatedAt,
+                                                  );
+                                              final timeLabel =
+                                                  _formatShortTime(createdAt);
+                                              final otherUid = isMe
+                                                  ? (_activeOtherUid ?? '')
+                                                  : fromUid;
+                                              if (!isLocalSystem &&
+                                                  !isMe &&
+                                                  otherUid.isNotEmpty &&
+                                                  canSend &&
+                                                  !blocked) {
+                                                _markDeliveredRead(
+                                                  key: key,
+                                                  myUid: current.uid,
+                                                  otherUid: otherUid,
+                                                  myLogin: myGithub.trim(),
+                                                  otherLogin: login,
+                                                  markRead: true,
+                                                );
+                                              }
+
+                                              final hasCipher =
+                                                  ((m['ciphertext'] ??
+                                                          m['ct'] ??
+                                                          m['cipher'])
+                                                      ?.toString()
+                                                      .isNotEmpty ??
+                                                  false);
+                                              String text = plaintext;
+                                              if (text.isEmpty && hasCipher) {
+                                                final persisted =
+                                                    PlaintextCache.tryGetDm(
+                                                      otherLoginLower:
+                                                          loginLower,
+                                                      messageKey: key,
+                                                    );
+                                                if (persisted != null &&
+                                                    persisted.isNotEmpty) {
+                                                  text = persisted;
+                                                  _decryptedCache[key] ??=
+                                                      persisted;
+                                                } else {
+                                                  text =
+                                                      _decryptedCache[key] ??
+                                                      '🔒 …';
+                                                }
+
+                                                if (persisted == null &&
+                                                    _decryptedCache[key] ==
+                                                        null &&
+                                                    !_decrypting.contains(
+                                                      key,
+                                                    )) {
+                                                  _decrypting.add(key);
+                                                  () async {
+                                                    try {
+                                                      final peerUid =
+                                                          await _ensureActiveOtherUid();
+                                                      final otherUid = isMe
+                                                          ? (peerUid ?? '')
+                                                          : (fromUid.isNotEmpty
+                                                                ? fromUid
+                                                                : (peerUid ??
+                                                                      ''));
+                                                      if (otherUid.isEmpty)
+                                                        return;
+                                                      final plain =
+                                                          await E2ee.decryptFromUser(
+                                                            otherUid: otherUid,
+                                                            message: m,
+                                                          );
+                                                      if (!mounted) return;
+                                                      setState(
+                                                        () =>
+                                                            _decryptedCache[key] =
+                                                                plain,
+                                                      );
+                                                      PlaintextCache.putDm(
+                                                        otherLoginLower:
+                                                            loginLower,
+                                                        messageKey: key,
+                                                        plaintext: plain,
+                                                      );
+
+                                                      if (burnAfterRead &&
+                                                          !isMe) {
+                                                        if (key.isNotEmpty &&
+                                                            !_ttlDeleting
+                                                                .contains(
+                                                                  key,
+                                                                )) {
+                                                          _ttlDeleting.add(key);
+                                                          () async {
+                                                            try {
+                                                              final peerUid =
+                                                                  await _ensureActiveOtherUid();
+                                                              final myLogin =
+                                                                  myGithub
+                                                                      .trim();
+                                                              final updates =
+                                                                  <
+                                                                    String,
+                                                                    Object?
+                                                                  >{
+                                                                    'messages/${current.uid}/$login/$key':
+                                                                        null,
+                                                                  };
+                                                              if (peerUid !=
+                                                                      null &&
+                                                                  peerUid
+                                                                      .isNotEmpty &&
+                                                                  myLogin
+                                                                      .isNotEmpty) {
+                                                                updates['messages/$peerUid/$myLogin/$key'] =
+                                                                    null;
+                                                              }
+                                                              await rtdb()
+                                                                  .ref()
+                                                                  .update(
+                                                                    updates,
+                                                                  );
+                                                            } catch (_) {
+                                                              try {
+                                                                await messagesRef
+                                                                    .child(key)
+                                                                    .remove();
+                                                              } catch (_) {}
+                                                            } finally {
+                                                              _ttlDeleting
+                                                                  .remove(key);
+                                                            }
+                                                          }();
+                                                        }
+                                                      }
+                                                    } catch (_) {
+                                                      // keep placeholder
+                                                    } finally {
+                                                      _decrypting.remove(key);
+                                                    }
+                                                  }();
+                                                }
+                                              }
+
+                                              final attachment =
+                                                  _AttachmentPayload.tryParse(
+                                                    text,
+                                                  );
+                                              final codePayload =
+                                                  _CodeMessagePayload.tryParse(
+                                                    text,
+                                                  );
+                                              if (attachment != null) {
+                                                final cacheKey =
+                                                    'dm:$loginLower:$key';
+                                                if (!_attachmentCache
+                                                    .containsKey(cacheKey)) {
+                                                  _ensureAttachmentCached(
+                                                    cacheKey: cacheKey,
+                                                    payload: attachment,
+                                                  );
+                                                }
+                                              }
+
+                                              final replyToFrom =
+                                                  (m['replyToFrom'] ?? '')
+                                                      .toString()
+                                                      .trim();
+                                              final replyToKey =
+                                                  (m['replyToKey'] ?? '')
+                                                      .toString()
+                                                      .trim();
+                                              final replyToPreview =
+                                                  (m['replyToPreview'] ?? '')
+                                                      .toString()
+                                                      .trim();
+                                              final hasReply =
+                                                  replyToKey.isNotEmpty &&
+                                                  replyToPreview.isNotEmpty;
+
+                                              final bubbleKey = isMe
+                                                  ? 'outgoing'
+                                                  : 'incoming';
+                                              final color = _bubbleColor(
+                                                context,
+                                                bubbleKey,
+                                              );
+                                              final tcolor = _bubbleTextColor(
+                                                context,
+                                                bubbleKey,
+                                              );
+                                              final effectiveColor =
+                                                  isLocalSystem
+                                                  ? const Color(0xFFDDE1E6)
+                                                  : color;
+                                              final effectiveTextColor =
+                                                  isLocalSystem
+                                                  ? const Color(0xFF30363D)
+                                                  : tcolor;
+
+                                              final reactions =
+                                                  (m['reactions'] is Map)
+                                                  ? (m['reactions'] as Map)
+                                                  : null;
+                                              final reactionChips = <Widget>[];
+                                              if (reactions != null) {
+                                                for (final re
+                                                    in reactions.entries) {
+                                                  final emoji = re.key
+                                                      .toString();
+                                                  final voters =
+                                                      (re.value is Map)
+                                                      ? (re.value as Map)
+                                                      : null;
+                                                  final count =
+                                                      voters?.length ?? 0;
+                                                  if (count > 0) {
+                                                    reactionChips.add(
+                                                      Container(
+                                                        margin:
+                                                            const EdgeInsets.only(
+                                                              top: 4,
+                                                              right: 6,
+                                                            ),
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 8,
+                                                              vertical: 4,
+                                                            ),
+                                                        decoration: BoxDecoration(
+                                                          color: Theme.of(
+                                                            context,
+                                                          ).colorScheme.surface,
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                999,
+                                                              ),
+                                                        ),
+                                                        child: Text(
+                                                          '$emoji $count',
+                                                          style: TextStyle(
+                                                            fontSize:
+                                                                widget
+                                                                    .settings
+                                                                    .chatTextSize -
+                                                                4,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              }
+
+                                              return KeyedSubtree(
+                                                key: messageItemKey,
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        vertical: 6,
+                                                      ),
+                                                  child: Column(
+                                                    children: [
+                                                      if (showDayDivider)
+                                                        _dayDivider(
+                                                          context,
+                                                          createdAt,
+                                                        ),
+                                                      GestureDetector(
+                                                        behavior:
+                                                            HitTestBehavior
+                                                                .translucent,
+                                                        onLongPress:
+                                                            (blocked ||
+                                                                isLocalSystem)
+                                                            ? null
+                                                            : () => _showMessageActions(
+                                                                isGroup: false,
+                                                                chatTarget:
+                                                                    login,
+                                                                messageKey: key,
+                                                                fromLabel: isMe
+                                                                    ? myGithub
+                                                                    : login,
+                                                                text: text,
+                                                                rawMessage: m,
+                                                                canDeleteForMe:
+                                                                    true,
+                                                                canDeleteForAll:
+                                                                    isMe,
+                                                                onDeleteForMe: () async {
+                                                                  await messagesRef
+                                                                      .child(
+                                                                        key,
+                                                                      )
+                                                                      .remove();
+                                                                },
+                                                                onDeleteForAll:
+                                                                    isMe
+                                                                    ? () async {
+                                                                        final peerUid =
+                                                                            await _ensureActiveOtherUid();
+                                                                        final myLogin =
+                                                                            myGithub.trim();
+                                                                        final updates =
+                                                                            <
+                                                                              String,
+                                                                              Object?
+                                                                            >{
+                                                                              'messages/${current.uid}/$login/$key': null,
+                                                                            };
+                                                                        if (peerUid !=
+                                                                                null &&
+                                                                            peerUid.isNotEmpty &&
+                                                                            myLogin.isNotEmpty) {
+                                                                          updates['messages/$peerUid/$myLogin/$key'] =
+                                                                              null;
+                                                                        }
+                                                                        await rtdb()
+                                                                            .ref()
+                                                                            .update(
+                                                                              updates,
+                                                                            );
+                                                                      }
+                                                                    : null,
+                                                              ),
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              isMe
+                                                              ? CrossAxisAlignment
+                                                                    .end
+                                                              : CrossAxisAlignment
+                                                                    .start,
+                                                          children: [
+                                                            if (isLocalSystem)
+                                                              Text(
+                                                                AppLanguage.tr(
+                                                                  context,
+                                                                  'Jen pro tebe',
+                                                                  'Only visible to you',
+                                                                ),
+                                                                style: const TextStyle(
+                                                                  fontSize: 12,
+                                                                  color: Color(
+                                                                    0xFF9CA3AF,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            Align(
+                                                              alignment: isMe
+                                                                  ? Alignment
+                                                                        .centerRight
+                                                                  : Alignment
+                                                                        .centerLeft,
+                                                              child: Container(
+                                                                padding:
+                                                                    const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          12,
+                                                                      vertical:
+                                                                          10,
+                                                                    ),
+                                                                decoration: BoxDecoration(
+                                                                  color:
+                                                                      effectiveColor,
+                                                                  borderRadius:
+                                                                      BorderRadius.circular(
+                                                                        14,
+                                                                      ),
+                                                                  border: Border.all(
+                                                                    color:
+                                                                        isFlashTarget
+                                                                        ? const Color(
+                                                                            0xFF58A6FF,
+                                                                          )
+                                                                        : isLocalSystem
+                                                                        ? const Color(
+                                                                            0xFFB8C0CC,
+                                                                          )
+                                                                        : const Color(
+                                                                            0x5530363D,
+                                                                          ),
+                                                                    width:
+                                                                        isFlashTarget
+                                                                        ? 2
+                                                                        : 1,
+                                                                  ),
+                                                                ),
+                                                                child: Column(
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .start,
+                                                                  children: [
+                                                                    if (isMe &&
+                                                                        expiresAt !=
+                                                                            null &&
+                                                                        expiresAt >
+                                                                            _ttlUiNowMs)
+                                                                      Padding(
+                                                                        padding: const EdgeInsets.only(
+                                                                          bottom:
+                                                                              6,
+                                                                        ),
+                                                                        child: Text(
+                                                                          'TTL: ${_formatTtlRemaining(expiresAt - _ttlUiNowMs)}',
+                                                                          style: TextStyle(
+                                                                            fontSize:
+                                                                                widget.settings.chatTextSize -
+                                                                                3,
+                                                                            color:
+                                                                                isLocalSystem
+                                                                                ? const Color(
+                                                                                    0xFF5A6472,
+                                                                                  )
+                                                                                : Colors.white70,
+                                                                            fontWeight:
+                                                                                FontWeight.w600,
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                    if (hasReply)
+                                                                      InkWell(
+                                                                        onTap: () => _jumpToMessageAndFlash(
+                                                                          isGroup:
+                                                                              false,
+                                                                          chatScope:
+                                                                              loginLower,
+                                                                          messageKey:
+                                                                              replyToKey,
+                                                                        ),
+                                                                        borderRadius:
+                                                                            BorderRadius.circular(
+                                                                              8,
+                                                                            ),
+                                                                        child: Container(
+                                                                          margin: const EdgeInsets.only(
+                                                                            bottom:
+                                                                                8,
+                                                                          ),
+                                                                          padding: const EdgeInsets.symmetric(
+                                                                            horizontal:
+                                                                                8,
+                                                                            vertical:
+                                                                                6,
+                                                                          ),
+                                                                          decoration: BoxDecoration(
+                                                                            color:
+                                                                                Colors.black26,
+                                                                            borderRadius: BorderRadius.circular(
+                                                                              8,
+                                                                            ),
+                                                                            border: Border.all(
+                                                                              color: Colors.white24,
+                                                                            ),
+                                                                          ),
+                                                                          child: Row(
+                                                                            mainAxisSize:
+                                                                                MainAxisSize.min,
+                                                                            children: [
+                                                                              const Icon(
+                                                                                Icons.subdirectory_arrow_right,
+                                                                                size: 14,
+                                                                                color: Colors.white70,
+                                                                              ),
+                                                                              const SizedBox(
+                                                                                width: 6,
+                                                                              ),
+                                                                              Flexible(
+                                                                                child: Text(
+                                                                                  '${replyToFrom.isNotEmpty ? '@$replyToFrom' : 'Reply'} • $replyToPreview',
+                                                                                  maxLines: 2,
+                                                                                  overflow: TextOverflow.ellipsis,
+                                                                                  style: TextStyle(
+                                                                                    fontSize:
+                                                                                        widget.settings.chatTextSize -
+                                                                                        2,
+                                                                                    color: Colors.white70,
+                                                                                  ),
+                                                                                ),
+                                                                              ),
+                                                                            ],
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                    if (attachment !=
+                                                                        null)
+                                                                      _attachmentBubble(
+                                                                        payload:
+                                                                            attachment,
+                                                                        cacheKey:
+                                                                            'dm:$loginLower:$key',
+                                                                        maxWidth:
+                                                                            MediaQuery.of(
+                                                                              context,
+                                                                            ).size.width *
+                                                                            0.62,
+                                                                        radius:
+                                                                            12,
+                                                                      )
+                                                                    else if (codePayload !=
+                                                                        null)
+                                                                      _codePreviewCard(
+                                                                        context:
+                                                                            context,
+                                                                        payload:
+                                                                            codePayload,
+                                                                        textColor:
+                                                                            effectiveTextColor,
+                                                                      )
+                                                                    else
+                                                                      _RichMessageText(
+                                                                        text:
+                                                                            text,
+                                                                        fontSize: widget
+                                                                            .settings
+                                                                            .chatTextSize,
+                                                                        textColor:
+                                                                            effectiveTextColor,
+                                                                        highlightQuery:
+                                                                            _chatFindQuery,
+                                                                      ),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            if (reactionChips
+                                                                .isNotEmpty)
+                                                              Wrap(
+                                                                alignment:
+                                                                    WrapAlignment
+                                                                        .end,
+                                                                children:
+                                                                    reactionChips,
+                                                              ),
+                                                            if (timeLabel
+                                                                    .isNotEmpty ||
+                                                                isMe ||
+                                                                hasTtlMarker)
+                                                              Padding(
+                                                                padding:
+                                                                    const EdgeInsets.only(
+                                                                      top: 4,
+                                                                    ),
+                                                                child: Row(
+                                                                  mainAxisSize:
+                                                                      MainAxisSize
+                                                                          .min,
+                                                                  mainAxisAlignment:
+                                                                      isMe
+                                                                      ? MainAxisAlignment
+                                                                            .end
+                                                                      : MainAxisAlignment
+                                                                            .start,
+                                                                  children: [
+                                                                    if (hasTtlMarker)
+                                                                      Icon(
+                                                                        Icons
+                                                                            .timer_outlined,
+                                                                        size:
+                                                                            12,
+                                                                        color:
+                                                                            Theme.of(
+                                                                              context,
+                                                                            ).colorScheme.onSurface.withAlpha(
+                                                                              (0.65 *
+                                                                                      255)
+                                                                                  .round(),
+                                                                            ),
+                                                                      ),
+                                                                    if (hasTtlMarker &&
+                                                                        timeLabel
+                                                                            .isNotEmpty)
+                                                                      const SizedBox(
+                                                                        width:
+                                                                            4,
+                                                                      ),
+                                                                    if (timeLabel
+                                                                        .isNotEmpty)
+                                                                      Text(
+                                                                        timeLabel,
+                                                                        style: TextStyle(
+                                                                          fontSize:
+                                                                              11,
+                                                                          color:
+                                                                              Theme.of(
+                                                                                context,
+                                                                              ).colorScheme.onSurface.withAlpha(
+                                                                                (0.6 *
+                                                                                        255)
+                                                                                    .round(),
+                                                                              ),
+                                                                        ),
+                                                                      ),
+                                                                    if (isMe &&
+                                                                        !isLocalSystem) ...[
+                                                                      if (timeLabel
+                                                                          .isNotEmpty)
+                                                                        const SizedBox(
+                                                                          width:
+                                                                              6,
+                                                                        ),
+                                                                      _statusChecks(
+                                                                        message:
+                                                                            m,
+                                                                        otherUid:
+                                                                            _activeOtherUid,
+                                                                        color:
+                                                                            Theme.of(
+                                                                              context,
+                                                                            ).colorScheme.onSurface.withAlpha(
+                                                                              (0.7 *
+                                                                                      255)
+                                                                                  .round(),
+                                                                            ),
+                                                                      ),
+                                                                    ],
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  if ((_pendingNewCountByChat[dmChatViewKey] ??
+                                          0) >
+                                      0)
+                                    Positioned(
+                                      right: 14,
+                                      bottom: 10,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          onTap: () => _scrollToBottomAndClear(
+                                            controller: _dmScrollController,
+                                            chatViewKey: dmChatViewKey,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF1F6FEB),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                              border: Border.all(
+                                                color: const Color(0xFF388BFD),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(
+                                                  Icons.keyboard_arrow_down,
+                                                  size: 18,
+                                                  color: Colors.white,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(
+                                                      0xFFDA3633,
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          999,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    ((_pendingNewCountByChat[dmChatViewKey] ??
+                                                                0) >
+                                                            99)
+                                                        ? '99+'
+                                                        : '${_pendingNewCountByChat[dmChatViewKey] ?? 0}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (!blocked &&
+                                _activeOtherUid != null &&
+                                _activeOtherUid!.isNotEmpty)
+                              ((_activeOtherUid != null &&
+                                      _activeOtherUid != current.uid)
+                                  ? StreamBuilder<DatabaseEvent>(
+                                      stream: rtdb()
+                                          .ref(
+                                            'typing/${_activeOtherUid!}/${current.uid}',
+                                          )
+                                          .onValue,
+                                      builder: (context, tSnap) {
+                                        final tval = tSnap.data?.snapshot.value;
+                                        final typing = (tval is Map)
+                                            ? (tval['typing'] == true)
+                                            : false;
+                                        if (!typing)
+                                          return const SizedBox.shrink();
+                                        return Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 6,
+                                          ),
+                                          child: Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                _typingPill(),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  '${AppLanguage.tr(context, 'Píše', 'Typing')} @$login',
+                                                  style: TextStyle(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurface
+                                                        .withAlpha(
+                                                          (0.6 * 255).round(),
+                                                        ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    )
+                                  : const SizedBox.shrink()),
+                            if (_replyToPreview != null &&
+                                _replyToPreview!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  0,
+                                  12,
+                                  4,
+                                ),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surface,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.subdirectory_arrow_right,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          '@${_replyToFrom ?? ''} • ${_replyToPreview ?? ''}',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.close, size: 18),
+                                        onPressed: _clearReplyTarget,
+                                        tooltip: AppLanguage.tr(
+                                          context,
+                                          'Zrušit odpověď',
+                                          'Cancel reply',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (!blocked &&
+                                _activeOtherUid != null &&
+                                _activeOtherUid!.isNotEmpty &&
+                                _peerHasPublishedKey[loginLower] == false &&
+                                !_inlineKeyRequestSent.contains(loginLower))
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  0,
+                                  12,
+                                  8,
+                                ),
+                                child: FilledButton.tonalIcon(
+                                  onPressed:
+                                      (_sendingInlineKeyRequest ||
+                                          myGithub.trim().isEmpty)
+                                      ? null
+                                      : () async {
+                                          setState(
+                                            () =>
+                                                _sendingInlineKeyRequest = true,
+                                          );
+                                          try {
+                                            await _sendDmRequest(
+                                              myUid: current.uid,
+                                              myLogin: myGithub.trim(),
+                                              otherUid: _activeOtherUid!,
+                                              otherLogin: login,
+                                              messageText: AppLanguage.tr(
+                                                context,
+                                                '🔐 Prosím povol sdílení E2EE klíče, ať se naváže šifrovaná komunikace.',
+                                                '🔐 Please allow E2EE key sharing so encrypted communication can start.',
+                                              ),
+                                            );
+                                            if (!mounted) return;
+                                            setState(() {
+                                              _inlineKeyRequestSent.add(
+                                                loginLower,
+                                              );
+                                            });
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  dmAccepted
+                                                      ? AppLanguage.tr(
+                                                          context,
+                                                          'Žádost o sdílení klíče odeslána.',
+                                                          'Key sharing request sent.',
+                                                        )
+                                                      : AppLanguage.tr(
+                                                          context,
+                                                          'Invajt + žádost o sdílení klíče odeslána.',
+                                                          'Invite + key sharing request sent.',
+                                                        ),
+                                                ),
+                                              ),
+                                            );
+                                          } catch (e) {
+                                            if (!mounted) return;
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
+                                                ),
+                                              ),
+                                            );
+                                          } finally {
+                                            if (mounted)
+                                              setState(
+                                                () => _sendingInlineKeyRequest =
+                                                    false,
+                                              );
+                                          }
+                                        },
+                                  icon: _sendingInlineKeyRequest
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.key_outlined),
+                                  label: Text(
+                                    dmAccepted
+                                        ? AppLanguage.tr(
+                                            context,
+                                            'Poprosit sdílet klíč',
+                                            'Ask to share key',
+                                          )
+                                        : AppLanguage.tr(
+                                            context,
+                                            'Poslat invajt + požádat o klíč',
+                                            'Send invite + ask for key',
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            if (!blocked &&
+                                canSend &&
+                                _slashSuggestions.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  0,
+                                  12,
+                                  8,
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surface,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
+                                    ),
+                                  ),
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxHeight: 210,
+                                    ),
+                                    child: ListView(
+                                      shrinkWrap: true,
+                                      padding: EdgeInsets.zero,
+                                      children: _slashSuggestions
+                                          .map(
+                                            (command) => ListTile(
+                                              leading: const Icon(
+                                                Icons.terminal,
+                                                size: 16,
+                                              ),
+                                              title: Text('/$command'),
+                                              subtitle: Text(
+                                                _slashCommands[command] ?? '',
+                                              ),
+                                              onTap: () =>
+                                                  _applySlashSuggestion(
+                                                    command,
+                                                  ),
+                                            ),
+                                          )
+                                          .toList(growable: false),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                              child: Container(
+                                padding: const EdgeInsets.fromLTRB(
+                                  10,
+                                  10,
+                                  10,
+                                  8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF161B22),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(0x5530363D),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _messageController,
+                                        decoration: InputDecoration(
+                                          labelText: AppLanguage.tr(
+                                            context,
+                                            'Zpráva / Markdown',
+                                            'Message / Markdown',
+                                          ),
+                                        ),
+                                        enabled: !blocked && canSend,
+                                        minLines: 1,
+                                        maxLines: 6,
+                                        onSubmitted: (!blocked && canSend)
+                                            ? (_) => _send()
+                                            : null,
+                                        onChanged: (!blocked && canSend)
+                                            ? (text) {
+                                                if (_pendingCodePayload !=
+                                                        null &&
+                                                    !text.trim().startsWith(
+                                                      '<> kód',
+                                                    )) {
+                                                  setState(
+                                                    () => _pendingCodePayload =
+                                                        null,
+                                                  );
+                                                }
+                                                _onTypingChanged(text);
+                                                _updateSlashSuggestions();
+                                              }
+                                            : null,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      tooltip: AppLanguage.tr(
+                                        context,
+                                        'Více',
+                                        'More',
+                                      ),
+                                      onPressed: (!blocked && canSend)
+                                          ? () async {
+                                              final value =
+                                                  await _showComposerActionsSheet(
+                                                    context,
+                                                  );
+                                              if (value == null) return;
+                                              if (value == 'image') {
+                                                final otherUid =
+                                                    await _ensureActiveOtherUid();
+                                                if (otherUid == null ||
+                                                    otherUid.isEmpty)
+                                                  return;
+                                                await _sendImageDm(
+                                                  current: current,
+                                                  login: login,
+                                                  myLogin: myGithub.trim(),
+                                                  otherUid: otherUid,
+                                                  canSend: canSend,
+                                                );
+                                                return;
+                                              }
+                                              if (value == 'code') {
+                                                await _insertCodeBlockTemplate();
+                                                return;
+                                              }
+                                              if (value == 'ttl_config') {
+                                                final picked =
+                                                    await _showTtlConfigDialog(
+                                                      context: context,
+                                                      currentMode: _dmTtlMode,
+                                                    );
+                                                if (picked != null && mounted) {
+                                                  setState(
+                                                    () => _dmTtlMode = picked,
+                                                  );
+                                                }
+                                              }
+                                            }
+                                          : null,
+                                      icon: const Icon(Icons.more_vert),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.send),
+                                      onPressed: (!blocked && canSend)
+                                          ? _send
+                                          : null,
                                     ),
                                   ],
                                 ),
                               ),
                             ),
-                          if (!blocked &&
-                              _activeOtherUid != null &&
-                              _activeOtherUid!.isNotEmpty &&
-                              _peerHasPublishedKey[loginLower] == false &&
-                              !_inlineKeyRequestSent.contains(loginLower))
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                              child: FilledButton.tonalIcon(
-                                onPressed:
-                                    (_sendingInlineKeyRequest ||
-                                        myGithub.trim().isEmpty)
-                                    ? null
-                                    : () async {
-                                        setState(
-                                          () => _sendingInlineKeyRequest = true,
-                                        );
-                                        try {
-                                          await _sendDmRequest(
-                                            myUid: current.uid,
-                                            myLogin: myGithub.trim(),
-                                            otherUid: _activeOtherUid!,
-                                            otherLogin: login,
-                                            messageText: AppLanguage.tr(
-                                              context,
-                                              '🔐 Prosím povol sdílení E2EE klíče, ať se naváže šifrovaná komunikace.',
-                                              '🔐 Please allow E2EE key sharing so encrypted communication can start.',
-                                            ),
-                                          );
-                                          if (!mounted) return;
-                                          setState(() {
-                                            _inlineKeyRequestSent.add(
-                                              loginLower,
-                                            );
-                                          });
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                dmAccepted
-                                                    ? AppLanguage.tr(
-                                                        context,
-                                                        'Žádost o sdílení klíče odeslána.',
-                                                        'Key sharing request sent.',
-                                                      )
-                                                    : AppLanguage.tr(
-                                                        context,
-                                                        'Invajt + žádost o sdílení klíče odeslána.',
-                                                        'Invite + key sharing request sent.',
-                                                      ),
-                                              ),
-                                            ),
-                                          );
-                                        } catch (e) {
-                                          if (!mounted) return;
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                '${AppLanguage.tr(context, 'Chyba', 'Error')}: $e',
-                                              ),
-                                            ),
-                                          );
-                                        } finally {
-                                          if (mounted)
-                                            setState(
-                                              () => _sendingInlineKeyRequest =
-                                                  false,
-                                            );
-                                        }
-                                      },
-                                icon: _sendingInlineKeyRequest
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.key_outlined),
-                                label: Text(
-                                  dmAccepted
-                                      ? AppLanguage.tr(
-                                          context,
-                                          'Poprosit sdílet klíč',
-                                          'Ask to share key',
-                                        )
-                                      : AppLanguage.tr(
-                                          context,
-                                          'Poslat invajt + požádat o klíč',
-                                          'Send invite + ask for key',
-                                        ),
-                                ),
-                              ),
-                            ),
-                          if (!blocked && canSend && _slashSuggestions.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.surface,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.outlineVariant,
-                                  ),
-                                ),
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxHeight: 210,
-                                  ),
-                                  child: ListView(
-                                    shrinkWrap: true,
-                                    padding: EdgeInsets.zero,
-                                    children: _slashSuggestions
-                                        .map(
-                                          (command) => ListTile(
-                                            leading: const Icon(
-                                              Icons.terminal,
-                                              size: 16,
-                                            ),
-                                            title: Text('/$command'),
-                                            subtitle: Text(
-                                              _slashCommands[command] ?? '',
-                                            ),
-                                            onTap: () =>
-                                                _applySlashSuggestion(command),
-                                          ),
-                                        )
-                                        .toList(growable: false),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                            child: Container(
-                              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF161B22),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0x5530363D)),
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _messageController,
-                                      decoration: InputDecoration(
-                                        labelText: AppLanguage.tr(
-                                          context,
-                                          'Zpráva / Markdown',
-                                          'Message / Markdown',
-                                        ),
-                                      ),
-                                      enabled: !blocked && canSend,
-                                      minLines: 1,
-                                      maxLines: 6,
-                                      onSubmitted: (!blocked && canSend)
-                                          ? (_) => _send()
-                                          : null,
-                                      onChanged: (!blocked && canSend)
-                                          ? (text) {
-                                              if (_pendingCodePayload != null &&
-                                                  !text.trim().startsWith(
-                                                    '<> kód',
-                                                  )) {
-                                                setState(
-                                                  () =>
-                                                      _pendingCodePayload = null,
-                                                );
-                                              }
-                                              _onTypingChanged(text);
-                                              _updateSlashSuggestions();
-                                            }
-                                          : null,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  IconButton(
-                                  tooltip: AppLanguage.tr(
-                                    context,
-                                    'Více',
-                                    'More',
-                                  ),
-                                  onPressed: (!blocked && canSend)
-                                      ? () async {
-                                          final value =
-                                              await _showComposerActionsSheet(
-                                                context,
-                                              );
-                                          if (value == null) return;
-                                    if (value == 'image') {
-                                      final otherUid =
-                                          await _ensureActiveOtherUid();
-                                      if (otherUid == null || otherUid.isEmpty)
-                                        return;
-                                      await _sendImageDm(
-                                        current: current,
-                                        login: login,
-                                        myLogin: myGithub.trim(),
-                                        otherUid: otherUid,
-                                        canSend: canSend,
-                                      );
-                                      return;
-                                    }
-                                    if (value == 'code') {
-                                      await _insertCodeBlockTemplate();
-                                      return;
-                                    }
-                                    if (value == 'ttl_config') {
-                                      final picked = await _showTtlConfigDialog(
-                                        context: context,
-                                        currentMode: _dmTtlMode,
-                                      );
-                                      if (picked != null && mounted) {
-                                        setState(() => _dmTtlMode = picked);
-                                      }
-                                    }
-                                        }
-                                      : null,
-                                    icon: const Icon(Icons.more_vert),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.send),
-                                    onPressed: (!blocked && canSend)
-                                        ? _send
-                                        : null,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      },
-    ));
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
   }
 }

@@ -40,8 +40,8 @@ class MyApp extends StatelessWidget {
     const ghCard = Color(0xB31A2736);
     const ghBorder = Color(0x66A6C4E8);
     const ghText = Color(0xFFD9E7F7);
-    const ghGreen = Color(0xFF32B57A);
-    const ghBlue = Color(0xFF4EA3FF);
+    const ghGreen = Color(0xFF2A8C63);
+    const ghBlue = Color(0xFF3B7FB8);
     const ghSurfaceSoft = Color(0x99203246);
     const uiRadius = 16.0;
     const uiSheetRadius = 24.0;
@@ -94,7 +94,7 @@ class MyApp extends StatelessWidget {
               onBackground: ghText,
               surface: ghCard,
               onSurface: ghText,
-              tertiary: Color(0xFF8DC4FF),
+              tertiary: Color(0xFF78A9D6),
               onTertiary: Color(0xFF06111E),
               surfaceContainerHighest: ghSurfaceSoft,
               outline: ghBorder,
@@ -134,15 +134,17 @@ class MyApp extends StatelessWidget {
               thickness: 1,
             ),
             dialogTheme: DialogThemeData(
-              backgroundColor: ghCard,
+              backgroundColor: const Color(0xF0192A3D),
+              surfaceTintColor: Colors.transparent,
+              shadowColor: const Color(0x55040A12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(uiRadius),
                 side: const BorderSide(color: ghBorder),
               ),
             ),
             bottomSheetTheme: const BottomSheetThemeData(
-              backgroundColor: Color(0xD9192A3D),
-              modalBackgroundColor: Color(0xE51A2C40),
+              backgroundColor: Color(0xF0192A3D),
+              modalBackgroundColor: Color(0xF01A2C40),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.vertical(
                   top: Radius.circular(uiSheetRadius),
@@ -187,7 +189,7 @@ class MyApp extends StatelessWidget {
             ),
             elevatedButtonTheme: ElevatedButtonThemeData(
               style: ButtonStyle(
-                backgroundColor: const MaterialStatePropertyAll(Color(0xFF2F9AEE)),
+                backgroundColor: const MaterialStatePropertyAll(Color(0xFF2E79B6)),
                 foregroundColor: const MaterialStatePropertyAll(Colors.white),
                 textStyle: MaterialStatePropertyAll(TextStyle(fontWeight: FontWeight.bold)),
                 minimumSize: const MaterialStatePropertyAll(
@@ -222,7 +224,7 @@ class MyApp extends StatelessWidget {
             ),
             textButtonTheme: TextButtonThemeData(
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF8BC7FF),
+                foregroundColor: const Color(0xFF79A9D6),
                 minimumSize: const Size(0, uiMinTapHeight),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(uiRadius),
@@ -248,7 +250,7 @@ class MyApp extends StatelessWidget {
             ),
             navigationBarTheme: NavigationBarThemeData(
               backgroundColor: const Color(0xC0142232),
-              indicatorColor: const Color(0x444EA3FF),
+              indicatorColor: const Color(0x333B7FB8),
               iconTheme: const WidgetStatePropertyAll(
                 IconThemeData(color: Color(0xFFAFC2D9)),
               ),
