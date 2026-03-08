@@ -11571,6 +11571,15 @@ class _ChatsTabState extends State<_ChatsTab>
   bool _dmSpeakerEnabled = true;
   bool _dmIsCaller = false;
   int _dmReconnectAttempts = 0;
+  bool _callMicDenied = false;
+  bool _callSawRelayCandidate = false;
+  bool _callSawP2pCandidate = false;
+  String _callPeerConnectionState = 'new';
+  String _callIceState = 'new';
+  int _callConnectRestartAttempts = 0;
+  Timer? _callConnectingWatchdog;
+  final Map<String, List<Map<String, dynamic>>> _pendingCallSignalsByCallId =
+      <String, List<Map<String, dynamic>>>{};
   bool _outgoingGroupCallRinging = false;
   String? _outgoingGroupCallId;
   String? _outgoingGroupId;
@@ -11810,6 +11819,252 @@ class _ChatsTabState extends State<_ChatsTab>
     return AppLanguage.tr(context, 'GitMit kontakt', 'GitMit contact');
   }
 
+  String _enumLabel(Object value) {
+    final raw = value.toString();
+    final i = raw.lastIndexOf('.');
+    if (i < 0 || i + 1 >= raw.length) return raw;
+    return raw.substring(i + 1);
+  }
+
+  void _callLog(String event, [Map<String, Object?> details = const <String, Object?>{}]) {
+    final ts = DateTime.now().toIso8601String();
+    final safe = <String, Object?>{};
+    for (final e in details.entries) {
+      final k = e.key.trim();
+      if (k.isEmpty) continue;
+      final v = e.value;
+      if (v is String || v is num || v is bool || v == null) {
+        safe[k] = v;
+      } else {
+        safe[k] = v.toString();
+      }
+    }
+    debugPrint('[CALL][$ts] $event ${jsonEncode(safe)}');
+  }
+
+  void _markIceCandidateDiagnostics(String candidateRaw) {
+    final candidate = candidateRaw.toLowerCase();
+    final m = RegExp(r'\btyp\s+([a-z0-9]+)\b').firstMatch(candidate);
+    final type = (m?.group(1) ?? '').trim();
+    if (type.isEmpty) return;
+
+    var changed = false;
+    if (type == 'relay') {
+      if (!_callSawRelayCandidate) {
+        _callSawRelayCandidate = true;
+        changed = true;
+      }
+    } else if (type == 'host' || type == 'srflx' || type == 'prflx') {
+      if (!_callSawP2pCandidate) {
+        _callSawP2pCandidate = true;
+        changed = true;
+      }
+    }
+    if (changed && mounted) {
+      setState(() {});
+    }
+  }
+
+  Widget _callDiagBadge({
+    required String label,
+    required Color bg,
+    required Color fg,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: fg,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _callDiagnosticsBadges(BuildContext context) {
+    final out = <Widget>[];
+
+    if (_callMicDenied) {
+      out.add(
+        _callDiagBadge(
+          label: 'mic denied',
+          bg: const Color(0xFF5A1A1A),
+          fg: const Color(0xFFFFB3B3),
+          icon: Icons.mic_off,
+        ),
+      );
+    }
+
+    if (_callSawRelayCandidate) {
+      out.add(
+        _callDiagBadge(
+          label: 'relay/TURN',
+          bg: const Color(0xFF4A3B14),
+          fg: const Color(0xFFFFE08A),
+          icon: Icons.alt_route,
+        ),
+      );
+    } else if (_callSawP2pCandidate) {
+      out.add(
+        _callDiagBadge(
+          label: 'P2P',
+          bg: const Color(0xFF143D2D),
+          fg: const Color(0xFF9EF0C2),
+          icon: Icons.wifi_tethering,
+        ),
+      );
+    } else {
+      out.add(
+        _callDiagBadge(
+          label: AppLanguage.tr(context, 'network: probing', 'network: probing'),
+          bg: const Color(0xFF1F2937),
+          fg: const Color(0xFFD1D5DB),
+          icon: Icons.network_check,
+        ),
+      );
+    }
+
+    final state = _callPeerConnectionState.trim();
+    if (state.isNotEmpty) {
+      out.add(
+        _callDiagBadge(
+          label: 'pc:$state',
+          bg: const Color(0xFF1E40AF),
+          fg: const Color(0xFFBFDBFE),
+          icon: Icons.link,
+        ),
+      );
+    }
+
+    final ice = _callIceState.trim();
+    if (ice.isNotEmpty) {
+      out.add(
+        _callDiagBadge(
+          label: 'ice:$ice',
+          bg: const Color(0xFF3F2A5F),
+          fg: const Color(0xFFE9D5FF),
+          icon: Icons.ac_unit,
+        ),
+      );
+    }
+
+    return out;
+  }
+
+  void _resetCallDiagnostics() {
+    _callConnectingWatchdog?.cancel();
+    _callConnectingWatchdog = null;
+    _callMicDenied = false;
+    _callSawRelayCandidate = false;
+    _callSawP2pCandidate = false;
+    _callPeerConnectionState = 'new';
+    _callIceState = 'new';
+    _callConnectRestartAttempts = 0;
+  }
+
+  void _enqueuePendingCallSignal(Map<String, dynamic> payload) {
+    final callId = (payload['callId'] ?? '').toString().trim();
+    if (callId.isEmpty) return;
+    final list = _pendingCallSignalsByCallId.putIfAbsent(
+      callId,
+      () => <Map<String, dynamic>>[],
+    );
+    list.add(Map<String, dynamic>.from(payload));
+    if (list.length > 64) {
+      list.removeRange(0, list.length - 64);
+    }
+    _callLog('signal_enqueued', {
+      'callId': callId,
+      'action': (payload['action'] ?? '').toString(),
+      'queueSize': list.length,
+      'activeCallId': (_activeCallId ?? '').trim(),
+      'outgoingCallId': (_outgoingCallId ?? '').trim(),
+    });
+  }
+
+  Future<void> _drainPendingSignalsForActiveCall() async {
+    final callId = (_activeCallId ?? '').trim();
+    if (callId.isEmpty) return;
+    final queued = _pendingCallSignalsByCallId.remove(callId);
+    if (queued == null || queued.isEmpty) return;
+    _callLog('signal_drain_start', {'callId': callId, 'count': queued.length});
+    for (final payload in queued) {
+      try {
+        await _handleDmWebRtcSignal(payload);
+      } catch (_) {
+        // ignore and continue
+      }
+    }
+    _callLog('signal_drain_done', {'callId': callId});
+  }
+
+  void _startCallConnectingWatchdog() {
+    _callConnectingWatchdog?.cancel();
+    _callLog('watchdog_start', {
+      'activeCallId': (_activeCallId ?? '').trim(),
+      'isCaller': _dmIsCaller,
+    });
+    _callConnectingWatchdog = Timer.periodic(
+      const Duration(seconds: 6),
+      (_) async {
+        if (!mounted) return;
+        if (!_dmIsCaller || _callConnected) return;
+        if (_activeCallId == null || _activeCallId!.trim().isEmpty) return;
+        if (_callConnectRestartAttempts >= 4) return;
+
+        final ice = _callIceState.toLowerCase();
+        if (ice == 'connected' || ice == 'completed') return;
+
+        final pc = _dmPeerConnection;
+        if (pc == null) return;
+
+        _callConnectRestartAttempts++;
+        _callLog('watchdog_restart_attempt', {
+          'attempt': _callConnectRestartAttempts,
+          'callId': (_activeCallId ?? '').trim(),
+          'ice': _callIceState,
+          'pc': _callPeerConnectionState,
+        });
+        try {
+          final offer = await pc.createOffer(<String, dynamic>{
+            'iceRestart': true,
+            'offerToReceiveAudio': true,
+          });
+          await pc.setLocalDescription(offer);
+          await _sendDmWebRtcSignal(
+            action: 'webrtc_offer',
+            data: <String, dynamic>{
+              'sdp': offer.sdp ?? '',
+              'sdpType': offer.type ?? 'offer',
+              'restart': true,
+            },
+          );
+        } catch (_) {
+          // best-effort watchdog restart
+          _callLog('watchdog_restart_failed', {
+            'attempt': _callConnectRestartAttempts,
+            'callId': (_activeCallId ?? '').trim(),
+          });
+        }
+      },
+    );
+  }
+
   Future<void> _cancelOutgoingDmRinging() async {
     final peerUid = _callPeerUid;
     final callId = _outgoingCallId;
@@ -11926,6 +12181,13 @@ class _ChatsTabState extends State<_ChatsTab>
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.center,
+                      children: _callDiagnosticsBadges(context),
+                    ),
                     const Spacer(),
                     if (showAudioControls)
                       Row(
@@ -12023,25 +12285,50 @@ class _ChatsTabState extends State<_ChatsTab>
   }) async {
     final current = FirebaseAuth.instance.currentUser;
     if (current == null) return;
-    Map<String, Object?> encrypted;
+    _callLog('send_call_response_start', {
+      'toUid': toUid,
+      'callId': callId,
+      'action': (payload['action'] ?? '').toString(),
+      'type': (payload['type'] ?? '').toString(),
+    });
+    Map<String, Object?> encrypted = <String, Object?>{};
     try {
       encrypted = await E2ee.encryptForUser(
         otherUid: toUid,
         plaintext: jsonEncode(payload),
       );
+      _callLog('send_call_response_encrypted', {
+        'toUid': toUid,
+        'callId': callId,
+        'encrypted': true,
+      });
     } catch (_) {
-      return;
+      // Fallback: keep signaling working even when E2EE session is out of sync.
+      _callLog('send_call_response_encrypt_failed_fallback_plain', {
+        'toUid': toUid,
+        'callId': callId,
+      });
     }
     final packet = <String, Object?>{
       ...encrypted,
+      'payloadPlain': jsonEncode(payload),
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
     };
     try {
       final resRef = rtdb().ref('callResponses/$toUid').push();
       await resRef.set(packet);
+      _callLog('send_call_response_sent', {
+        'toUid': toUid,
+        'callId': callId,
+        'dbKey': (resRef.key ?? ''),
+      });
     } catch (_) {
       // best effort
+      _callLog('send_call_response_send_failed', {
+        'toUid': toUid,
+        'callId': callId,
+      });
     }
   }
 
@@ -12070,10 +12357,16 @@ class _ChatsTabState extends State<_ChatsTab>
   }
 
   Future<bool> _prepareDmWebRtc({required bool isCaller}) async {
+    _callLog('webrtc_prepare_start', {
+      'isCaller': isCaller,
+      'activeCallId': (_activeCallId ?? '').trim(),
+      'outgoingCallId': (_outgoingCallId ?? '').trim(),
+    });
     _dmIsCaller = isCaller;
     _dmReconnectAttempts = 0;
     _dmHasRemoteDescription = false;
     _dmPendingIceCandidates.clear();
+    _resetCallDiagnostics();
 
     await _disposeDmWebRtc();
 
@@ -12082,6 +12375,10 @@ class _ChatsTabState extends State<_ChatsTab>
         'urls': <String>[
           'stun:stun.l.google.com:19302',
           'stun:stun1.l.google.com:19302',
+          'stun:stun2.l.google.com:19302',
+          'stun:stun3.l.google.com:19302',
+          'stun:stun4.l.google.com:19302',
+          'stun:stun.cloudflare.com:3478',
         ],
       },
     ];
@@ -12101,8 +12398,15 @@ class _ChatsTabState extends State<_ChatsTab>
 
     try {
       _dmPeerConnection = await rtc.createPeerConnection(config);
+      _callLog('webrtc_peer_connection_created', {
+        'isCaller': isCaller,
+        'iceServers': iceServers.length,
+      });
     } catch (_) {
+      _callPeerConnectionState = 'create_failed';
       _dmPeerConnection = null;
+      if (mounted) setState(() {});
+      _callLog('webrtc_peer_connection_create_failed', {'isCaller': isCaller});
       return false;
     }
 
@@ -12117,7 +12421,25 @@ class _ChatsTabState extends State<_ChatsTab>
           'video': false,
         },
       );
+      _callLog('webrtc_get_user_media_ok', {'audio': true});
     } catch (_) {
+      _callMicDenied = true;
+      _callPeerConnectionState = 'mic_denied';
+      if (mounted) setState(() {});
+      _callLog('webrtc_get_user_media_failed', {'reason': 'mic_denied_or_unavailable'});
+      if (mounted) {
+        _safeShowSnackBarSnackBar(
+          SnackBar(
+            content: Text(
+              AppLanguage.tr(
+                context,
+                'Mikrofon není dostupný. Povol mikrofon pro GitMit v nastavení telefonu.',
+                'Microphone is unavailable. Allow microphone access for GitMit in phone settings.',
+              ),
+            ),
+          ),
+        );
+      }
       await _disposeDmWebRtc();
       return false;
     }
@@ -12135,6 +12457,11 @@ class _ChatsTabState extends State<_ChatsTab>
 
     _dmPeerConnection!.onIceCandidate = (candidate) {
       if (candidate.candidate == null || candidate.candidate!.isEmpty) return;
+      _markIceCandidateDiagnostics(candidate.candidate!);
+      _callLog('webrtc_local_ice_candidate', {
+        'len': candidate.candidate!.length,
+        'sdpMid': (candidate.sdpMid ?? ''),
+      });
       _sendDmWebRtcSignal(
         action: 'webrtc_ice',
         data: <String, dynamic>{
@@ -12147,7 +12474,16 @@ class _ChatsTabState extends State<_ChatsTab>
 
     _dmPeerConnection!.onConnectionState = (state) async {
       if (!mounted) return;
+      _callPeerConnectionState = _enumLabel(state);
+      _callLog('webrtc_connection_state', {
+        'state': _callPeerConnectionState,
+        'callId': (_activeCallId ?? _outgoingCallId ?? '').toString(),
+      });
+      setState(() {});
       if (state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _callIceState = 'connected';
+        _callConnectingWatchdog?.cancel();
+        _callConnectingWatchdog = null;
         if (!_callConnected) {
           setState(() {
             _callConnected = true;
@@ -12190,6 +12526,29 @@ class _ChatsTabState extends State<_ChatsTab>
       }
     };
 
+    _dmPeerConnection!.onIceConnectionState = (state) async {
+      final label = _enumLabel(state);
+      _callIceState = label;
+      _callLog('webrtc_ice_state', {
+        'state': label,
+        'callId': (_activeCallId ?? _outgoingCallId ?? '').toString(),
+      });
+      if (mounted) setState(() {});
+
+      final l = label.toLowerCase();
+      if (l == 'connected' || l == 'completed') {
+        _callConnectingWatchdog?.cancel();
+        _callConnectingWatchdog = null;
+        if (!_callConnected && mounted) {
+          setState(() {
+            _callConnected = true;
+            _callElapsedSeconds = 0;
+          });
+          _startCallElapsedTicker();
+        }
+      }
+    };
+
     _dmPeerConnection!.onTrack = (event) {
       // Ensure incoming audio tracks are enabled when attached by remote peer.
       if (event.track.kind == 'audio') {
@@ -12224,6 +12583,10 @@ class _ChatsTabState extends State<_ChatsTab>
   Future<void> _startDmOfferFlow() async {
     final pc = _dmPeerConnection;
     if (pc == null) return;
+    _startCallConnectingWatchdog();
+    _callLog('webrtc_offer_flow_start', {
+      'callId': (_activeCallId ?? _outgoingCallId ?? '').toString(),
+    });
     try {
       final offer = await pc.createOffer(<String, dynamic>{
         'offerToReceiveAudio': true,
@@ -12233,28 +12596,41 @@ class _ChatsTabState extends State<_ChatsTab>
         action: 'webrtc_offer',
         data: <String, dynamic>{
           'sdp': offer.sdp ?? '',
-          'type': offer.type ?? 'offer',
+          'sdpType': offer.type ?? 'offer',
         },
       );
+      _callLog('webrtc_offer_sent', {
+        'callId': (_activeCallId ?? _outgoingCallId ?? '').toString(),
+        'sdpLen': (offer.sdp ?? '').length,
+      });
     } catch (_) {
       // signaling failure handled by timeout/cancel
+      _callLog('webrtc_offer_send_failed', {
+        'callId': (_activeCallId ?? _outgoingCallId ?? '').toString(),
+      });
     }
   }
 
-  Future<void> _handleDmWebRtcSignal(Map<String, dynamic> payload) async {
+  Future<bool> _handleDmWebRtcSignal(Map<String, dynamic> payload) async {
     final action = (payload['action'] ?? '').toString();
     final callId = (payload['callId'] ?? '').toString();
-    if (callId.isEmpty) return;
+    _callLog('webrtc_signal_received', {
+      'action': action,
+      'callId': callId,
+      'activeCallId': (_activeCallId ?? '').trim(),
+      'outgoingCallId': (_outgoingCallId ?? '').trim(),
+    });
+    if (callId.isEmpty) return false;
     final currentCall = _activeCallId ?? _outgoingCallId;
-    if (currentCall == null || currentCall != callId) return;
+    if (currentCall == null || currentCall != callId) return false;
 
     if (action == 'webrtc_offer') {
       if (_dmPeerConnection == null) {
         final ok = await _prepareDmWebRtc(isCaller: false);
-        if (!ok) return;
+        if (!ok) return true;
       }
       final sdp = (payload['sdp'] ?? '').toString();
-      if (sdp.isEmpty) return;
+      if (sdp.isEmpty) return true;
       try {
         await _dmPeerConnection!.setRemoteDescription(
           rtc.RTCSessionDescription(sdp, 'offer'),
@@ -12269,19 +12645,19 @@ class _ChatsTabState extends State<_ChatsTab>
           action: 'webrtc_answer',
           data: <String, dynamic>{
             'sdp': answer.sdp ?? '',
-            'type': answer.type ?? 'answer',
+            'sdpType': answer.type ?? 'answer',
           },
         );
       } catch (_) {
         // ignore malformed renegotiation
       }
-      return;
+      return true;
     }
 
     if (action == 'webrtc_answer') {
-      if (_dmPeerConnection == null) return;
+      if (_dmPeerConnection == null) return true;
       final sdp = (payload['sdp'] ?? '').toString();
-      if (sdp.isEmpty) return;
+      if (sdp.isEmpty) return true;
       try {
         await _dmPeerConnection!.setRemoteDescription(
           rtc.RTCSessionDescription(sdp, 'answer'),
@@ -12291,13 +12667,14 @@ class _ChatsTabState extends State<_ChatsTab>
       } catch (_) {
         // ignore
       }
-      return;
+      return true;
     }
 
     if (action == 'webrtc_ice') {
-      if (_dmPeerConnection == null) return;
+      if (_dmPeerConnection == null) return true;
       final candidate = (payload['candidate'] ?? '').toString();
-      if (candidate.isEmpty) return;
+      if (candidate.isEmpty) return true;
+      _markIceCandidateDiagnostics(candidate);
       final sdpMid = (payload['sdpMid'] ?? '').toString();
       final rawLine = payload['sdpMLineIndex'];
       int? sdpMLineIndex;
@@ -12314,16 +12691,28 @@ class _ChatsTabState extends State<_ChatsTab>
         );
         if (!_dmHasRemoteDescription) {
           _dmPendingIceCandidates.add(ice);
-          return;
+          return true;
         }
         await _dmPeerConnection!.addCandidate(ice);
       } catch (_) {
         // ignore
       }
+      return true;
     }
+
+    return true;
   }
 
   Future<void> _disposeDmWebRtc() async {
+    _callLog('webrtc_dispose', {
+      'activeCallId': (_activeCallId ?? '').trim(),
+      'outgoingCallId': (_outgoingCallId ?? '').trim(),
+      'pc': _callPeerConnectionState,
+      'ice': _callIceState,
+    });
+    _callConnectingWatchdog?.cancel();
+    _callConnectingWatchdog = null;
+    _pendingCallSignalsByCallId.clear();
     final pc = _dmPeerConnection;
     _dmPeerConnection = null;
     _dmHasRemoteDescription = false;
@@ -12385,6 +12774,12 @@ class _ChatsTabState extends State<_ChatsTab>
     final peerLogin = _callPeerLogin;
     final callId = _activeCallId;
     final duration = _callElapsedSeconds;
+    _callLog('call_end_requested', {
+      'sendRemoteEnd': sendRemoteEnd,
+      'callId': (callId ?? ''),
+      'durationSec': duration,
+      'peerUid': (peerUid ?? ''),
+    });
 
     if (sendRemoteEnd &&
         current != null &&
@@ -12423,6 +12818,8 @@ class _ChatsTabState extends State<_ChatsTab>
     _outgoingCallTimeout = null;
     _callElapsedTicker?.cancel();
     _callElapsedTicker = null;
+    _resetCallDiagnostics();
+    _pendingCallSignalsByCallId.clear();
     if (!mounted) return;
     setState(() {
       _outgoingCallRinging = false;
@@ -12453,6 +12850,10 @@ class _ChatsTabState extends State<_ChatsTab>
 
     final peerUid = await _ensureActiveOtherUid();
     if (peerUid == null || peerUid.isEmpty) return;
+    _callLog('dm_call_start_requested', {
+      'peerUid': peerUid,
+      'peerLogin': login,
+    });
     final myLogin = (await _myGithubUsername(current.uid) ?? '').trim();
     if (myLogin.isEmpty) return;
 
@@ -12477,18 +12878,24 @@ class _ChatsTabState extends State<_ChatsTab>
       'createdAt': DateTime.now().millisecondsSinceEpoch,
     };
 
-    Map<String, Object?> encrypted;
+    Map<String, Object?> encrypted = <String, Object?>{};
     try {
       encrypted = await E2ee.encryptForUser(
         otherUid: peerUid,
         plaintext: jsonEncode(payload),
       );
+      _callLog('dm_call_invite_encrypted', {'callId': callId, 'peerUid': peerUid});
     } catch (_) {
-      return;
+      // Fallback: keep call invite delivery working with plaintext payload.
+      _callLog('dm_call_invite_encrypt_failed_fallback_plain', {
+        'callId': callId,
+        'peerUid': peerUid,
+      });
     }
 
     final offerPacket = <String, Object?>{
       ...encrypted,
+      'payloadPlain': jsonEncode(payload),
       'fromUid': current.uid,
       'fromLogin': myLogin,
       'createdAt': ServerValue.timestamp,
@@ -12496,7 +12903,9 @@ class _ChatsTabState extends State<_ChatsTab>
 
     try {
       await rtdb().ref('callInvites/$peerUid/$callId').set(offerPacket);
+      _callLog('dm_call_invite_sent', {'callId': callId, 'peerUid': peerUid});
     } catch (_) {
+      _callLog('dm_call_invite_send_failed', {'callId': callId, 'peerUid': peerUid});
       return;
     }
 
@@ -12549,22 +12958,45 @@ class _ChatsTabState extends State<_ChatsTab>
       if (callId.isEmpty || raw is! Map) return;
       final packet = Map<String, dynamic>.from(raw);
       packet['__key'] = callId;
+      Future<void> removeCurrent() async {
+        try {
+          await rtdb().ref('callResponses/${current.uid}/$callId').remove();
+        } catch (_) {}
+      }
       final fromUid = (packet['fromUid'] ?? '').toString();
-      if (fromUid.isEmpty) return;
+      if (fromUid.isEmpty) {
+        await removeCurrent();
+        return;
+      }
+      _callLog('incoming_call_invite_received', {'callId': callId, 'fromUid': fromUid});
 
       String clear;
       try {
         clear = await E2ee.decryptFromUser(otherUid: fromUid, message: packet);
+        _callLog('incoming_call_invite_decrypt_ok', {'callId': callId, 'fromUid': fromUid});
       } catch (_) {
-        return;
+        final plain = (packet['payloadPlain'] ?? '').toString().trim();
+        if (plain.isEmpty) {
+          await removeCurrent();
+          return;
+        }
+        clear = plain;
+        _callLog('incoming_call_invite_decrypt_failed_using_plain', {
+          'callId': callId,
+          'fromUid': fromUid,
+        });
       }
 
       Map<String, dynamic> payload;
       try {
         final decoded = jsonDecode(clear);
-        if (decoded is! Map) return;
+        if (decoded is! Map) {
+          await removeCurrent();
+          return;
+        }
         payload = Map<String, dynamic>.from(decoded);
       } catch (_) {
+        await removeCurrent();
         return;
       }
 
@@ -12690,6 +13122,7 @@ class _ChatsTabState extends State<_ChatsTab>
             _outgoingGroupTitle = groupTitle;
           }
         });
+        await _drainPendingSignalsForActiveCall();
 
         await _sendCallResponse(
           toUid: fromUid,
@@ -12833,26 +13266,45 @@ class _ChatsTabState extends State<_ChatsTab>
       if (callId.isEmpty || raw is! Map) return;
       final packet = Map<String, dynamic>.from(raw);
       packet['__key'] = callId;
+      Future<void> removeCurrent() async {
+        try {
+          await rtdb().ref('callResponses/${current.uid}/$callId').remove();
+        } catch (_) {}
+      }
       final fromUid = (packet['fromUid'] ?? '').toString();
-      if (fromUid.isEmpty) return;
+      if (fromUid.isEmpty) {
+        await removeCurrent();
+        return;
+      }
+      _callLog('call_response_received', {'dbKey': callId, 'fromUid': fromUid});
 
       String clear;
       try {
         clear = await E2ee.decryptFromUser(otherUid: fromUid, message: packet);
+        _callLog('call_response_decrypt_ok', {'dbKey': callId, 'fromUid': fromUid});
       } catch (_) {
-        return;
+        final plain = (packet['payloadPlain'] ?? '').toString().trim();
+        if (plain.isEmpty) {
+          await removeCurrent();
+          return;
+        }
+        clear = plain;
+        _callLog('call_response_decrypt_failed_using_plain', {
+          'dbKey': callId,
+          'fromUid': fromUid,
+        });
       }
 
       Map<String, dynamic> payload;
       try {
         final decoded = jsonDecode(clear);
-        if (decoded is! Map) return;
+        if (decoded is! Map) {
+          await removeCurrent();
+          return;
+        }
         payload = Map<String, dynamic>.from(decoded);
       } catch (_) {
-        return;
-      }
-
-      if ((payload['type'] ?? '').toString() != 'dm_call_response') {
+        await removeCurrent();
         return;
       }
 
@@ -12861,14 +13313,30 @@ class _ChatsTabState extends State<_ChatsTab>
       final mode = (payload['mode'] ?? 'dm').toString();
       final fromLogin = (payload['fromLogin'] ?? '').toString();
       final isGroupResp = mode == 'group';
+      _callLog('call_response_parsed', {
+        'action': action,
+        'respCallId': respCallId,
+        'mode': mode,
+      });
 
       if (action == 'webrtc_offer' ||
           action == 'webrtc_answer' ||
           action == 'webrtc_ice') {
-        await _handleDmWebRtcSignal(payload);
-        try {
-          await rtdb().ref('callResponses/${current.uid}/$callId').remove();
-        } catch (_) {}
+        final handled = await _handleDmWebRtcSignal(payload);
+        if (!handled) {
+          _enqueuePendingCallSignal(payload);
+        }
+        await removeCurrent();
+        return;
+      }
+
+      if ((payload['type'] ?? '').toString() != 'dm_call_response') {
+        _callLog('call_response_ignored_unexpected_type', {
+          'dbKey': callId,
+          'type': (payload['type'] ?? '').toString(),
+          'action': action,
+        });
+        await removeCurrent();
         return;
       }
 
@@ -12896,6 +13364,7 @@ class _ChatsTabState extends State<_ChatsTab>
               _callPeerLogin = peerLogin;
             }
           });
+          await _drainPendingSignalsForActiveCall();
           await _startDmOfferFlow();
         }
       } else if (action == 'accepted' &&
@@ -12925,6 +13394,7 @@ class _ChatsTabState extends State<_ChatsTab>
               _callPeerLogin = fromLogin;
             }
           });
+          await _drainPendingSignalsForActiveCall();
           await _startDmOfferFlow();
         }
       } else if (action == 'declined' && _outgoingCallId == respCallId) {
@@ -12963,6 +13433,7 @@ class _ChatsTabState extends State<_ChatsTab>
         await _disposeDmWebRtc();
         _callElapsedTicker?.cancel();
         _callElapsedTicker = null;
+        _resetCallDiagnostics();
         if (mounted) {
           setState(() {
             _callConnected = false;
@@ -15440,13 +15911,19 @@ class _ChatsTabState extends State<_ChatsTab>
         'fromLogin': myLogin,
         'createdAt': DateTime.now().millisecondsSinceEpoch,
       };
+      Map<String, Object?> encrypted = <String, Object?>{};
       try {
-        final encrypted = await E2ee.encryptForUser(
+        encrypted = await E2ee.encryptForUser(
           otherUid: uid,
           plaintext: jsonEncode(payload),
         );
+      } catch (_) {
+        // Fallback: invite can still be delivered with plaintext payload.
+      }
+      try {
         await rtdb().ref('callInvites/$uid/$callId').set(<String, Object?>{
           ...encrypted,
+          'payloadPlain': jsonEncode(payload),
           'fromUid': current.uid,
           'fromLogin': myLogin,
           'createdAt': ServerValue.timestamp,
