@@ -30,6 +30,7 @@ class AppNotifications {
   static bool _notificationsEnabled = true;
   static bool _vibrationEnabled = true;
   static bool _soundsEnabled = true;
+  static Map<String, String>? _pendingOpenTarget;
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'messages',
@@ -37,6 +38,129 @@ class AppNotifications {
     description: 'New message notifications',
     importance: Importance.high,
   );
+
+  static void _captureOpenTargetFromRemoteMessage(RemoteMessage message) {
+    final data = message.data;
+    final type = (data['type'] ?? '').toString().trim();
+    if (type == 'dm_message') {
+      final chatLogin = (data['chatLogin'] ?? data['fromLogin'] ?? '')
+          .toString()
+          .trim();
+      if (chatLogin.isEmpty) return;
+      _pendingOpenTarget = {
+        'type': 'dm',
+        'chatLogin': chatLogin,
+      };
+      return;
+    }
+
+    if (type == 'group_message') {
+      final groupId = (data['groupId'] ?? '').toString().trim();
+      if (groupId.isEmpty) return;
+      _pendingOpenTarget = {
+        'type': 'group',
+        'groupId': groupId,
+      };
+    }
+  }
+
+  static Map<String, String>? consumePendingOpenTarget() {
+    final target = _pendingOpenTarget;
+    _pendingOpenTarget = null;
+    return target;
+  }
+
+  static Future<void> _showLocalNotification({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    if (!_initialized || !_notificationsEnabled) return;
+
+    final cleanTitle = title.trim().isEmpty ? 'GitMit' : title.trim();
+    final cleanBody = body.trim();
+    if (cleanBody.isEmpty) return;
+
+    if (kIsWeb) {
+      if (!kReleaseMode) {
+        debugPrint('[NotifyOnline][Web] $cleanTitle: $cleanBody');
+      }
+      return;
+    }
+
+    final androidDetails = AndroidNotificationDetails(
+      _channel.id,
+      _channel.name,
+      channelDescription: _channel.description,
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: _soundsEnabled,
+      enableVibration: _vibrationEnabled,
+    );
+
+    final iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: _soundsEnabled,
+    );
+
+    final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+    await _local.show(
+      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title: cleanTitle,
+      body: cleanBody,
+      notificationDetails: details,
+      payload: payload,
+    );
+  }
+
+  static void _captureOpenTargetFromLocalPayload(String? payload) {
+    final raw = (payload ?? '').trim();
+    if (raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final m = Map<String, dynamic>.from(decoded);
+      final type = (m['type'] ?? '').toString().trim();
+      if (type == 'dm') {
+        final chatLogin = (m['chatLogin'] ?? '').toString().trim();
+        if (chatLogin.isEmpty) return;
+        _pendingOpenTarget = {
+          'type': 'dm',
+          'chatLogin': chatLogin,
+        };
+        return;
+      }
+      if (type == 'group') {
+        final groupId = (m['groupId'] ?? '').toString().trim();
+        if (groupId.isEmpty) return;
+        _pendingOpenTarget = {
+          'type': 'group',
+          'groupId': groupId,
+        };
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  static Future<void> showIncomingMessageNotification({
+    required String sender,
+    required String preview,
+    String title = 'GitMit',
+    Map<String, String>? openTarget,
+  }) async {
+    final senderText = sender.trim();
+    final previewText = preview.trim();
+    final body = senderText.isEmpty ? previewText : '$senderText: $previewText';
+    await _showLocalNotification(
+      title: title,
+      body: body,
+      payload: (openTarget == null || openTarget.isEmpty)
+          ? null
+          : jsonEncode(openTarget),
+    );
+  }
 
   static String _tokenKey(String token) {
     // RTDB key-safe encoding.
@@ -83,11 +207,17 @@ class AppNotifications {
       const iosInit = DarwinInitializationSettings();
       const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
 
-      await _local.initialize(settings: initSettings);
+      await _local.initialize(
+        settings: initSettings,
+        onDidReceiveNotificationResponse: (response) {
+          _captureOpenTargetFromLocalPayload(response.payload);
+        },
+      );
 
       if (Platform.isAndroid) {
         final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
         await android?.createNotificationChannel(_channel);
+        await android?.requestNotificationsPermission();
       }
     }
 
@@ -97,36 +227,29 @@ class AppNotifications {
     FirebaseMessaging.onMessage.listen((message) async {
       if (!_notificationsEnabled) return;
 
-      final title = message.notification?.title ?? 'GitMit';
-      final body = message.notification?.body ?? '';
-      if (body.trim().isEmpty) return;
-
-      if (kIsWeb) {
-        if (!kReleaseMode) {
-          debugPrint('[NotifyOnline][Web] $title: $body');
-        }
+      final pushType = (message.data['type'] ?? '').toString().trim();
+      if (pushType == 'dm_message' || pushType == 'group_message') {
+        // Chat push should be visible only when app is background/terminated.
         return;
       }
 
-      final androidDetails = AndroidNotificationDetails(
-        _channel.id,
-        _channel.name,
-        channelDescription: _channel.description,
-        importance: Importance.max,
-        priority: Priority.high,
-        playSound: _soundsEnabled,
-        enableVibration: _vibrationEnabled,
-      );
-
-      final iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: _soundsEnabled,
-      );
-
-      final details = NotificationDetails(android: androidDetails, iOS: iosDetails);
-      await _local.show(id: DateTime.now().millisecondsSinceEpoch ~/ 1000, title: title, body: body, notificationDetails: details);
+      final title = message.notification?.title ?? 'GitMit';
+      final body = message.notification?.body ?? '';
+      await _showLocalNotification(title: title, body: body);
     });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      _captureOpenTargetFromRemoteMessage(message);
+    });
+
+    try {
+      final initial = await FirebaseMessaging.instance.getInitialMessage();
+      if (initial != null) {
+        _captureOpenTargetFromRemoteMessage(initial);
+      }
+    } catch (_) {
+      // ignore
+    }
 
     _initialized = true;
   }

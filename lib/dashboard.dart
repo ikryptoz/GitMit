@@ -2023,35 +2023,9 @@ class _CreateGroupPage extends StatefulWidget {
 }
 
 class _CreateGroupPageState extends State<_CreateGroupPage> {
-  Future<void> _pickLogo() async {
-    if (_pickingLogo) return;
-    setState(() => _pickingLogo = true);
-    try {
-      final picker = ImagePicker();
-      final file = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 512,
-        maxHeight: 512,
-        imageQuality: 85,
-      );
-      if (file == null) return;
-      final bytes = await file.readAsBytes();
-      if (!mounted) return;
-      setState(() {
-        _pickedLogoBytes = bytes;
-      });
-        // Typing indicator pills for group chat
-    } catch (e) {
-      if (!mounted) return;
-      _safeShowSnackBarSnackBar(SnackBar(content: Text('Chyba: $e')));
-    } finally {
-      if (mounted) setState(() => _pickingLogo = false);
-    }
-  }
-
   final _title = TextEditingController();
   final _description = TextEditingController();
-  final _logoUrl = TextEditingController();
+  final _logoEmoji = TextEditingController(text: '💬');
   final _members = TextEditingController();
 
   Timer? _membersDebounce;
@@ -2066,9 +2040,6 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
 
   bool _saving = false;
 
-  Uint8List? _pickedLogoBytes;
-  bool _pickingLogo = false;
-
   @override
   void initState() {
     super.initState();
@@ -2081,7 +2052,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
     _membersDebounce?.cancel();
     _title.dispose();
     _description.dispose();
-    _logoUrl.dispose();
+    _logoEmoji.dispose();
     _members.dispose();
     super.dispose();
   }
@@ -2223,36 +2194,12 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
       if (groupId == null) throw Exception('Nelze vytvořit groupId');
 
       final inviteCode = _inviteLinkEnabled ? generateInviteCode() : '';
-
-      String? logoUrl;
-      final manualLogoUrl = _logoUrl.text.trim();
-      if (_pickedLogoBytes != null) {
-        try {
-          logoUrl = await _uploadGroupLogo(
-            groupId: groupId,
-            bytes: _pickedLogoBytes!,
-          );
-        } catch (e) {
-          // Don't fail group creation just because logo upload failed.
-          logoUrl = null;
-          if (mounted) {
-            _safeShowSnackBarSnackBar(
-              SnackBar(
-                content: Text(
-                  '${t(context, 'Logo se nepodařilo nahrát (skupina se vytvoří i tak)', 'Logo upload failed (group will still be created)')}: $e',
-                ),
-              ),
-            );
-          }
-        }
-      } else if (manualLogoUrl.isNotEmpty) {
-        logoUrl = manualLogoUrl;
-      }
+      final logoEmoji = _logoEmoji.text.trim();
 
       await groupPush.set({
         'title': title,
         'description': desc,
-        if (logoUrl != null && logoUrl.isNotEmpty) 'logoUrl': logoUrl,
+        if (logoEmoji.isNotEmpty) 'logoEmoji': logoEmoji,
         if (inviteCode.isNotEmpty) 'inviteCode': inviteCode,
         'createdByUid': current.uid,
         'createdByGithub': widget.myGithubUsername,
@@ -2286,7 +2233,7 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
         await rtdb().ref('groupInvites/$uid/$groupId').set({
           'groupId': groupId,
           'groupTitle': title,
-          if (logoUrl != null && logoUrl.isNotEmpty) 'groupLogoUrl': logoUrl,
+          if (logoEmoji.isNotEmpty) 'groupLogoEmoji': logoEmoji,
           'invitedByUid': current.uid,
           'invitedByGithub': widget.myGithubUsername,
           'createdAt': ServerValue.timestamp,
@@ -2343,57 +2290,67 @@ class _CreateGroupPageState extends State<_CreateGroupPage> {
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: _logoUrl,
+            controller: _logoEmoji,
+            maxLength: 2,
+            onChanged: (_) {
+              if (mounted) setState(() {});
+            },
             decoration: InputDecoration(
               labelText: t(
                 context,
-                'Logo URL (volitelné)',
-                'Logo URL (optional)',
+                'Emoji ikonka skupiny',
+                'Group emoji icon',
               ),
+              hintText: '💬',
             ),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              '💬',
+              '🔥',
+              '🚀',
+              '🎮',
+              '📚',
+              '🎵',
+              '⚡',
+              '🛠️',
+              '🏆',
+              '🧠',
+              '🍕',
+              '🌍',
+            ]
+                .map(
+                  (emoji) => ActionChip(
+                    label: Text(emoji),
+                    onPressed: _saving
+                        ? null
+                        : () => setState(() => _logoEmoji.text = emoji),
+                  ),
+                )
+                .toList(growable: false),
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: (_saving || _pickingLogo) ? null : _pickLogo,
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: Text(
-                    _pickedLogoBytes == null
-                        ? t(
-                            context,
-                            'Vybrat logo z galerie',
-                            'Pick logo from gallery',
-                          )
-                        : t(context, 'Změnit logo', 'Change logo'),
-                  ),
+              Text(
+                t(context, 'Náhled ikonky', 'Icon preview'),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(width: 12),
-              if (_pickedLogoBytes != null)
-                OutlinedButton(
-                  onPressed: _saving
-                      ? null
-                      : () => setState(() => _pickedLogoBytes = null),
-                  child: Text(t(context, 'Odebrat', 'Remove')),
+              const SizedBox(width: 10),
+              CircleAvatar(
+                radius: 18,
+                child: Text(
+                  _logoEmoji.text.trim().isEmpty
+                      ? '💬'
+                      : _logoEmoji.text.trim(),
                 ),
+              ),
             ],
           ),
-          if (_pickedLogoBytes != null) ...[
-            const SizedBox(height: 12),
-            Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.memory(
-                  _pickedLogoBytes!,
-                  width: 96,
-                  height: 96,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 16),
           Text(
             t(context, 'Oprávnění', 'Permissions'),
@@ -3239,6 +3196,9 @@ class _GroupInfoPageState extends State<_GroupInfoPage> {
                                           'groupTitle': title,
                                           if (logo.isNotEmpty)
                                             'groupLogoUrl': logo,
+                                          if (logoEmoji.trim().isNotEmpty)
+                                            'groupLogoEmoji':
+                                                logoEmoji.trim(),
                                           'invitedByUid': current.uid,
                                           'invitedByGithub': myGithub,
                                           'createdAt': ServerValue.timestamp,
@@ -3559,6 +3519,8 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _openChatLogin;
   String? _openChatAvatarUrl;
   int _openChatToken = 0;
+  String? _openGroupId;
+  int _openGroupToken = 0;
   int _chatsOverviewToken = 0;
 
   StreamSubscription<DatabaseEvent>? _connectedSub;
@@ -3571,10 +3533,40 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _currentDeviceId;
   int _currentDeviceLoginAt = 0;
   StreamSubscription<DatabaseEvent>? _deviceSessionSub;
+  StreamSubscription<DatabaseEvent>? _autoDeviceKeyTransferSub;
+  bool _autoRestoreAttempted = false;
+  final Set<String> _autoTransferHandled = <String>{};
   static const Duration _presenceSessionTtl = Duration(days: 3);
   late final _AppLifecycleObserver _lifecycleObserver;
 
   final GlobalKey<_ChatsTabState> _chatsKey = GlobalKey<_ChatsTabState>();
+
+  void _applyPendingNotificationOpenTarget() {
+    final target = AppNotifications.consumePendingOpenTarget();
+    if (target == null || target.isEmpty) return;
+
+    final type = (target['type'] ?? '').trim();
+    if (type == 'dm') {
+      final login = (target['chatLogin'] ?? '').trim();
+      if (login.isEmpty) return;
+      _index = 1;
+      _openGroupId = null;
+      _openChatLogin = login;
+      _openChatAvatarUrl = '';
+      _openChatToken++;
+      return;
+    }
+
+    if (type == 'group') {
+      final groupId = (target['groupId'] ?? '').trim();
+      if (groupId.isEmpty) return;
+      _index = 1;
+      _openChatLogin = null;
+      _openChatAvatarUrl = null;
+      _openGroupId = groupId;
+      _openGroupToken++;
+    }
+  }
 
 
 // Top-level function for group achievements
@@ -4098,6 +4090,8 @@ Future<void> checkGroupAchievements(String uid) async {
             .remove();
       }
     }
+    await _autoDeviceKeyTransferSub?.cancel();
+    _autoDeviceKeyTransferSub = null;
     () async {
       try {
         await PlaintextCache.setActiveUser(null);
@@ -4387,6 +4381,7 @@ Future<void> checkGroupAchievements(String uid) async {
   @override
   void initState() {
     super.initState();
+    _applyPendingNotificationOpenTarget();
     _lifecycleObserver = _AppLifecycleObserver(onChanged: _onLifecycle);
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
     _listenPresenceSettings();
@@ -4399,6 +4394,7 @@ Future<void> checkGroupAchievements(String uid) async {
     _connectedSub?.cancel();
     _presenceEnabledSub?.cancel();
     _deviceSessionSub?.cancel();
+    _autoDeviceKeyTransferSub?.cancel();
     super.dispose();
   }
 
@@ -4464,6 +4460,9 @@ Future<void> checkGroupAchievements(String uid) async {
     if (kIsWeb) {
       unawaited(_maybeShowPairingQrIfNeeded());
     }
+
+    unawaited(_listenAutoDeviceKeyTransfers(uid: current.uid, deviceId: deviceId));
+    unawaited(_requestAutoKeyRestoreIfNeeded(uid: current.uid, deviceId: deviceId));
   }
 
   Future<void> _maybeShowPairingQrIfNeeded() async {
@@ -4711,6 +4710,251 @@ Future<void> checkGroupAchievements(String uid) async {
           ],
         ),
       );
+    } catch (_) {
+      // best-effort
+    }
+  }
+
+  Future<bool> _importTransferPayload({
+    required String uid,
+    required String deviceId,
+    required Object? payloadRaw,
+  }) async {
+    if (payloadRaw is! Map) return false;
+
+    final asMap = Map<dynamic, dynamic>.from(payloadRaw);
+    final material = <String, String>{};
+    final importedPt = <String, String>{};
+
+    final nestedE2ee = asMap['e2ee'];
+    if (nestedE2ee is Map) {
+      for (final e in nestedE2ee.entries) {
+        final k = e.key.toString();
+        final val = (e.value ?? '').toString();
+        if (k.trim().isEmpty || val.trim().isEmpty) continue;
+        material[k] = val;
+      }
+    } else {
+      for (final e in asMap.entries) {
+        final k = e.key.toString();
+        final val = (e.value ?? '').toString();
+        if (k.trim().isEmpty || val.trim().isEmpty) continue;
+        material[k] = val;
+      }
+    }
+
+    final nestedPt = asMap['ptcache'];
+    if (nestedPt is Map) {
+      for (final e in nestedPt.entries) {
+        final k = e.key.toString();
+        final val = (e.value ?? '').toString();
+        if (k.trim().isEmpty || val.trim().isEmpty) continue;
+        importedPt[k] = val;
+      }
+    }
+
+    if (material.isEmpty) return false;
+
+    await E2ee.importDeviceKeyMaterial(material);
+    if (importedPt.isNotEmpty) {
+      await PlaintextCache.importEntries(importedPt);
+    }
+    await E2ee.publishMyPublicKey(uid: uid);
+    try {
+      await PlaintextCache.flushNow();
+      await rtdb().ref('users/$uid').update({
+        'e2eeCacheRebuiltAt': ServerValue.timestamp,
+      });
+    } catch (_) {
+      // best-effort
+    }
+
+    try {
+      await rtdb().ref('deviceSessions/$uid/$deviceId').update({
+        'paired': true,
+        'updatedAt': ServerValue.timestamp,
+      });
+    } catch (_) {
+      // best-effort
+    }
+    return true;
+  }
+
+  Future<void> _listenAutoDeviceKeyTransfers({
+    required String uid,
+    required String deviceId,
+  }) async {
+    await _autoDeviceKeyTransferSub?.cancel();
+    _autoDeviceKeyTransferSub = rtdb()
+        .ref('deviceKeyTransfers/$uid')
+        .onValue
+        .listen((event) {
+          final raw = event.snapshot.value;
+          final root = (raw is Map) ? raw : null;
+          if (root == null || root.isEmpty) return;
+
+          for (final entry in root.entries) {
+            final token = entry.key.toString().trim();
+            if (token.isEmpty || entry.value is! Map) continue;
+            final m = Map<String, dynamic>.from(entry.value as Map);
+            final status = (m['status'] ?? '').toString().trim();
+            final sourceDeviceId = (m['sourceDeviceId'] ?? '').toString().trim();
+            final targetDeviceId = (m['targetDeviceId'] ?? '').toString().trim();
+
+            // This device should answer an automatic restore request.
+            if (status == 'waiting_auto' &&
+                sourceDeviceId.isNotEmpty &&
+                sourceDeviceId != deviceId) {
+              final dedupeSend = 'send:$token:$deviceId';
+              if (!_autoTransferHandled.add(dedupeSend)) continue;
+              unawaited(() async {
+                try {
+                  final tokenRef = rtdb().ref('deviceKeyTransfers/$uid/$token');
+                  final snap = await tokenRef.get();
+                  final v = snap.value;
+                  if (v is! Map) return;
+                  final fresh = Map<String, dynamic>.from(v);
+                  final freshStatus = (fresh['status'] ?? '').toString().trim();
+                  final freshSource =
+                      (fresh['sourceDeviceId'] ?? '').toString().trim();
+                  if (freshStatus != 'waiting_auto' || freshSource == deviceId) {
+                    return;
+                  }
+
+                  await tokenRef.update({
+                    'status': 'sending_auto',
+                    'responderDeviceId': deviceId,
+                    'updatedAt': ServerValue.timestamp,
+                  });
+
+                  await PlaintextCache.flushNow();
+                  final material = await E2ee.exportDeviceKeyMaterial();
+                  if (material.isEmpty) {
+                    await tokenRef.update({
+                      'status': 'failed_auto',
+                      'error': 'no_keys_on_responder',
+                      'updatedAt': ServerValue.timestamp,
+                    });
+                    return;
+                  }
+                  final ptCache = await PlaintextCache.exportAllEntries(
+                    maxEntries: 1500,
+                  );
+
+                  await tokenRef.update({
+                    'status': 'ready_auto',
+                    'payload': {
+                      'e2ee': material,
+                      if (ptCache.isNotEmpty) 'ptcache': ptCache,
+                    },
+                    'updatedAt': ServerValue.timestamp,
+                  });
+                } catch (_) {
+                  // best-effort
+                }
+              }());
+              continue;
+            }
+
+            // This device requested restore and can now import received keys.
+            final isMine = targetDeviceId.isEmpty || targetDeviceId == deviceId;
+            if (!isMine) continue;
+            if (status != 'ready_auto' && status != 'ready') continue;
+
+            final dedupeImport = 'import:$token:$deviceId';
+            if (!_autoTransferHandled.add(dedupeImport)) continue;
+            unawaited(() async {
+              try {
+                final ok = await _importTransferPayload(
+                  uid: uid,
+                  deviceId: deviceId,
+                  payloadRaw: m['payload'],
+                );
+                if (!ok) return;
+
+                await rtdb().ref('deviceKeyTransfers/$uid/$token').update({
+                  'status': 'completed',
+                  'completedAt': ServerValue.timestamp,
+                  'updatedAt': ServerValue.timestamp,
+                });
+
+                if (mounted) {
+                  _safeShowSnackBarSnackBar(
+                    SnackBar(
+                      content: Text(
+                        AppLanguage.tr(
+                          context,
+                          'Šifrovací klíče byly automaticky obnoveny.',
+                          'Encryption keys were restored automatically.',
+                        ),
+                      ),
+                    ),
+                  );
+                }
+              } catch (_) {
+                // best-effort
+              }
+            }());
+          }
+        });
+  }
+
+  Future<void> _requestAutoKeyRestoreIfNeeded({
+    required String uid,
+    required String deviceId,
+  }) async {
+    if (_autoRestoreAttempted) return;
+    _autoRestoreAttempted = true;
+
+    try {
+      final local = await E2ee.exportDeviceKeyMaterial();
+      if (local.isNotEmpty) {
+        try {
+          await rtdb().ref('deviceSessions/$uid/$deviceId').update({
+            'paired': true,
+            'updatedAt': ServerValue.timestamp,
+          });
+        } catch (_) {
+          // best-effort
+        }
+        return;
+      }
+    } catch (_) {
+      // ignore and continue to best-effort auto restore
+    }
+
+    try {
+      final sessionsSnap = await rtdb().ref('deviceSessions/$uid').get();
+      final raw = sessionsSnap.value;
+      final m = (raw is Map) ? raw : null;
+      if (m == null || m.isEmpty) return;
+
+      var hasOnlinePeer = false;
+      for (final e in m.entries) {
+        final did = e.key.toString().trim();
+        if (did.isEmpty || did == deviceId || e.value is! Map) continue;
+        final s = Map<String, dynamic>.from(e.value as Map);
+        final online = s['online'] == true;
+        if (online) {
+          hasOnlinePeer = true;
+          break;
+        }
+      }
+      if (!hasOnlinePeer) return;
+
+      final token =
+          rtdb().ref().push().key ?? DateTime.now().millisecondsSinceEpoch.toString();
+      final expiresAt = DateTime.now()
+          .add(const Duration(minutes: 5))
+          .millisecondsSinceEpoch;
+      await rtdb().ref('deviceKeyTransfers/$uid/$token').set({
+        'status': 'waiting_auto',
+        'mode': 'auto',
+        'sourceDeviceId': deviceId,
+        'targetDeviceId': deviceId,
+        'createdAt': ServerValue.timestamp,
+        'expiresAt': expiresAt,
+      });
     } catch (_) {
       // best-effort
     }
@@ -4994,8 +5238,10 @@ Future<void> checkGroupAchievements(String uid) async {
             key: _chatsKey,
             initialOpenLogin: _openChatLogin,
             initialOpenAvatarUrl: _openChatAvatarUrl,
+            initialOpenGroupId: _openGroupId,
             settings: settings,
             openChatToken: _openChatToken,
+            openGroupToken: _openGroupToken,
             overviewToken: _chatsOverviewToken,
           ),
           _ContactsTab(
@@ -8359,6 +8605,114 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
     return AppLanguage.tr(context, 'Párování: nepřipraveno', 'Pairing: idle');
   }
 
+  int _transferTimestamp(Map<String, dynamic> m) {
+    final updatedAt = (m['updatedAt'] is int)
+        ? m['updatedAt'] as int
+        : int.tryParse((m['updatedAt'] ?? '').toString()) ?? 0;
+    final createdAt = (m['createdAt'] is int)
+        ? m['createdAt'] as int
+        : int.tryParse((m['createdAt'] ?? '').toString()) ?? 0;
+    return updatedAt > 0 ? updatedAt : createdAt;
+  }
+
+  ({String label, bool isError}) _autoRestoreStatusLabel({
+    required BuildContext context,
+    required String localDeviceId,
+    required Object? transfersRaw,
+  }) {
+    final root = (transfersRaw is Map)
+        ? Map<dynamic, dynamic>.from(transfersRaw)
+        : <dynamic, dynamic>{};
+
+    Map<String, dynamic>? latest;
+    var latestTs = 0;
+    for (final e in root.entries) {
+      if (e.value is! Map) continue;
+      final m = Map<String, dynamic>.from(e.value as Map);
+      final mode = (m['mode'] ?? '').toString().trim();
+      if (mode != 'auto') continue;
+      final target = (m['targetDeviceId'] ?? '').toString().trim();
+      final source = (m['sourceDeviceId'] ?? '').toString().trim();
+      final relevant = target == localDeviceId || source == localDeviceId;
+      if (!relevant) continue;
+
+      final ts = _transferTimestamp(m);
+      if (latest == null || ts >= latestTs) {
+        latest = m;
+        latestTs = ts;
+      }
+    }
+
+    if (latest == null) {
+      return (
+        label: AppLanguage.tr(
+          context,
+          'Automatická obnova klíčů: neaktivní',
+          'Automatic key restore: idle',
+        ),
+        isError: false,
+      );
+    }
+
+    final status = (latest['status'] ?? '').toString().trim();
+    switch (status) {
+      case 'waiting_auto':
+        return (
+          label: AppLanguage.tr(
+            context,
+            'Automatická obnova klíčů: čeká na druhé zařízení…',
+            'Automatic key restore: waiting for another device…',
+          ),
+          isError: false,
+        );
+      case 'sending_auto':
+        return (
+          label: AppLanguage.tr(
+            context,
+            'Automatická obnova klíčů: přenos probíhá…',
+            'Automatic key restore: transferring keys…',
+          ),
+          isError: false,
+        );
+      case 'ready_auto':
+        return (
+          label: AppLanguage.tr(
+            context,
+            'Automatická obnova klíčů: importuji klíče…',
+            'Automatic key restore: importing keys…',
+          ),
+          isError: false,
+        );
+      case 'completed':
+        return (
+          label: AppLanguage.tr(
+            context,
+            'Automatická obnova klíčů: hotovo',
+            'Automatic key restore: done',
+          ),
+          isError: false,
+        );
+      case 'failed_auto':
+        return (
+          label: AppLanguage.tr(
+            context,
+            'Automatická obnova klíčů: chyba',
+            'Automatic key restore: failed',
+          ),
+          isError: true,
+        );
+      default:
+        return (
+          label: AppLanguage.tr(
+            context,
+            'Automatická obnova klíčů: neznámý stav',
+            'Automatic key restore: unknown state',
+          ),
+          isError: false,
+        );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -9104,6 +9458,29 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
                                   : Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
+                          const SizedBox(height: 6),
+                          StreamBuilder<DatabaseEvent>(
+                            stream: rtdb()
+                                .ref('deviceKeyTransfers/${current.uid}')
+                                .onValue,
+                            builder: (context, transferSnap) {
+                              final auto = _autoRestoreStatusLabel(
+                                context: context,
+                                localDeviceId: localDeviceId,
+                                transfersRaw: transferSnap.data?.snapshot.value,
+                              );
+                              return Text(
+                                auto.label,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: auto.isError
+                                      ? Theme.of(context).colorScheme.error
+                                      : Theme.of(context).colorScheme.onSurface
+                                            .withAlpha((0.85 * 255).round()),
+                                ),
+                              );
+                            },
+                          ),
                           const SizedBox(height: 12),
                           if (kIsWeb) ...[
                             OutlinedButton.icon(
@@ -9373,6 +9750,7 @@ Future<void> sendInviteWithMessage({
   required String message,
   required String groupTitle,
   required String? logoUrl,
+  String? logoEmoji,
   required String invitedByUid,
   required String invitedByGithub,
   required BuildContext context,
@@ -9420,6 +9798,8 @@ Future<void> sendInviteWithMessage({
       'groupId': groupId,
       'groupTitle': groupTitle,
       if (logoUrl != null && logoUrl.isNotEmpty) 'groupLogoUrl': logoUrl,
+      if (logoEmoji != null && logoEmoji.trim().isNotEmpty)
+        'groupLogoEmoji': logoEmoji.trim(),
       'invitedByUid': invitedByUid,
       'invitedByGithub': invitedByGithub,
       'createdAt': ServerValue.timestamp,
@@ -11023,14 +11403,18 @@ class _ChatsTab extends StatefulWidget {
     super.key,
     required this.initialOpenLogin,
     required this.initialOpenAvatarUrl,
+    required this.initialOpenGroupId,
     required this.settings,
     required this.openChatToken,
+    required this.openGroupToken,
     required this.overviewToken,
   });
   final String? initialOpenLogin;
   final String? initialOpenAvatarUrl;
+  final String? initialOpenGroupId;
   final UserSettings settings;
   final int openChatToken;
+  final int openGroupToken;
   final int overviewToken;
 
   @override
@@ -11038,7 +11422,7 @@ class _ChatsTab extends StatefulWidget {
 }
 
 class _ChatsTabState extends State<_ChatsTab>
-    with SingleTickerProviderStateMixin {
+  with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   String? _activeLogin;
   String? _activeAvatarUrl;
   String? _activeOtherUid;
@@ -11102,6 +11486,17 @@ class _ChatsTabState extends State<_ChatsTab>
     String? _activeDmScrollChatViewKey;
   StreamSubscription<DatabaseEvent>? _incomingCallInviteSub;
   StreamSubscription<DatabaseEvent>? _callResponseSub;
+    StreamSubscription<DatabaseEvent>? _dmThreadAddedSub;
+    StreamSubscription<DatabaseEvent>? _dmThreadRemovedSub;
+    final Map<String, StreamSubscription<DatabaseEvent>> _dmIncomingSubs =
+      <String, StreamSubscription<DatabaseEvent>>{};
+    StreamSubscription<DatabaseEvent>? _userGroupsSub;
+    final Map<String, StreamSubscription<DatabaseEvent>> _groupIncomingSubs =
+      <String, StreamSubscription<DatabaseEvent>>{};
+    final Map<String, String> _groupTitleCache = <String, String>{};
+    final Set<String> _incomingNotificationSeen = <String>{};
+    int _incomingNotificationsStartMs = 0;
+    bool _incomingNotificationsRunning = false;
   Timer? _outgoingCallTimeout;
   Timer? _callElapsedTicker;
   bool _incomingCallDialogOpen = false;
@@ -14285,12 +14680,19 @@ class _ChatsTabState extends State<_ChatsTab>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _typingAnim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat();
     _activeLogin = widget.initialOpenLogin;
     _activeAvatarUrl = widget.initialOpenAvatarUrl;
+    if (widget.initialOpenGroupId != null &&
+        widget.initialOpenGroupId!.trim().isNotEmpty) {
+      _activeLogin = null;
+      _activeAvatarUrl = null;
+      _activeGroupId = widget.initialOpenGroupId!.trim();
+    }
     _dmScrollController.addListener(_handleDmScrollPositionChanged);
     _syncShellChatMeta();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -14298,6 +14700,7 @@ class _ChatsTabState extends State<_ChatsTab>
       _prewarmGroupDecryptAfterJoin();
       _listenIncomingCallInvites();
       _listenCallResponses();
+      unawaited(_setIncomingNotificationsEnabled(true));
     });
     _ttlUiTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -14337,8 +14740,28 @@ class _ChatsTabState extends State<_ChatsTab>
       setState(() {
         _activeLogin = widget.initialOpenLogin;
         _activeAvatarUrl = widget.initialOpenAvatarUrl;
+        _activeGroupId = null;
         _activeOtherUid = null;
         _activeOtherUidLoginLower = null;
+        _pendingCodePayload = null;
+        _replyToKey = null;
+        _replyToFrom = null;
+        _replyToPreview = null;
+        _replyToUid = null;
+      });
+      _syncShellChatMeta();
+      return;
+    }
+
+    if (widget.openGroupToken != oldWidget.openGroupToken &&
+        widget.initialOpenGroupId != null &&
+        widget.initialOpenGroupId!.trim().isNotEmpty) {
+      setState(() {
+        _activeLogin = null;
+        _activeAvatarUrl = null;
+        _activeOtherUid = null;
+        _activeOtherUidLoginLower = null;
+        _activeGroupId = widget.initialOpenGroupId!.trim();
         _pendingCodePayload = null;
         _replyToKey = null;
         _replyToFrom = null;
@@ -14368,6 +14791,7 @@ class _ChatsTabState extends State<_ChatsTab>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _messageController.dispose();
     _dmScrollController.removeListener(_handleDmScrollPositionChanged);
     _dmScrollController.dispose();
@@ -14377,6 +14801,7 @@ class _ChatsTabState extends State<_ChatsTab>
     _ttlUiTicker?.cancel();
     _incomingCallInviteSub?.cancel();
     _callResponseSub?.cancel();
+    unawaited(_stopIncomingMessageNotifications());
     _outgoingCallTimeout?.cancel();
     _callElapsedTicker?.cancel();
     _disposeDmWebRtc();
@@ -14391,6 +14816,42 @@ class _ChatsTabState extends State<_ChatsTab>
     _chatsHasVerificationAlert.value = false;
     _typingAnim.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_setIncomingNotificationsEnabled(true));
+      return;
+    }
+
+    // Keep listeners alive when app is merely minimized/backgrounded.
+    // This preserves local incoming notifications while the process stays alive.
+    if (state == AppLifecycleState.detached) {
+      unawaited(_setIncomingNotificationsEnabled(false));
+    }
+  }
+
+  Future<void> _setIncomingNotificationsEnabled(bool enabled) async {
+    if (enabled) {
+      if (_incomingNotificationsRunning) return;
+      if (FirebaseAuth.instance.currentUser == null) return;
+      await _startIncomingMessageNotifications();
+      _incomingNotificationsRunning = true;
+      return;
+    }
+
+    if (!_incomingNotificationsRunning) return;
+    await _stopIncomingMessageNotifications();
+    _incomingNotificationsRunning = false;
+  }
+
+  void _rememberIncomingNotificationKey(String key) {
+    if (_incomingNotificationSeen.add(key) &&
+        _incomingNotificationSeen.length > 2048) {
+      _incomingNotificationSeen.clear();
+      _incomingNotificationSeen.add(key);
+    }
   }
 
   void _hapticSelect() {
@@ -14799,6 +15260,297 @@ class _ChatsTabState extends State<_ChatsTab>
     if (v == null) return null;
     final s = v.toString().trim();
     return s.isEmpty ? null : s;
+  }
+
+  String _incomingMessagePreview(Map<String, dynamic> message) {
+    final plaintext = (message['text'] ?? '').toString().trim();
+    if (plaintext.isNotEmpty) {
+      final code = _CodeMessagePayload.tryParse(plaintext);
+      if (code != null) return code.previewLabel();
+      final image = _AttachmentPayload.tryParse(plaintext);
+      if (image != null) return 'Image';
+      if (plaintext.length > 140) {
+        return '${plaintext.substring(0, 140)}...';
+      }
+      return plaintext;
+    }
+
+    final hasCipher =
+        ((message['ciphertext'] ?? message['ct'] ?? message['cipher'])
+            ?.toString()
+            .isNotEmpty ??
+        false);
+    if (hasCipher) {
+      return AppLanguage.tr(
+        context,
+        'Nova sifrovana zprava',
+        'New encrypted message',
+      );
+    }
+
+    return AppLanguage.tr(context, 'Nova zprava', 'New message');
+  }
+
+  Future<String> _incomingDmPreview({
+    required String myUid,
+    required String fromUid,
+    required Map<String, dynamic> message,
+  }) async {
+    final plain = (message['text'] ?? '').toString().trim();
+    if (plain.isNotEmpty) return _incomingMessagePreview(message);
+
+    final hasCipher =
+        ((message['ciphertext'] ?? message['ct'] ?? message['cipher'])
+            ?.toString()
+            .isNotEmpty ??
+        false);
+    if (!hasCipher) return _incomingMessagePreview(message);
+
+    try {
+      final decrypted = await E2ee.decryptFromUser(
+        otherUid: fromUid,
+        message: message,
+      );
+      final preview = _incomingMessagePreview({'text': decrypted});
+      final key = (message['__key'] ?? '').toString();
+      if (key.isNotEmpty) {
+        PlaintextCache.putDm(
+          otherLoginLower: ((message['__login'] ?? '').toString().trim().toLowerCase()),
+          messageKey: key,
+          plaintext: decrypted,
+        );
+      }
+      return preview;
+    } catch (_) {
+      return AppLanguage.tr(
+        context,
+        'Nova sifrovana zprava',
+        'New encrypted message',
+      );
+    }
+  }
+
+  Future<String> _incomingGroupPreview({
+    required String groupId,
+    required String myUid,
+    required Map<String, dynamic> message,
+  }) async {
+    final plain = (message['text'] ?? '').toString().trim();
+    if (plain.isNotEmpty) return _incomingMessagePreview(message);
+
+    final hasCipher =
+        ((message['ciphertext'] ?? message['ct'] ?? message['cipher'])
+            ?.toString()
+            .isNotEmpty ??
+        false);
+    if (!hasCipher) return _incomingMessagePreview(message);
+
+    try {
+      SecretKey? gk = _groupKeyCache[groupId];
+      gk ??= await E2ee.fetchGroupKey(groupId: groupId, myUid: myUid);
+      if (gk != null) {
+        _groupKeyCache[groupId] = gk;
+      }
+      final decrypted = await E2ee.decryptGroupMessage(
+        groupId: groupId,
+        myUid: myUid,
+        groupKey: gk,
+        message: message,
+      );
+      final key = (message['__key'] ?? '').toString();
+      if (key.isNotEmpty) {
+        PlaintextCache.putGroup(
+          groupId: groupId,
+          messageKey: key,
+          plaintext: decrypted,
+        );
+      }
+      return _incomingMessagePreview({'text': decrypted});
+    } catch (_) {
+      return AppLanguage.tr(
+        context,
+        'Nova sifrovana zprava',
+        'New encrypted message',
+      );
+    }
+  }
+
+  Future<void> _startIncomingMessageNotifications() async {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+
+    _incomingNotificationsStartMs = DateTime.now().millisecondsSinceEpoch;
+    final myUid = current.uid;
+    final dmRootRef = rtdb().ref('messages/$myUid');
+
+    Future<void> ensureDmThreadListener(String login) async {
+      final loginLower = login.trim().toLowerCase();
+      if (loginLower.isEmpty || _dmIncomingSubs.containsKey(loginLower)) {
+        return;
+      }
+
+      final ref = rtdb()
+          .ref('messages/$myUid/$login')
+          .orderByChild('createdAt')
+          .startAt((_incomingNotificationsStartMs + 1).toDouble());
+      _dmIncomingSubs[loginLower] = ref.onChildAdded.listen((event) async {
+        final key = (event.snapshot.key ?? '').toString().trim();
+        final raw = event.snapshot.value;
+        if (key.isEmpty || raw is! Map) return;
+
+        final m = Map<String, dynamic>.from(raw);
+        m['__key'] = key;
+        m['__login'] = login;
+        final fromUid = (m['fromUid'] ?? '').toString().trim();
+        if (fromUid.isEmpty || fromUid == myUid) return;
+
+        final createdAt = (m['createdAt'] is int) ? m['createdAt'] as int : 0;
+        if (createdAt <= 0 ||
+            createdAt <= (_incomingNotificationsStartMs + 1500)) {
+          return;
+        }
+
+        final dedupeKey = 'dm:$loginLower:$key';
+        if (_incomingNotificationSeen.contains(dedupeKey)) return;
+        _rememberIncomingNotificationKey(dedupeKey);
+
+        final sender = '@${login.trim()}';
+        final preview = await _incomingDmPreview(
+          myUid: myUid,
+          fromUid: fromUid,
+          message: m,
+        );
+        await AppNotifications.showIncomingMessageNotification(
+          sender: sender,
+          preview: preview,
+          title: 'GitMit',
+          openTarget: {
+            'type': 'dm',
+            'chatLogin': login.trim(),
+          },
+        );
+      });
+    }
+
+    _dmThreadAddedSub = dmRootRef.onChildAdded.listen((event) {
+      final login = (event.snapshot.key ?? '').toString();
+      if (login.trim().isEmpty) return;
+      ensureDmThreadListener(login);
+    });
+
+    _dmThreadRemovedSub = dmRootRef.onChildRemoved.listen((event) {
+      final loginLower =
+          (event.snapshot.key ?? '').toString().trim().toLowerCase();
+      final sub = _dmIncomingSubs.remove(loginLower);
+      sub?.cancel();
+    });
+
+    Future<void> ensureGroupListener(String groupId) async {
+      final gid = groupId.trim();
+      if (gid.isEmpty || _groupIncomingSubs.containsKey(gid)) return;
+
+      try {
+        final titleSnap = await rtdb().ref('groups/$gid/title').get();
+        final title = (titleSnap.value ?? '').toString().trim();
+        if (title.isNotEmpty) {
+          _groupTitleCache[gid] = title;
+        }
+      } catch (_) {
+        // best-effort
+      }
+
+        final ref = rtdb()
+          .ref('groupMessages/$gid')
+          .orderByChild('createdAt')
+          .startAt((_incomingNotificationsStartMs + 1).toDouble());
+      _groupIncomingSubs[gid] = ref.onChildAdded.listen((event) async {
+        final key = (event.snapshot.key ?? '').toString().trim();
+        final raw = event.snapshot.value;
+        if (key.isEmpty || raw is! Map) return;
+
+        final m = Map<String, dynamic>.from(raw);
+        m['__key'] = key;
+        final fromUid = (m['fromUid'] ?? '').toString().trim();
+        if (fromUid.isEmpty || fromUid == myUid) return;
+
+        final createdAt = (m['createdAt'] is int) ? m['createdAt'] as int : 0;
+        if (createdAt <= 0 ||
+            createdAt <= (_incomingNotificationsStartMs + 1500)) {
+          return;
+        }
+
+        final dedupeKey = 'group:$gid:$key';
+        if (_incomingNotificationSeen.contains(dedupeKey)) return;
+        _rememberIncomingNotificationKey(dedupeKey);
+
+        final senderRaw = (m['fromGithub'] ?? '').toString().trim();
+        final sender = senderRaw.isEmpty ? fromUid : '@$senderRaw';
+        final preview = await _incomingGroupPreview(
+          groupId: gid,
+          myUid: myUid,
+          message: m,
+        );
+        final groupTitle = (_groupTitleCache[gid] ?? '').trim();
+        final title = groupTitle.isEmpty ? 'Skupina' : 'Skupina #$groupTitle';
+
+        await AppNotifications.showIncomingMessageNotification(
+          sender: sender,
+          preview: preview,
+          title: title,
+          openTarget: {
+            'type': 'group',
+            'groupId': gid,
+          },
+        );
+      });
+    }
+
+    _userGroupsSub = rtdb().ref('userGroups/$myUid').onValue.listen((event) {
+      final v = event.snapshot.value;
+      final m = (v is Map) ? v : null;
+
+      final desired = <String>{};
+      if (m != null) {
+        for (final e in m.entries) {
+          if (e.value == true) {
+            final gid = e.key.toString().trim();
+            if (gid.isNotEmpty) desired.add(gid);
+          }
+        }
+      }
+
+      final removed = _groupIncomingSubs.keys
+          .where((gid) => !desired.contains(gid))
+          .toList(growable: false);
+      for (final gid in removed) {
+        _groupIncomingSubs.remove(gid)?.cancel();
+        _groupTitleCache.remove(gid);
+      }
+
+      for (final gid in desired) {
+        ensureGroupListener(gid);
+      }
+    });
+  }
+
+  Future<void> _stopIncomingMessageNotifications() async {
+    await _dmThreadAddedSub?.cancel();
+    await _dmThreadRemovedSub?.cancel();
+    _dmThreadAddedSub = null;
+    _dmThreadRemovedSub = null;
+
+    for (final sub in _dmIncomingSubs.values) {
+      await sub.cancel();
+    }
+    _dmIncomingSubs.clear();
+
+    await _userGroupsSub?.cancel();
+    _userGroupsSub = null;
+    for (final sub in _groupIncomingSubs.values) {
+      await sub.cancel();
+    }
+    _groupIncomingSubs.clear();
+    _groupTitleCache.clear();
   }
 
   Future<void> _prewarmDmDecryptAfterJoin() async {
@@ -17168,6 +17920,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                             final groupLogo =
                                                 (inv['groupLogoUrl'] ?? '')
                                                     .toString();
+                                            final groupLogoEmoji =
+                                                (inv['groupLogoEmoji'] ?? '')
+                                                    .toString()
+                                                    .trim();
                                             return ListTile(
                                               leading: CircleAvatar(
                                                 radius: 18,
@@ -17176,7 +17932,13 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     ? NetworkImage(groupLogo)
                                                     : null,
                                                 child: groupLogo.isEmpty
-                                                    ? const Icon(Icons.group)
+                                                    ? (groupLogoEmoji.isNotEmpty
+                                                          ? Text(
+                                                              groupLogoEmoji,
+                                                            )
+                                                          : const Icon(
+                                                              Icons.group,
+                                                            ))
                                                     : null,
                                               ),
                                               title: Text(groupTitle),
@@ -17318,6 +18080,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                             .toString();
                                         final logo = (gm?['logoUrl'] ?? '')
                                             .toString();
+                                        final logoEmoji =
+                                          (gm?['logoEmoji'] ?? '')
+                                            .toString()
+                                            .trim();
 
                                         await rtdb()
                                             .ref(
@@ -17328,6 +18094,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                               'groupTitle': title,
                                               if (logo.isNotEmpty)
                                                 'groupLogoUrl': logo,
+                                              if (logoEmoji.isNotEmpty)
+                                                'groupLogoEmoji': logoEmoji,
                                               'invitedByUid': current.uid,
                                               'invitedByGithub': myGithub,
                                               'createdAt':
@@ -17986,6 +18754,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                                     final logo =
                                                         (m['logoUrl'] ?? '')
                                                             .toString();
+                                                    final logoEmoji =
+                                                        (m['logoEmoji'] ?? '')
+                                                            .toString()
+                                                            .trim();
                                                     return StreamBuilder<
                                                       DatabaseEvent
                                                     >(
@@ -18076,10 +18848,14 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                     : null,
                                                                 child: logo
                                                                         .isEmpty
-                                                                    ? const Icon(
-                                                                        Icons
-                                                                            .group,
-                                                                      )
+                                                                    ? (logoEmoji
+                                                                              .isNotEmpty
+                                                                          ? Text(
+                                                                              logoEmoji,
+                                                                            )
+                                                                          : const Icon(
+                                                                              Icons.group,
+                                                                            ))
                                                                     : null,
                                                               ),
                                                               title: Text(title),
@@ -20162,6 +20938,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                 final expiresAt = (m['expiresAt'] is int)
                                   ? m['expiresAt'] as int
                                   : null;
+                                final hasTtlMarker =
+                                  burnAfterRead || expiresAt != null;
                                 final createdAt = (m['createdAt'] is int)
                                     ? m['createdAt'] as int
                                     : null;
@@ -20600,22 +21378,47 @@ class _ChatsTabState extends State<_ChatsTab>
                                             alignment: WrapAlignment.end,
                                             children: reactionChips,
                                           ),
-                                        if (timeLabel.isNotEmpty)
+                                        if (timeLabel.isNotEmpty ||
+                                            hasTtlMarker)
                                           Padding(
                                             padding: const EdgeInsets.only(
                                               top: 4,
                                             ),
-                                            child: Text(
-                                              timeLabel,
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .onSurface
-                                                    .withAlpha(
-                                                      (0.6 * 255).round(),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              mainAxisAlignment: isMe
+                                                  ? MainAxisAlignment.end
+                                                  : MainAxisAlignment.start,
+                                              children: [
+                                                if (hasTtlMarker)
+                                                  Icon(
+                                                    Icons.timer_outlined,
+                                                    size: 12,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurface
+                                                        .withAlpha(
+                                                          (0.65 * 255).round(),
+                                                        ),
+                                                  ),
+                                                if (hasTtlMarker &&
+                                                    timeLabel.isNotEmpty)
+                                                  const SizedBox(width: 4),
+                                                if (timeLabel.isNotEmpty)
+                                                  Text(
+                                                    timeLabel,
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurface
+                                                          .withAlpha(
+                                                            (0.6 * 255)
+                                                                .round(),
+                                                          ),
                                                     ),
-                                              ),
+                                                  ),
+                                              ],
                                             ),
                                           ),
                                       ],
@@ -20628,6 +21431,81 @@ class _ChatsTabState extends State<_ChatsTab>
                             );
                           },
                         ),
+                      ),
+                      StreamBuilder<DatabaseEvent>(
+                        stream: rtdb().ref('typingGroups/$groupId').onValue,
+                        builder: (context, typingSnap) {
+                          final raw = typingSnap.data?.snapshot.value;
+                          final map = (raw is Map) ? raw : null;
+                          if (map == null || map.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+
+                          final now = DateTime.now().millisecondsSinceEpoch;
+                          final typers = <String>[];
+                          for (final e in map.entries) {
+                            final uid = e.key.toString().trim();
+                            if (uid.isEmpty || uid == current.uid) continue;
+                            if (e.value is! Map) continue;
+
+                            final item = Map<String, dynamic>.from(
+                              e.value as Map,
+                            );
+                            if (item['typing'] != true) continue;
+
+                            final at = (item['at'] is int)
+                                ? item['at'] as int
+                                : int.tryParse((item['at'] ?? '').toString()) ??
+                                      0;
+                            if (at > 0 && (now - at) > 12000) {
+                              // Best-effort cleanup for stale typing entries.
+                              unawaited(
+                                rtdb()
+                                    .ref('typingGroups/$groupId/$uid')
+                                    .remove(),
+                              );
+                              continue;
+                            }
+
+                            final github = (item['github'] ?? '')
+                                .toString()
+                                .trim();
+                            typers.add(github.isNotEmpty ? '@$github' : uid);
+                          }
+
+                          if (typers.isEmpty) return const SizedBox.shrink();
+
+                          final label = typers.length == 1
+                              ? '${typers.first} ${AppLanguage.tr(context, 'píše', 'is typing')}'
+                              : '${typers.take(2).join(', ')}${typers.length > 2 ? ' +' + (typers.length - 2).toString() : ''} ${AppLanguage.tr(context, 'píší', 'are typing')}';
+
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _typingPill(),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurface
+                                            .withAlpha((0.6 * 255).round()),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       ),
                       if (_replyToPreview != null &&
                           _replyToPreview!.isNotEmpty)
@@ -21475,6 +22353,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                           (m['expiresAt'] is int)
                                           ? m['expiresAt'] as int
                                           : null;
+                                      final hasTtlMarker =
+                                          burnAfterRead || expiresAt != null;
                                       final createdAt = (m['createdAt'] is int)
                                           ? m['createdAt'] as int
                                           : null;
@@ -21962,7 +22842,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                                   alignment: WrapAlignment.end,
                                                   children: reactionChips,
                                                 ),
-                                              if (timeLabel.isNotEmpty || isMe)
+                                              if (timeLabel.isNotEmpty ||
+                                                  isMe ||
+                                                  hasTtlMarker)
                                                 Padding(
                                                   padding:
                                                       const EdgeInsets.only(
@@ -21976,6 +22858,27 @@ class _ChatsTabState extends State<_ChatsTab>
                                                         : MainAxisAlignment
                                                               .start,
                                                     children: [
+                                                      if (hasTtlMarker)
+                                                        Icon(
+                                                          Icons
+                                                              .timer_outlined,
+                                                          size: 12,
+                                                          color: Theme.of(
+                                                                context,
+                                                              )
+                                                              .colorScheme
+                                                              .onSurface
+                                                              .withAlpha(
+                                                                (0.65 * 255)
+                                                                    .round(),
+                                                              ),
+                                                        ),
+                                                      if (hasTtlMarker &&
+                                                          timeLabel
+                                                              .isNotEmpty)
+                                                        const SizedBox(
+                                                          width: 4,
+                                                        ),
                                                       if (timeLabel.isNotEmpty)
                                                         Text(
                                                           timeLabel,

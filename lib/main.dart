@@ -272,6 +272,70 @@ class _AuthGateState extends State<AuthGate> {
   StreamSubscription<User?>? _sub;
   User? _user;
   bool _ready = false;
+  String? _githubGateUid;
+  int _githubGateStartedAt = 0;
+  bool _githubRepairInFlight = false;
+
+  void _resetGithubGate(String uid) {
+    if (_githubGateUid == uid && _githubGateStartedAt > 0) return;
+    _githubGateUid = uid;
+    _githubGateStartedAt = DateTime.now().millisecondsSinceEpoch;
+  }
+
+  Duration _githubGateAge() {
+    if (_githubGateStartedAt <= 0) return Duration.zero;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return Duration(milliseconds: (now - _githubGateStartedAt).clamp(0, 1 << 30));
+  }
+
+  bool _looksLikeGithubLogin(String value) {
+    final v = value.trim();
+    if (v.isEmpty || v.length > 39) return false;
+    if (v.startsWith('-') || v.endsWith('-')) return false;
+    return RegExp(r'^[A-Za-z0-9-]+$').hasMatch(v);
+  }
+
+  void _kickGithubRepair({required User user, required Map? profile}) {
+    if (_githubRepairInFlight) return;
+    _githubRepairInFlight = true;
+    () async {
+      try {
+        var username = (profile?['githubUsername'] ?? '').toString().trim();
+
+        if (username.isEmpty) {
+          for (final p in user.providerData) {
+            if (p.providerId != 'github.com') continue;
+            final candidate = (p.displayName ?? '').trim();
+            if (_looksLikeGithubLogin(candidate)) {
+              username = candidate;
+              break;
+            }
+          }
+        }
+
+        if (username.isNotEmpty) {
+          final lower = username.toLowerCase();
+          final mapRef = rtdb().ref('usernames/$lower');
+          final mapSnap = await mapRef.get();
+          final mapped = mapSnap.value?.toString();
+          if (mapped == null || mapped.isEmpty || mapped == user.uid) {
+            await mapRef.set(user.uid);
+          }
+          await rtdb().ref('users/${user.uid}').update({
+            'githubUsername': username,
+            'provider': 'github',
+            'email': user.email,
+            'lastLoginAt': ServerValue.timestamp,
+            if ((user.photoURL ?? '').trim().isNotEmpty) 'avatarUrl': user.photoURL,
+          });
+        }
+      } catch (_) {
+        // best-effort self-heal only
+      } finally {
+        _githubRepairInFlight = false;
+      }
+    }();
+  }
 
   @override
   void initState() {
@@ -314,6 +378,8 @@ class _AuthGateState extends State<AuthGate> {
     final user = _user;
     if (user == null) return const LoginPage();
 
+    _resetGithubGate(user.uid);
+
     final userRef = rtdb().ref('users/${user.uid}');
     return StreamBuilder<DatabaseEvent>(
       stream: userRef.onValue,
@@ -325,10 +391,18 @@ class _AuthGateState extends State<AuthGate> {
 
         // If this is a GitHub user, wait until RTDB profile + username mapping exist.
         if (provider == 'github') {
+          final gateAge = _githubGateAge();
           if (githubUsername.isEmpty) {
+            _kickGithubRepair(user: user, profile: m);
+            if (gateAge > const Duration(seconds: 20)) {
+              // Prevent infinite spinner on older Android devices with delayed
+              // RTDB profile propagation.
+              return const DashboardPage();
+            }
             return _AccountSetupScreen(
               title: AppLanguage.tr(context, 'Dokončuji registraci…', 'Finishing registration…'),
               message: AppLanguage.tr(context, 'Načítám profil a připravuji účet.', 'Loading profile and preparing your account.'),
+              showSignOut: gateAge > const Duration(seconds: 8),
             );
           }
           final lower = githubUsername.toLowerCase();
@@ -341,6 +415,9 @@ class _AuthGateState extends State<AuthGate> {
               if (mapped == null || mapped.isEmpty) {
                 // Best-effort: fill mapping once it's known.
                 mapRef.set(user.uid);
+                if (gateAge > const Duration(seconds: 20)) {
+                  return const DashboardPage();
+                }
                 return _AccountSetupScreen(
                   title: AppLanguage.tr(context, 'Dokončuji registraci…', 'Finishing registration…'),
                   message: AppLanguage.tr(
@@ -348,6 +425,7 @@ class _AuthGateState extends State<AuthGate> {
                     'Nastavuji mapování @${githubUsername.toLowerCase()} → UID.',
                     'Setting mapping @${githubUsername.toLowerCase()} → UID.',
                   ),
+                  showSignOut: gateAge > const Duration(seconds: 8),
                 );
               }
 
@@ -441,11 +519,35 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  static bool _githubLoginInFlight = false;
+  static int _githubLoginStartedAtMs = 0;
+
   String? _errorMessage;
   bool _loading = false;
 
   Future<void> _loginWithGitHub() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // Guard against duplicated provider launches across quick taps/rebuilds.
+    if (_githubLoginInFlight) {
+      final age = now - _githubLoginStartedAtMs;
+      if (age < 45000) {
+        if (mounted) {
+          setState(
+            () => _errorMessage = AppLanguage.tr(
+              context,
+              'Přihlášení už běží. Chvilku počkej prosím.',
+              'Sign-in is already in progress. Please wait a moment.',
+            ),
+          );
+        }
+        return;
+      }
+      // Stale lock fallback.
+      _githubLoginInFlight = false;
+    }
     if (_loading) return;
+    _githubLoginInFlight = true;
+    _githubLoginStartedAtMs = now;
     if (mounted) {
       setState(() {
         _loading = true;
@@ -554,6 +656,19 @@ class _LoginPageState extends State<LoginPage> {
       // Navigation is handled by AuthGate reacting to authStateChanges.
       // Avoid pushing a second Dashboard route (can lead to odd initial state).
     } on FirebaseAuthException catch (e) {
+      final msg = (e.message ?? '').toLowerCase();
+      if (msg.contains('operation is already in progress') ||
+          msg.contains('headful operation is already in progress')) {
+        if (mounted) {
+          setState(
+            () => _errorMessage = AppLanguage.tr(
+              context,
+              'Přihlášení už běží. Zavři prosím okno GitHubu a zkus to za pár sekund znovu.',
+              'Sign-in is already in progress. Close the GitHub window and try again in a few seconds.',
+            ),
+          );
+        }
+      } else {
       if (mounted) {
         setState(
           () => _errorMessage = e.message ?? AppLanguage.tr(
@@ -563,9 +678,11 @@ class _LoginPageState extends State<LoginPage> {
           ),
         );
       }
+      }
     } catch (e) {
       if (mounted) setState(() => _errorMessage = e.toString());
     } finally {
+      _githubLoginInFlight = false;
       if (mounted) setState(() => _loading = false);
     }
   }

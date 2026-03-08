@@ -1,4 +1,5 @@
 const { onRequest } = require('firebase-functions/v2/https');
+const { onValueCreated } = require('firebase-functions/v2/database');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
@@ -6,6 +7,201 @@ admin.initializeApp();
 
 const backendApiKey = defineSecret('BACKEND_API_KEY');
 const githubNotifyToken = defineSecret('GITHUB_NOTIFY_TOKEN');
+
+function buildPreviewText(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) {
+    return 'Nova sifrovana zprava';
+  }
+
+  if (text.startsWith('{') && text.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.type === 'image') {
+        return 'Obrazek';
+      }
+      if (parsed && parsed.type === 'code') {
+        const title = String(parsed.title || '').trim();
+        if (title) return `Kod: ${title}`;
+        return 'Kod';
+      }
+    } catch (_) {
+      // Non-JSON plaintext; continue.
+    }
+  }
+
+  if (text.length > 160) {
+    return `${text.slice(0, 160)}...`;
+  }
+  return text;
+}
+
+async function isUserOffline(uid) {
+  const snap = await admin.database().ref(`presence/${uid}`).get();
+  const value = snap.val();
+  if (!value || typeof value !== 'object') {
+    return true;
+  }
+  return value.online !== true;
+}
+
+async function notificationsEnabledForUser(uid) {
+  const snap = await admin.database().ref(`settings/${uid}/notificationsEnabled`).get();
+  const value = snap.val();
+  return value !== false;
+}
+
+async function getUserTokens(uid) {
+  const snap = await admin.database().ref(`fcmTokens/${uid}`).get();
+  const value = snap.val();
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  return Object.values(value)
+    .map((item) => (item && typeof item === 'object' ? String(item.token || '') : ''))
+    .filter((token) => token.length > 0);
+}
+
+async function sendPushToUser({ uid, title, body, data }) {
+  const tokens = await getUserTokens(uid);
+  if (!tokens.length) return { sent: 0, failed: 0, reason: 'No tokens' };
+
+  const result = await admin.messaging().sendEachForMulticast({
+    tokens,
+    notification: { title, body },
+    data,
+    android: { priority: 'high' },
+    apns: {
+      headers: { 'apns-priority': '10' },
+      payload: { aps: { sound: 'default' } },
+    },
+  });
+
+  return {
+    sent: result.successCount,
+    failed: result.failureCount,
+  };
+}
+
+exports.notifyDmMessageCreated = onValueCreated(
+  {
+    region: 'us-central1',
+    ref: '/messages/{toUid}/{peerLogin}/{messageId}',
+  },
+  async (event) => {
+    const toUid = String(event.params?.toUid || '').trim();
+    const peerLogin = String(event.params?.peerLogin || '').trim();
+    const messageId = String(event.params?.messageId || '').trim();
+    const payload = event.data?.val();
+
+    if (!toUid || !peerLogin || !messageId || !payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    const fromUid = String(payload.fromUid || '').trim();
+    if (!fromUid || fromUid === toUid) {
+      // Ignore sender-side mirrored message node.
+      return null;
+    }
+
+    const [offline, enabled] = await Promise.all([
+      isUserOffline(toUid),
+      notificationsEnabledForUser(toUid),
+    ]);
+    if (!offline || !enabled) {
+      return null;
+    }
+
+    const sender = `@${peerLogin}`;
+    const preview = buildPreviewText(payload.text);
+    const body = `${sender}: ${preview}`;
+
+    await sendPushToUser({
+      uid: toUid,
+      title: 'Nova zprava',
+      body,
+      data: {
+        type: 'dm_message',
+        fromUid,
+        fromLogin: peerLogin,
+        chatLogin: peerLogin,
+        messageId,
+      },
+    });
+
+    return null;
+  },
+);
+
+exports.notifyGroupMessageCreated = onValueCreated(
+  {
+    region: 'us-central1',
+    ref: '/groupMessages/{groupId}/{messageId}',
+  },
+  async (event) => {
+    const groupId = String(event.params?.groupId || '').trim();
+    const messageId = String(event.params?.messageId || '').trim();
+    const payload = event.data?.val();
+
+    if (!groupId || !messageId || !payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    const fromUid = String(payload.fromUid || '').trim();
+    if (!fromUid) {
+      return null;
+    }
+
+    const [membersSnap, groupTitleSnap] = await Promise.all([
+      admin.database().ref(`groupMembers/${groupId}`).get(),
+      admin.database().ref(`groups/${groupId}/title`).get(),
+    ]);
+
+    const membersValue = membersSnap.val();
+    if (!membersValue || typeof membersValue !== 'object') {
+      return null;
+    }
+
+    const groupTitle = String(groupTitleSnap.val() || '').trim();
+    const senderRaw = String(payload.fromGithub || '').trim();
+    const sender = senderRaw ? `@${senderRaw}` : fromUid;
+    const preview = buildPreviewText(payload.text);
+    const body = `${sender}: ${preview}`;
+    const title = groupTitle ? `Nova zprava ve skupine #${groupTitle}` : 'Nova skupinova zprava';
+
+    const memberUids = Object.keys(membersValue).filter((uid) => uid && uid !== fromUid);
+    if (!memberUids.length) {
+      return null;
+    }
+
+    await Promise.all(
+      memberUids.map(async (uid) => {
+        const [offline, enabled] = await Promise.all([
+          isUserOffline(uid),
+          notificationsEnabledForUser(uid),
+        ]);
+        if (!offline || !enabled) return;
+
+        await sendPushToUser({
+          uid,
+          title,
+          body,
+          data: {
+            type: 'group_message',
+            groupId,
+            groupTitle,
+            fromUid,
+            fromLogin: senderRaw,
+            messageId,
+          },
+        });
+      }),
+    );
+
+    return null;
+  },
+);
 
 function readProvidedApiKey(req) {
   const headerApiKey = String(req.get('x-api-key') || '').trim();

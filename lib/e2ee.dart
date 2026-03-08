@@ -27,6 +27,7 @@ class E2ee {
 
   // Highest supported/advertised E2EE version by this client.
   static const int currentVersion = v2;
+  static final Set<String> _dmForceReinitPeers = <String>{};
 
   static const String _kPrivKey = 'e2ee_x25519_private_v1';
   static const String _kPubKey = 'e2ee_x25519_public_v1';
@@ -720,6 +721,10 @@ class E2ee {
     );
 
     var st = await _loadSession(otherUid);
+    if (_dmForceReinitPeers.remove(otherUid)) {
+      await _deleteSession(otherUid);
+      st = null;
+    }
     if (st == null) {
       // Prekey message init (X3DH-like) + start double ratchet.
       final myIk = await getOrCreateIdentityKeyPair();
@@ -816,15 +821,17 @@ class E2ee {
       try {
         return _decryptFromUserV2(otherUid: otherUid, message: m);
       } catch (_) {
-        final hasSpkId = (m['spkId'] ?? '').toString().trim().isNotEmpty;
-        final isInit = _fieldBool(m, ['init']) || hasSpkId;
-        if (!isInit) rethrow;
+        _dmForceReinitPeers.add(otherUid);
         try {
           await _deleteSession(otherUid);
         } catch (_) {
           // ignore
         }
-        return _decryptFromUserV2(otherUid: otherUid, message: m);
+        try {
+          return _decryptFromUserV2(otherUid: otherUid, message: m);
+        } catch (_) {
+          rethrow;
+        }
       }
     }
 

@@ -1,7 +1,5 @@
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
-
 class ParsedGroupInvite {
   const ParsedGroupInvite(this.groupId, this.code);
 
@@ -17,25 +15,24 @@ String generateInviteCode({int length = 12}) {
   );
 }
 
+const String _groupInviteWebBaseUrl = 'https://github.com/ikryptoz/GitMit';
+
 String buildGroupInviteLink({required String groupId, required String code}) {
-  return 'gitmit://join?g=$groupId&c=$code';
+  final uri = Uri.parse(_groupInviteWebBaseUrl).replace(
+    queryParameters: {
+      'join': '1',
+      'g': groupId,
+      'c': code,
+    },
+  );
+  return uri.toString();
 }
 
-/// QR payload optimized for scanning by the system camera on Android.
+/// QR payload for system camera scanners.
 ///
-/// - If the app is installed, Android resolves the intent and opens GitMit.
-/// - If not installed, the scanner/browser can fall back to Play Store.
-///
-/// On iOS (and other platforms), returns the plain `gitmit://` link.
+/// We intentionally use an HTTPS URL so native camera apps recognize it as a
+/// clickable web link, even outside GitMit.
 String buildGroupInviteQrPayload({required String groupId, required String code}) {
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    // Keep this in sync with android/app/build.gradle.kts -> applicationId.
-    const androidPackage = 'com.nothix.gitmit';
-    final fallback = 'https://play.google.com/store/apps/details?id=$androidPackage';
-    return 'intent://join?g=$groupId&c=$code'
-        '#Intent;scheme=gitmit;package=$androidPackage;'
-        'S.browser_fallback_url=${Uri.encodeComponent(fallback)};end';
-  }
   return buildGroupInviteLink(groupId: groupId, code: code);
 }
 
