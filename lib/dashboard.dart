@@ -11782,6 +11782,198 @@ class _ChatsTabState extends State<_ChatsTab>
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
+  bool get _hasAnyCallVisualState {
+    return _outgoingCallRinging ||
+        _outgoingGroupCallRinging ||
+        (_activeCallId != null && _activeCallId!.trim().isNotEmpty) ||
+        _callConnected;
+  }
+
+  String _callStatusText(BuildContext context) {
+    if (_callConnected) {
+      return AppLanguage.tr(context, 'Přijato', 'Accepted');
+    }
+    if (_activeCallId != null && _activeCallId!.trim().isNotEmpty) {
+      return AppLanguage.tr(context, 'Připojování…', 'Connecting...');
+    }
+    if (_outgoingCallRinging || _outgoingGroupCallRinging) {
+      return AppLanguage.tr(context, 'Vyzvánění…', 'Ringing...');
+    }
+    return AppLanguage.tr(context, 'Hovor', 'Call');
+  }
+
+  String _callPeerLabel(BuildContext context) {
+    final groupTitle = (_outgoingGroupTitle ?? '').trim();
+    if (groupTitle.isNotEmpty) return '#$groupTitle';
+    final peer = (_callPeerLogin ?? '').trim();
+    if (peer.isNotEmpty) return '@$peer';
+    return AppLanguage.tr(context, 'GitMit kontakt', 'GitMit contact');
+  }
+
+  Future<void> _cancelOutgoingDmRinging() async {
+    final peerUid = _callPeerUid;
+    final callId = _outgoingCallId;
+    if (peerUid != null && callId != null) {
+      try {
+        await rtdb().ref('callInvites/$peerUid/$callId').remove();
+      } catch (_) {
+        // best-effort
+      }
+    }
+    _outgoingCallTimeout?.cancel();
+    _outgoingCallTimeout = null;
+    if (!mounted) return;
+    setState(() {
+      _outgoingCallRinging = false;
+      _outgoingCallId = null;
+    });
+  }
+
+  Future<void> _callPrimaryAction() async {
+    if (_outgoingGroupCallRinging) {
+      await _cancelOutgoingGroupInvites();
+      _outgoingCallTimeout?.cancel();
+      _outgoingCallTimeout = null;
+      if (mounted) {
+        setState(() {
+          _outgoingGroupCallRinging = false;
+          _outgoingGroupCallId = null;
+        });
+      }
+      return;
+    }
+    if (_outgoingCallRinging) {
+      await _cancelOutgoingDmRinging();
+      return;
+    }
+    if (_callConnected ||
+        (_activeCallId != null && _activeCallId!.trim().isNotEmpty)) {
+      await _endActiveCall(sendRemoteEnd: true);
+    }
+  }
+
+  Widget _withCallOverlay(Widget child) {
+    if (!_hasAnyCallVisualState) return child;
+
+    final showAudioControls =
+        _callConnected ||
+        (_activeCallId != null && _activeCallId!.trim().isNotEmpty);
+
+    return Stack(
+      children: [
+        child,
+        Positioned.fill(
+          child: ColoredBox(
+            color: const Color(0xE6111822),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
+                child: Column(
+                  children: [
+                    const Spacer(),
+                    Container(
+                      width: 110,
+                      height: 110,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF132A1C),
+                        border: Border.all(color: const Color(0xFF3FB950), width: 2),
+                      ),
+                      child: const Icon(
+                        Icons.verified_user_rounded,
+                        color: Color(0xFF3FB950),
+                        size: 52,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'GitMit',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _callPeerLabel(context),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white70, fontSize: 15),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0E4429),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        _callStatusText(context),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      _callDurationLabel(_callElapsedSeconds),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (showAudioControls)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton.filledTonal(
+                            tooltip: AppLanguage.tr(context, 'Mikrofon', 'Microphone'),
+                            onPressed: () => _toggleDmMic(),
+                            icon: Icon(_dmMicEnabled ? Icons.mic : Icons.mic_off),
+                          ),
+                          const SizedBox(width: 16),
+                          IconButton.filledTonal(
+                            tooltip: AppLanguage.tr(context, 'Reproduktor', 'Speaker'),
+                            onPressed: () => _toggleDmSpeaker(),
+                            icon: Icon(
+                              _dmSpeakerEnabled
+                                  ? Icons.volume_up
+                                  : Icons.hearing_disabled,
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFB62324),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 14,
+                        ),
+                      ),
+                      onPressed: () => _callPrimaryAction(),
+                      icon: const Icon(Icons.call_end),
+                      label: Text(
+                        AppLanguage.tr(context, 'Ukončit', 'End'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _sendDmEncryptedSystemText({
     required String myUid,
     required String myLogin,
@@ -11799,8 +11991,13 @@ class _ChatsTabState extends State<_ChatsTab>
 
     final key = rtdb().ref().push().key;
     if (key == null || key.isEmpty) return;
+    // Call-status system messages are non-sensitive UX hints.
+    // Keep encrypted envelope, but also persist plaintext fallback so
+    // recipients do not see encrypted placeholders when session ratchet
+    // state is temporarily out of sync after reinstall/device restore.
     final msg = <String, Object?>{
       ...encrypted,
+      'text': text,
       'fromUid': myUid,
       'createdAt': ServerValue.timestamp,
     };
@@ -17563,7 +17760,7 @@ class _ChatsTabState extends State<_ChatsTab>
       final userGroupsRef = rtdb().ref('userGroups/${current.uid}');
       final groupsRef = rtdb().ref('groups');
 
-      return StreamBuilder<DatabaseEvent>(
+      return _withCallOverlay(StreamBuilder<DatabaseEvent>(
         stream: currentUserRef.onValue,
         builder: (context, userSnap) {
           final uval = userSnap.data?.snapshot.value;
@@ -20048,7 +20245,7 @@ class _ChatsTabState extends State<_ChatsTab>
             },
           );
         },
-      );
+      ));
     }
 
     // Verified chat view
@@ -20623,7 +20820,7 @@ class _ChatsTabState extends State<_ChatsTab>
                     }
                   }
 
-                  return Column(
+                  return _withCallOverlay(Column(
                     children: [
                       if (_outgoingGroupCallRinging && _outgoingGroupId == groupId)
                         Padding(
@@ -21775,7 +21972,7 @@ class _ChatsTabState extends State<_ChatsTab>
                         ),
                       ),
                     ],
-                  );
+                  ));
                 },
               );
             },
@@ -21802,7 +21999,7 @@ class _ChatsTabState extends State<_ChatsTab>
     );
 
     const bgColor = Color(0xFF0D1117);
-    return StreamBuilder<DatabaseEvent>(
+    return _withCallOverlay(StreamBuilder<DatabaseEvent>(
       stream: currentUserRef.onValue,
       builder: (context, uSnap) {
         final uv = uSnap.data?.snapshot.value;
@@ -23396,6 +23593,6 @@ class _ChatsTabState extends State<_ChatsTab>
           },
         );
       },
-    );
+    ));
   }
 }
