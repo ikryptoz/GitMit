@@ -11568,7 +11568,7 @@ class _ChatsTabState extends State<_ChatsTab>
       <rtc.RTCIceCandidate>[];
   bool _dmHasRemoteDescription = false;
   bool _dmMicEnabled = true;
-  bool _dmSpeakerEnabled = true;
+  bool _dmSpeakerEnabled = false;
   bool _dmIsCaller = false;
   int _dmReconnectAttempts = 0;
   bool _callMicDenied = false;
@@ -12451,8 +12451,10 @@ class _ChatsTabState extends State<_ChatsTab>
 
     try {
       await rtc.Helper.setSpeakerphoneOn(_dmSpeakerEnabled);
+      _callLog('audio_route_initial', {'speakerOn': _dmSpeakerEnabled});
     } catch (_) {
       // unsupported platform route toggle
+      _callLog('audio_route_initial_failed', {'speakerOn': _dmSpeakerEnabled});
     }
 
     _dmPeerConnection!.onIceCandidate = (candidate) {
@@ -12481,6 +12483,16 @@ class _ChatsTabState extends State<_ChatsTab>
       });
       setState(() {});
       if (state == rtc.RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        try {
+          await rtc.Helper.setSpeakerphoneOn(_dmSpeakerEnabled);
+          _callLog('audio_route_connected_reapply', {
+            'speakerOn': _dmSpeakerEnabled,
+          });
+        } catch (_) {
+          _callLog('audio_route_connected_reapply_failed', {
+            'speakerOn': _dmSpeakerEnabled,
+          });
+        }
         _callIceState = 'connected';
         _callConnectingWatchdog?.cancel();
         _callConnectingWatchdog = null;
@@ -12553,6 +12565,19 @@ class _ChatsTabState extends State<_ChatsTab>
       // Ensure incoming audio tracks are enabled when attached by remote peer.
       if (event.track.kind == 'audio') {
         event.track.enabled = true;
+        _callLog('remote_audio_track', {'enabled': true});
+        () async {
+          try {
+            await rtc.Helper.setSpeakerphoneOn(_dmSpeakerEnabled);
+            _callLog('audio_route_on_track_reapply', {
+              'speakerOn': _dmSpeakerEnabled,
+            });
+          } catch (_) {
+            _callLog('audio_route_on_track_reapply_failed', {
+              'speakerOn': _dmSpeakerEnabled,
+            });
+          }
+        }();
       }
       for (final stream in event.streams) {
         for (final track in stream.getAudioTracks()) {
@@ -12754,8 +12779,10 @@ class _ChatsTabState extends State<_ChatsTab>
     _dmSpeakerEnabled = !_dmSpeakerEnabled;
     try {
       await rtc.Helper.setSpeakerphoneOn(_dmSpeakerEnabled);
+      _callLog('audio_route_toggle', {'speakerOn': _dmSpeakerEnabled});
     } catch (_) {
       // unsupported platform route toggle
+      _callLog('audio_route_toggle_failed', {'speakerOn': _dmSpeakerEnabled});
     }
     if (mounted) setState(() {});
   }
