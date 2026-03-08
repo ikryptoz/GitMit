@@ -3534,8 +3534,14 @@ class _DashboardPageState extends State<DashboardPage> {
   int _currentDeviceLoginAt = 0;
   StreamSubscription<DatabaseEvent>? _deviceSessionSub;
   StreamSubscription<DatabaseEvent>? _autoDeviceKeyTransferSub;
-  bool _autoRestoreAttempted = false;
+  bool _autoRestoreCompleted = false;
+  bool _autoRestoreInFlight = false;
+  int _autoRestoreLastAttemptAt = 0;
+  String? _pendingAutoRestoreToken;
+  int _pendingAutoRestoreRequestedAt = 0;
   final Set<String> _autoTransferHandled = <String>{};
+  static const Duration _autoRestoreRetryThrottle = Duration(seconds: 20);
+  static const Duration _autoRestoreTokenTtl = Duration(minutes: 6);
   static const Duration _presenceSessionTtl = Duration(days: 3);
   late final _AppLifecycleObserver _lifecycleObserver;
 
@@ -4092,6 +4098,12 @@ Future<void> checkGroupAchievements(String uid) async {
     }
     await _autoDeviceKeyTransferSub?.cancel();
     _autoDeviceKeyTransferSub = null;
+    _autoRestoreCompleted = false;
+    _autoRestoreInFlight = false;
+    _autoRestoreLastAttemptAt = 0;
+    _pendingAutoRestoreToken = null;
+    _pendingAutoRestoreRequestedAt = 0;
+    _autoTransferHandled.clear();
     () async {
       try {
         await PlaintextCache.setActiveUser(null);
@@ -4859,6 +4871,15 @@ Future<void> checkGroupAchievements(String uid) async {
             // This device requested restore and can now import received keys.
             final isMine = targetDeviceId.isEmpty || targetDeviceId == deviceId;
             if (!isMine) continue;
+
+            if (status == 'failed_auto' || status == 'expired') {
+              if (_pendingAutoRestoreToken == token) {
+                _pendingAutoRestoreToken = null;
+                _pendingAutoRestoreRequestedAt = 0;
+              }
+              continue;
+            }
+
             if (status != 'ready_auto' && status != 'ready') continue;
 
             final dedupeImport = 'import:$token:$deviceId';
@@ -4871,6 +4892,12 @@ Future<void> checkGroupAchievements(String uid) async {
                   payloadRaw: m['payload'],
                 );
                 if (!ok) return;
+
+                _autoRestoreCompleted = true;
+                if (_pendingAutoRestoreToken == token) {
+                  _pendingAutoRestoreToken = null;
+                  _pendingAutoRestoreRequestedAt = 0;
+                }
 
                 await rtdb().ref('deviceKeyTransfers/$uid/$token').update({
                   'status': 'completed',
@@ -4903,60 +4930,84 @@ Future<void> checkGroupAchievements(String uid) async {
     required String uid,
     required String deviceId,
   }) async {
-    if (_autoRestoreAttempted) return;
-    _autoRestoreAttempted = true;
+    if (_autoRestoreCompleted) return;
 
-    try {
-      final local = await E2ee.exportDeviceKeyMaterial();
-      if (local.isNotEmpty) {
-        try {
-          await rtdb().ref('deviceSessions/$uid/$deviceId').update({
-            'paired': true,
-            'updatedAt': ServerValue.timestamp,
-          });
-        } catch (_) {
-          // best-effort
-        }
-        return;
-      }
-    } catch (_) {
-      // ignore and continue to best-effort auto restore
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_autoRestoreInFlight) return;
+    if (now - _autoRestoreLastAttemptAt < _autoRestoreRetryThrottle.inMilliseconds) {
+      return;
     }
 
-    try {
-      final sessionsSnap = await rtdb().ref('deviceSessions/$uid').get();
-      final raw = sessionsSnap.value;
-      final m = (raw is Map) ? raw : null;
-      if (m == null || m.isEmpty) return;
-
-      var hasOnlinePeer = false;
-      for (final e in m.entries) {
-        final did = e.key.toString().trim();
-        if (did.isEmpty || did == deviceId || e.value is! Map) continue;
-        final s = Map<String, dynamic>.from(e.value as Map);
-        final online = s['online'] == true;
-        if (online) {
-          hasOnlinePeer = true;
-          break;
-        }
+    if (_pendingAutoRestoreToken != null) {
+      final age = now - _pendingAutoRestoreRequestedAt;
+      if (age >= 0 && age < _autoRestoreTokenTtl.inMilliseconds) {
+        return;
       }
-      if (!hasOnlinePeer) return;
+      _pendingAutoRestoreToken = null;
+      _pendingAutoRestoreRequestedAt = 0;
+    }
 
-      final token =
-          rtdb().ref().push().key ?? DateTime.now().millisecondsSinceEpoch.toString();
-      final expiresAt = DateTime.now()
-          .add(const Duration(minutes: 5))
-          .millisecondsSinceEpoch;
-      await rtdb().ref('deviceKeyTransfers/$uid/$token').set({
-        'status': 'waiting_auto',
-        'mode': 'auto',
-        'sourceDeviceId': deviceId,
-        'targetDeviceId': deviceId,
-        'createdAt': ServerValue.timestamp,
-        'expiresAt': expiresAt,
-      });
-    } catch (_) {
-      // best-effort
+    _autoRestoreInFlight = true;
+    _autoRestoreLastAttemptAt = now;
+
+    try {
+      try {
+        final local = await E2ee.exportDeviceKeyMaterial();
+        if (local.isNotEmpty) {
+          _autoRestoreCompleted = true;
+          try {
+            await rtdb().ref('deviceSessions/$uid/$deviceId').update({
+              'paired': true,
+              'updatedAt': ServerValue.timestamp,
+            });
+          } catch (_) {
+            // best-effort
+          }
+          return;
+        }
+      } catch (_) {
+        // ignore and continue to best-effort auto restore
+      }
+
+      try {
+        final sessionsSnap = await rtdb().ref('deviceSessions/$uid').get();
+        final raw = sessionsSnap.value;
+        final m = (raw is Map) ? raw : null;
+        if (m == null || m.isEmpty) return;
+
+        var hasOnlinePeer = false;
+        for (final e in m.entries) {
+          final did = e.key.toString().trim();
+          if (did.isEmpty || did == deviceId || e.value is! Map) continue;
+          final s = Map<String, dynamic>.from(e.value as Map);
+          final online = s['online'] == true;
+          if (online) {
+            hasOnlinePeer = true;
+            break;
+          }
+        }
+        if (!hasOnlinePeer) return;
+
+        final token =
+            rtdb().ref().push().key ?? DateTime.now().millisecondsSinceEpoch.toString();
+        final expiresAt = DateTime.now()
+            .add(const Duration(minutes: 5))
+            .millisecondsSinceEpoch;
+        await rtdb().ref('deviceKeyTransfers/$uid/$token').set({
+          'status': 'waiting_auto',
+          'mode': 'auto',
+          'sourceDeviceId': deviceId,
+          'targetDeviceId': deviceId,
+          'createdAt': ServerValue.timestamp,
+          'expiresAt': expiresAt,
+        });
+        _pendingAutoRestoreToken = token;
+        _pendingAutoRestoreRequestedAt = DateTime.now().millisecondsSinceEpoch;
+      } catch (_) {
+        // best-effort
+      }
+    } finally {
+      _autoRestoreInFlight = false;
     }
   }
 
@@ -4987,6 +5038,10 @@ Future<void> checkGroupAchievements(String uid) async {
     final sessionRef = _presenceSessionRef(current.uid);
 
     if (state == AppLifecycleState.resumed) {
+      final did = _currentDeviceId;
+      if (did != null && did.isNotEmpty) {
+        unawaited(_requestAutoKeyRestoreIfNeeded(uid: current.uid, deviceId: did));
+      }
       final online = _presenceStatus != 'hidden';
       presenceRef.update({
         'enabled': true,
