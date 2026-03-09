@@ -916,6 +916,9 @@ class _UserProfilePage extends StatefulWidget {
 
 class _UserProfilePageState extends State<_UserProfilePage> {
   late final Future<Map<String, dynamic>?> _githubDataFuture;
+  double _backSwipeDx = 0;
+  double _backSwipeDy = 0;
+  bool _backSwipeFromEdge = false;
 
   @override
   void initState() {
@@ -1300,6 +1303,34 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     }
   }
 
+  void _startBackSwipe(DragStartDetails details) {
+    if (kIsWeb) {
+      _backSwipeFromEdge = false;
+      return;
+    }
+    _backSwipeFromEdge = details.globalPosition.dx <= 30;
+    _backSwipeDx = 0;
+    _backSwipeDy = 0;
+  }
+
+  void _updateBackSwipe(DragUpdateDetails details) {
+    if (!_backSwipeFromEdge) return;
+    _backSwipeDx += details.delta.dx;
+    _backSwipeDy += details.delta.dy.abs();
+  }
+
+  void _endBackSwipe(DragEndDetails _) {
+    if (!_backSwipeFromEdge) return;
+    final absDx = _backSwipeDx.abs();
+    final absDy = _backSwipeDy;
+    _backSwipeFromEdge = false;
+    final horizontalIntent = absDx >= 56 && absDx > (absDy * 1.2);
+    if (!horizontalIntent || _backSwipeDx <= 0) return;
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = FirebaseAuth.instance.currentUser;
@@ -1361,8 +1392,13 @@ class _UserProfilePageState extends State<_UserProfilePage> {
           ],
         ),
       ),
-      body: Column(
-        children: [
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: _startBackSwipe,
+        onHorizontalDragUpdate: _updateBackSwipe,
+        onHorizontalDragEnd: _endBackSwipe,
+        child: Column(
+          children: [
           // Offline mode banner
           StreamBuilder<ConnectivityResult>(
             stream: Connectivity().onConnectivityChanged.map(
@@ -2053,7 +2089,8 @@ class _UserProfilePageState extends State<_UserProfilePage> {
               ],
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -3600,6 +3637,8 @@ class _DashboardPageState extends State<DashboardPage> {
   late final _AppLifecycleObserver _lifecycleObserver;
 
   final GlobalKey<_ChatsTabState> _chatsKey = GlobalKey<_ChatsTabState>();
+  final GlobalKey<_ChatsTabState> _desktopDetailChatsKey =
+      GlobalKey<_ChatsTabState>();
   final GlobalKey<_JobsTabState> _jobsKey = GlobalKey<_JobsTabState>();
 
   void _applyPendingNotificationOpenTarget() {
@@ -3694,6 +3733,21 @@ class _DashboardPageState extends State<DashboardPage> {
       return false;
     }
 
+    final desktopChatSplit =
+        kIsWeb && MediaQuery.of(context).size.width >= 1200;
+    if (desktopChatSplit &&
+        ((_openChatLogin ?? '').trim().isNotEmpty ||
+            (_openGroupId ?? '').trim().isNotEmpty)) {
+      setState(() {
+        _openChatLogin = null;
+        _openChatAvatarUrl = null;
+        _openGroupId = null;
+        _openChatToken++;
+        _openGroupToken++;
+      });
+      return false;
+    }
+
     final handled = _chatsKey.currentState?.handleBack() == true;
     if (handled) return false;
     return true;
@@ -3702,6 +3756,8 @@ class _DashboardPageState extends State<DashboardPage> {
   PreferredSizeWidget _pillAppBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final title = _titleForIndex(context, _index);
+    final desktopChatSplit =
+        kIsWeb && MediaQuery.of(context).size.width >= 1200;
     return PreferredSize(
       preferredSize: const Size.fromHeight(kToolbarHeight),
       child: ValueListenableBuilder<bool>(
@@ -3715,21 +3771,42 @@ class _DashboardPageState extends State<DashboardPage> {
               return ValueListenableBuilder<String?>(
                 valueListenable: _chatsTopHandle,
                 builder: (context, activeHandle, _) {
-                  final liveState = _chatsKey.currentState;
+                  final overviewState = _chatsKey.currentState;
+                  final splitDetailState = desktopChatSplit
+                    ? _desktopDetailChatsKey.currentState
+                    : null;
+                  final appBarState = splitDetailState ?? overviewState;
+                  final splitHasSelectedDm =
+                    _index == 1 &&
+                    desktopChatSplit &&
+                    (_openChatLogin ?? '').trim().isNotEmpty;
+                  final splitHasSelectedGroup =
+                    _index == 1 &&
+                    desktopChatSplit &&
+                    (_openGroupId ?? '').trim().isNotEmpty;
                   final liveShowOverviewNotifications =
-                      _index == 1 && (liveState?.isMainChatsOverview ?? false);
+                    _index == 1 &&
+                    (overviewState?.isMainChatsOverview ?? false) &&
+                    !splitHasSelectedDm &&
+                    !splitHasSelectedGroup;
                   final liveShowNotificationPill =
                       _index == 0 || liveShowOverviewNotifications;
                   final showVerificationAction =
                       liveShowOverviewNotifications && hasVerificationAlert;
                   final liveShowDmActions =
-                      _index == 1 && (liveState?.hasActiveDm ?? false);
+                    _index == 1 &&
+                    ((appBarState?.hasActiveDm ?? false) ||
+                      splitHasSelectedDm);
                   final liveShowGroupCallAction =
-                      _index == 1 && (liveState?.hasActiveGroup ?? false);
+                    _index == 1 &&
+                    ((appBarState?.hasActiveGroup ?? false) ||
+                      splitHasSelectedGroup);
                   final liveShowChatSearchAction =
                       _index == 1 &&
-                      ((liveState?.hasActiveDm ?? false) ||
-                          (liveState?.hasActiveGroup ?? false));
+                    (((appBarState?.hasActiveDm ?? false) ||
+                        splitHasSelectedDm) ||
+                      ((appBarState?.hasActiveGroup ?? false) ||
+                        splitHasSelectedGroup));
                   return AppBar(
                     backgroundColor: shellBg,
                     surfaceTintColor: shellBg,
@@ -3764,7 +3841,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                   'Account verification (notification)',
                                 ),
                                 icon: const Icon(Icons.check_circle_outline),
-                                onPressed: () => liveState
+                                onPressed: () => overviewState
                                     ?.openVerificationNotificationChat(),
                               ),
                             if (liveShowDmActions)
@@ -3775,8 +3852,8 @@ class _DashboardPageState extends State<DashboardPage> {
                                   'Key fingerprint',
                                 ),
                                 icon: const Icon(Icons.fingerprint),
-                                onPressed: () =>
-                                    liveState?.openActiveDmFingerprint(),
+                                onPressed: () => appBarState
+                                    ?.openActiveDmFingerprint(),
                               ),
                             if (liveShowChatSearchAction)
                               IconButton(
@@ -3787,14 +3864,22 @@ class _DashboardPageState extends State<DashboardPage> {
                                 ),
                                 icon: const Icon(Icons.search),
                                 onPressed: () =>
-                                    liveState?.openActiveChatFind(),
+                                  appBarState?.openActiveChatFind(),
                               ),
                           ]
                         : null,
                     title: Builder(
                       builder: (context) {
-                        final handle = (_index == 1) ? activeHandle : null;
-                        final currentChatsState = _chatsKey.currentState;
+                            final splitHandle = splitHasSelectedDm
+                              ? '@${_openChatLogin!.trim()}'
+                              : null;
+                            final handle = (_index == 1)
+                              ? ((activeHandle == null ||
+                                    activeHandle.trim().isEmpty)
+                                  ? splitHandle
+                                  : activeHandle)
+                              : null;
+                            final currentChatsState = appBarState;
                         final canOpenGroup =
                             _index == 1 &&
                             (currentChatsState?.hasActiveGroup ?? false);
@@ -3852,7 +3937,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                   color: isCallActive ? Colors.redAccent : null,
                                 ),
                                 onPressed: () {
-                                  final liveState = _chatsKey.currentState;
+                                  final liveState = appBarState;
                                   if (liveState == null) return;
                                   if (liveState.hasActiveGroup) {
                                     liveState.openActiveGroupCallAction();
@@ -3873,8 +3958,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                   child: InkWell(
                                     onTap: isPillClickable
                                         ? () {
-                                            final liveState =
-                                                _chatsKey.currentState;
+                                          final liveState = appBarState;
                                             if (liveState == null) return;
                                             if (liveState.hasActiveGroup) {
                                               liveState.openActiveGroupInfo();
@@ -4258,65 +4342,111 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildWebChatsSplitPane(BuildContext context, Widget page) {
-    final liveState = _chatsKey.currentState;
+  void _openChatInDesktopSplit(String login, String avatarUrl) {
+    setState(() {
+      _openGroupId = null;
+      _openGroupToken++;
+      _openChatLogin = login;
+      _openChatAvatarUrl = avatarUrl;
+      _openChatToken++;
+    });
+  }
+
+  void _openGroupInDesktopSplit(String groupId) {
+    setState(() {
+      _openChatLogin = null;
+      _openChatAvatarUrl = null;
+      _openChatToken++;
+      _openGroupId = groupId;
+      _openGroupToken++;
+    });
+  }
+
+  Widget _buildWebDesktopChatDetailPane(
+    BuildContext context,
+    UserSettings settings,
+  ) {
+    final hasSelection =
+        (_openChatLogin ?? '').trim().isNotEmpty ||
+        (_openGroupId ?? '').trim().isNotEmpty;
+    final cs = Theme.of(context).colorScheme;
+    if (!hasSelection) {
+      return Container(
+        color: cs.surface.withValues(alpha: 0.28),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 54,
+                color: cs.onSurface.withValues(alpha: 0.42),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                AppLanguage.tr(
+                  context,
+                  'Vyber chat a začni psát',
+                  'Select a chat and start messaging',
+                ),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.72),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                AppLanguage.tr(
+                  context,
+                  'Zprávy jsou chráněné end-to-end šifrováním.',
+                  'Messages are protected with end-to-end encryption.',
+                ),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.58),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return _ChatsTab(
+      key: _desktopDetailChatsKey,
+      initialOpenLogin: _openChatLogin,
+      initialOpenAvatarUrl: _openChatAvatarUrl,
+      initialOpenGroupId: _openGroupId,
+      settings: settings,
+      openChatToken: _openChatToken,
+      openGroupToken: _openGroupToken,
+      overviewToken: 0,
+      publishShellState: false,
+    );
+  }
+
+  Widget _buildWebChatsSplitPane(
+    BuildContext context,
+    Widget page,
+    UserSettings settings,
+  ) {
     final shouldSplit =
-        kIsWeb &&
-        _index == 1 &&
-        (liveState?.isMainChatsOverview ?? false) &&
-        MediaQuery.of(context).size.width >= 1200;
+        kIsWeb && _index == 1 && MediaQuery.of(context).size.width >= 1200;
     if (!shouldSplit) return page;
 
-    final cs = Theme.of(context).colorScheme;
     return Row(
       children: [
         Container(
           width: 430,
           decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: cs.outlineVariant)),
-          ),
-          child: page,
-        ),
-        Expanded(
-          child: Container(
-            color: cs.surface.withValues(alpha: 0.28),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.lock_outline_rounded,
-                    size: 54,
-                    color: cs.onSurface.withValues(alpha: 0.42),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    AppLanguage.tr(
-                      context,
-                      'Vyber chat a začni psát',
-                      'Select a chat and start messaging',
-                    ),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: cs.onSurface.withValues(alpha: 0.72),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    AppLanguage.tr(
-                      context,
-                      'Zprávy jsou chráněné end-to-end šifrováním.',
-                      'Messages are protected with end-to-end encryption.',
-                    ),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: cs.onSurface.withValues(alpha: 0.58),
-                    ),
-                  ),
-                ],
+            border: Border(
+              right: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
               ),
             ),
           ),
+          child: page,
         ),
+        Expanded(child: _buildWebDesktopChatDetailPane(context, settings)),
       ],
     );
   }
@@ -4351,9 +4481,13 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildWebDesktopBody(BuildContext context, Widget page) {
+  Widget _buildWebDesktopBody(
+    BuildContext context,
+    Widget page,
+    UserSettings settings,
+  ) {
     if (_index == 1) {
-      return _buildWebChatsSplitPane(context, page);
+      return _buildWebChatsSplitPane(context, page, settings);
     }
     if (_index == 2 || _index == 3) {
       return _buildWebDesktopPopupPanel(context, page);
@@ -5632,6 +5766,9 @@ class _DashboardPageState extends State<DashboardPage> {
           snapshot.data?.snapshot.value,
         );
 
+        final desktopChatSplit =
+            kIsWeb && MediaQuery.of(context).size.width >= 1200;
+
         final pages = <Widget>[
           _JobsTab(key: _jobsKey),
           _ChatsTab(
@@ -5643,6 +5780,13 @@ class _DashboardPageState extends State<DashboardPage> {
             openChatToken: _openChatToken,
             openGroupToken: _openGroupToken,
             overviewToken: _chatsOverviewToken,
+            forceOverview: desktopChatSplit,
+            onDesktopSelectDm: desktopChatSplit
+                ? _openChatInDesktopSplit
+                : null,
+            onDesktopSelectGroup: desktopChatSplit
+                ? _openGroupInDesktopSplit
+                : null,
           ),
           _ContactsTab(
             onStartChat: _openChat,
@@ -5684,6 +5828,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                       child: _buildWebDesktopBody(
                                         context,
                                         pages[_index],
+                                        settings,
                                       ),
                                     ),
                                   ],
@@ -6392,10 +6537,29 @@ class _JobsTabState extends State<_JobsTab> {
   static const List<String> _stackFilters = <String>[
     'All',
     'Flutter',
+    'Dart',
     'React',
+    'TypeScript',
+    'Next.js',
+    'Vue',
+    'Angular',
     'Node',
+    'Java',
+    '.NET',
+    'PHP',
+    'Go',
+    'Rust',
     'Python',
+    'AI/ML',
+    'Data',
+    'QA',
+    'UI/UX',
+    'Product',
     'DevOps',
+    'Mobile',
+    'Backend',
+    'Frontend',
+    'Fullstack',
   ];
 
   @override
@@ -12508,6 +12672,10 @@ class _ChatsTab extends StatefulWidget {
     required this.openChatToken,
     required this.openGroupToken,
     required this.overviewToken,
+    this.forceOverview = false,
+    this.publishShellState = true,
+    this.onDesktopSelectDm,
+    this.onDesktopSelectGroup,
   });
   final String? initialOpenLogin;
   final String? initialOpenAvatarUrl;
@@ -12516,6 +12684,10 @@ class _ChatsTab extends StatefulWidget {
   final int openChatToken;
   final int openGroupToken;
   final int overviewToken;
+  final bool forceOverview;
+  final bool publishShellState;
+  final void Function(String login, String avatarUrl)? onDesktopSelectDm;
+  final ValueChanged<String>? onDesktopSelectGroup;
 
   @override
   State<_ChatsTab> createState() => _ChatsTabState();
@@ -12646,6 +12818,8 @@ class _ChatsTabState extends State<_ChatsTab>
   String? _outgoingGroupId;
   String? _outgoingGroupTitle;
   final Set<String> _outgoingGroupInviteUids = <String>{};
+
+  bool get _desktopSplitMaster => widget.forceOverview;
 
   static const double _uiRadiusCard = 12;
   static const double _uiRadiusSheet = 18;
@@ -14753,6 +14927,7 @@ class _ChatsTabState extends State<_ChatsTab>
   }
 
   void _syncShellChatMeta({String? groupTitle}) {
+    if (!widget.publishShellState) return;
     String? label;
     if (_activeLogin != null && _activeLogin!.trim().isNotEmpty) {
       label = '@${_activeLogin!.trim()}';
@@ -16226,6 +16401,9 @@ class _ChatsTabState extends State<_ChatsTab>
   bool _showListNotificationLauncher = false;
   double _overviewSwipeDx = 0;
   double _overviewSwipeDy = 0;
+  double _detailBackSwipeDx = 0;
+  double _detailBackSwipeDy = 0;
+  bool _detailBackSwipeFromEdge = false;
 
   void _setOverviewMode(int mode) {
     final normalized = mode.clamp(0, 2);
@@ -16255,6 +16433,45 @@ class _ChatsTabState extends State<_ChatsTab>
     final next = _overviewSwipeDx < 0 ? _overviewMode + 1 : _overviewMode - 1;
     if (next < 0 || next > 2) return;
     _setOverviewMode(next);
+  }
+
+  void _startDetailBackSwipe(DragStartDetails details) {
+    if (_desktopSplitMaster || kIsWeb) {
+      _detailBackSwipeFromEdge = false;
+      return;
+    }
+    _detailBackSwipeFromEdge = details.globalPosition.dx <= 30;
+    _detailBackSwipeDx = 0;
+    _detailBackSwipeDy = 0;
+  }
+
+  void _updateDetailBackSwipe(DragUpdateDetails details) {
+    if (!_detailBackSwipeFromEdge) return;
+    _detailBackSwipeDx += details.delta.dx;
+    _detailBackSwipeDy += details.delta.dy.abs();
+  }
+
+  void _endDetailBackSwipe(DragEndDetails _) {
+    if (!_detailBackSwipeFromEdge) return;
+    final absDx = _detailBackSwipeDx.abs();
+    final absDy = _detailBackSwipeDy;
+    _detailBackSwipeFromEdge = false;
+    final horizontalIntent = absDx >= 56 && absDx > (absDy * 1.2);
+    if (!horizontalIntent || _detailBackSwipeDx <= 0) return;
+    if (handleBack() && widget.settings.vibrationEnabled) {
+      HapticFeedback.lightImpact();
+    }
+  }
+
+  Widget _wrapDetailSwipeBack(Widget child) {
+    if (_desktopSplitMaster) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: _startDetailBackSwipe,
+      onHorizontalDragUpdate: _updateDetailBackSwipe,
+      onHorizontalDragEnd: _endDetailBackSwipe,
+      child: child,
+    );
   }
 
   Future<String?> _myGithubUsername(String myUid) async {
@@ -16765,6 +16982,7 @@ class _ChatsTabState extends State<_ChatsTab>
   }
 
   bool handleBack() {
+    if (_desktopSplitMaster) return false;
     if (_activeLogin != null) {
       setState(() {
         _activeLogin = null;
@@ -16823,13 +17041,15 @@ class _ChatsTabState extends State<_ChatsTab>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat();
-    _activeLogin = widget.initialOpenLogin;
-    _activeAvatarUrl = widget.initialOpenAvatarUrl;
-    if (widget.initialOpenGroupId != null &&
-        widget.initialOpenGroupId!.trim().isNotEmpty) {
-      _activeLogin = null;
-      _activeAvatarUrl = null;
-      _activeGroupId = widget.initialOpenGroupId!.trim();
+    if (!_desktopSplitMaster) {
+      _activeLogin = widget.initialOpenLogin;
+      _activeAvatarUrl = widget.initialOpenAvatarUrl;
+      if (widget.initialOpenGroupId != null &&
+          widget.initialOpenGroupId!.trim().isNotEmpty) {
+        _activeLogin = null;
+        _activeAvatarUrl = null;
+        _activeGroupId = widget.initialOpenGroupId!.trim();
+      }
     }
     _dmScrollController.addListener(_handleDmScrollPositionChanged);
     _syncShellChatMeta();
@@ -16852,6 +17072,37 @@ class _ChatsTabState extends State<_ChatsTab>
   @override
   void didUpdateWidget(covariant _ChatsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    if (_desktopSplitMaster) {
+      if (_activeLogin != null ||
+          _activeAvatarUrl != null ||
+          _activeOtherUid != null ||
+          _activeOtherUidLoginLower != null ||
+          _activeGroupId != null ||
+          _activeVerifiedUid != null ||
+          _activeVerifiedGithub != null ||
+          _pendingCodePayload != null ||
+          _replyToKey != null ||
+          _replyToFrom != null ||
+          _replyToPreview != null ||
+          _replyToUid != null) {
+        setState(() {
+          _activeLogin = null;
+          _activeAvatarUrl = null;
+          _activeOtherUid = null;
+          _activeOtherUidLoginLower = null;
+          _activeGroupId = null;
+          _activeVerifiedUid = null;
+          _activeVerifiedGithub = null;
+          _pendingCodePayload = null;
+          _replyToKey = null;
+          _replyToFrom = null;
+          _replyToPreview = null;
+          _replyToUid = null;
+        });
+      }
+      return;
+    }
 
     if (widget.overviewToken != oldWidget.overviewToken) {
       setState(() {
@@ -16957,10 +17208,12 @@ class _ChatsTabState extends State<_ChatsTab>
     if (_activeGroupId != null) {
       _setGroupTyping(groupId: _activeGroupId!, value: false);
     }
-    _chatsTopHandle.value = null;
-    _chatsCanStepBack.value = false;
-    _chatsHasVerificationAlert.value = false;
-    _chatsNotificationCount.value = 0;
+    if (widget.publishShellState) {
+      _chatsTopHandle.value = null;
+      _chatsCanStepBack.value = false;
+      _chatsHasVerificationAlert.value = false;
+      _chatsNotificationCount.value = 0;
+    }
     _typingAnim.dispose();
     super.dispose();
   }
@@ -17011,6 +17264,29 @@ class _ChatsTabState extends State<_ChatsTab>
     if (widget.settings.vibrationEnabled) {
       HapticFeedback.mediumImpact();
     }
+  }
+
+  void _openDmFromOverview({required String login, required String avatarUrl}) {
+    if (_desktopSplitMaster && widget.onDesktopSelectDm != null) {
+      widget.onDesktopSelectDm!(login, avatarUrl);
+      return;
+    }
+    setState(() {
+      _activeLogin = login;
+      _activeAvatarUrl = avatarUrl;
+    });
+  }
+
+  void _openGroupFromOverview(String groupId) {
+    if (_desktopSplitMaster && widget.onDesktopSelectGroup != null) {
+      widget.onDesktopSelectGroup!(groupId);
+      return;
+    }
+    setState(() {
+      _activeGroupId = groupId;
+      _activeLogin = null;
+      _activeVerifiedUid = null;
+    });
   }
 
   Widget _unreadBadge(int count) {
@@ -17129,6 +17405,7 @@ class _ChatsTabState extends State<_ChatsTab>
   int _pendingMapCount(Object? value) => (value is Map) ? value.length : 0;
 
   void _syncShellNotificationCount(int value) {
+    if (!widget.publishShellState) return;
     if (_chatsNotificationCount.value != value) {
       _chatsNotificationCount.value = value;
     }
@@ -17246,6 +17523,7 @@ class _ChatsTabState extends State<_ChatsTab>
   }
 
   void _syncVerificationAlertBadge(bool value) {
+    if (!widget.publishShellState) return;
     if (_chatsHasVerificationAlert.value != value) {
       _chatsHasVerificationAlert.value = value;
     }
@@ -20199,9 +20477,10 @@ class _ChatsTabState extends State<_ChatsTab>
     final invitesRef = rtdb().ref('groupInvites/${current.uid}');
 
     // Seznam chatů + ověření
-    if (_activeLogin == null &&
-        _activeVerifiedUid == null &&
-        _activeGroupId == null) {
+    if (_desktopSplitMaster ||
+        (_activeLogin == null &&
+            _activeVerifiedUid == null &&
+            _activeGroupId == null)) {
       _lastAutoScrolledChatViewKey = null;
       final chatsMetaRef = rtdb().ref('savedChats/${current.uid}');
       final chatsMessagesRef = rtdb().ref('messages/${current.uid}');
@@ -21638,11 +21917,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                                 },
                                                 onTap: () {
                                                   _hapticSelect();
-                                                  setState(() {
-                                                    _activeLogin = login;
-                                                    _activeAvatarUrl =
-                                                        avatarUrl;
-                                                  });
+                                                  _openDmFromOverview(
+                                                    login: login,
+                                                    avatarUrl: avatarUrl,
+                                                  );
                                                 },
                                               );
                                             }),
@@ -21716,11 +21994,7 @@ class _ChatsTabState extends State<_ChatsTab>
                                               if (!mounted) return;
                                               if (joined != null &&
                                                   joined.isNotEmpty) {
-                                                setState(() {
-                                                  _activeGroupId = joined;
-                                                  _activeLogin = null;
-                                                  _activeVerifiedUid = null;
-                                                });
+                                                _openGroupFromOverview(joined);
                                               }
                                             },
                                           ),
@@ -21931,14 +22205,9 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                               latestAt,
                                                                         );
                                                                       }
-                                                                      setState(() {
-                                                                        _activeGroupId =
-                                                                            gid;
-                                                                        _activeLogin =
-                                                                            null;
-                                                                        _activeVerifiedUid =
-                                                                            null;
-                                                                      });
+                                                                      _openGroupFromOverview(
+                                                                        gid,
+                                                                      );
                                                                     },
                                                                   );
                                                                 },
@@ -22796,12 +23065,12 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                     },
                                                                     onTap: () {
                                                                       _hapticSelect();
-                                                                      setState(() {
-                                                                        _activeLogin =
-                                                                            login;
-                                                                        _activeAvatarUrl =
-                                                                            avatarUrl;
-                                                                      });
+                                                                      _openDmFromOverview(
+                                                                        login:
+                                                                            login,
+                                                                        avatarUrl:
+                                                                            avatarUrl,
+                                                                      );
                                                                     },
                                                                   );
                                                                 }),
@@ -22900,12 +23169,8 @@ class _ChatsTabState extends State<_ChatsTab>
                                                                                   : null,
                                                                               onTap: () {
                                                                                 _hapticSelect();
-                                                                                setState(
-                                                                                  () {
-                                                                                    _activeGroupId = gid;
-                                                                                    _activeLogin = null;
-                                                                                    _activeVerifiedUid = null;
-                                                                                  },
+                                                                                _openGroupFromOverview(
+                                                                                  gid,
                                                                                 );
                                                                               },
                                                                             );
@@ -23111,7 +23376,8 @@ class _ChatsTabState extends State<_ChatsTab>
       final reqRef = _verifiedRequestRef(requestUid);
       final msgsRef = _verifiedMessagesRef(requestUid);
 
-      return StreamBuilder<DatabaseEvent>(
+      return _wrapDetailSwipeBack(
+        StreamBuilder<DatabaseEvent>(
         stream: currentUserRef.onValue,
         builder: (context, userSnap) {
           final uval = userSnap.data?.snapshot.value;
@@ -23401,6 +23667,7 @@ class _ChatsTabState extends State<_ChatsTab>
             },
           );
         },
+        ),
       );
     }
 
@@ -23412,7 +23679,8 @@ class _ChatsTabState extends State<_ChatsTab>
       final memberRef = rtdb().ref('groupMembers/$groupId/${current.uid}');
       final msgsRef = rtdb().ref('groupMessages/$groupId');
 
-      return StreamBuilder<DatabaseEvent>(
+      return _wrapDetailSwipeBack(
+        StreamBuilder<DatabaseEvent>(
         stream: currentUserRef.onValue,
         builder: (context, userSnap) {
           final uv = userSnap.data?.snapshot.value;
@@ -24952,6 +25220,7 @@ class _ChatsTabState extends State<_ChatsTab>
             },
           );
         },
+        ),
       );
     }
 
@@ -24973,8 +25242,9 @@ class _ChatsTabState extends State<_ChatsTab>
     );
 
     const bgColor = Color(0xFF0D1117);
-    return _withCallOverlay(
-      StreamBuilder<DatabaseEvent>(
+    return _wrapDetailSwipeBack(
+      _withCallOverlay(
+        StreamBuilder<DatabaseEvent>(
         stream: currentUserRef.onValue,
         builder: (context, uSnap) {
           final uv = uSnap.data?.snapshot.value;
@@ -26718,6 +26988,7 @@ class _ChatsTabState extends State<_ChatsTab>
             },
           );
         },
+        ),
       ),
     );
   }
