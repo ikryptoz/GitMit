@@ -1,0 +1,7 @@
+# Copy this file to android/key.properties and fill with your real release values.
+# Never commit android/key.properties to version control.
+
+storeFile=app/keystore/release.keystore
+storePassword=CHANGE_ME
+keyAlias=CHANGE_ME
+keyPassword=CHANGE_ME

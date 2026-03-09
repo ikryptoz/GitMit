@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GitMit security and privacy overview" />
+  <title>GitMit Security</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --muted: #8b949e;
+      --text: #e6edf3;
+      --accent: #58a6ff;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --border: #30363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at top, #162338 0%, var(--bg) 60%);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 36px 18px 54px;
+    }
+    .hero {
+      background: linear-gradient(145deg, #1f2937, #121821);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+    h1, h2 { margin: 0 0 10px; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; margin-top: 18px; }
+    p { margin: 0 0 10px; }
+    .muted { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin: 14px 0;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      margin-right: 7px;
+      margin-bottom: 7px;
+      color: var(--muted);
+    }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    ul { margin: 8px 0 0 18px; }
+    li { margin: 5px 0; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .footer { margin-top: 20px; font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <h1>GitMit Security and Privacy</h1>
+      <p>
+        GitMit is designed to keep message content encrypted end-to-end while being transparent about
+        security boundaries and limitations.
+      </p>
+      <div style="margin-top: 10px;">
+        <span class="badge">E2EE message content</span>
+        <span class="badge">Fingerprint verification</span>
+        <span class="badge">Multi-device key continuity</span>
+        <span class="badge">Public security docs</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>What Is Protected</h2>
+      <ul>
+        <li>Message plaintext is encrypted on client devices.</li>
+        <li>Server-side storage is intended to hold encrypted payloads, not message plaintext.</li>
+        <li>Fingerprint checks support anti-MITM verification between users.</li>
+      </ul>
+    </section>
+
+    <section class="card" style="margin-top: 12px;">
+      <h2>What Is Not Fully Hidden</h2>
+      <ul>
+        <li>Operational metadata exists for routing and synchronization.</li>
+        <li>Public repositories can be cloned.</li>
+        <li>Web client code is downloadable by browsers by design.</li>
+      </ul>
+      <p class="muted" style="margin-top: 10px;">
+        Security here means layered controls and transparency, not impossible-to-copy client code.
+      </p>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2 style="font-size: 18px;">Recommended User Actions</h2>
+        <ul>
+          <li>Verify fingerprints for sensitive chats.</li>
+          <li>Use trusted devices and screen lock.</li>
+          <li>Avoid shared/untrusted web sessions.</li>
+          <li>Report suspicious identity changes.</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h2 style="font-size: 18px;">Maintainer Security Priorities</h2>
+        <ul>
+          <li>Never commit secrets or signing passwords.</li>
+          <li>Keep authz checks server-side.</li>
+          <li>Rotate tokens/keys after incidents.</li>
+          <li>Use legal/trademark controls against impersonation.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="card" style="margin-top: 12px;">
+      <h2>Detailed Security Documents</h2>
+      <ul>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/ENCRYPTION_ARCHITECTURE.md">Encryption Architecture</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/SECURITY_MODEL.md">Security Model</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/THREAT_MODEL.md">Threat Model</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/KEY_MANAGEMENT_AND_PAIRING.md">Key Management and Pairing</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/PRIVACY_AND_METADATA.md">Privacy and Metadata</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/BACKEND_SECURITY_CHECKLIST.md">Backend Security Checklist</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/RELEASE_SECURITY_CHECKLIST.md">Release Security Checklist</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/SOURCE_CODE_PROTECTION.md">Source Code Protection</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/docs/SECURITY_FAQ.md">Security FAQ</a></li>
+        <li><a href="https://github.com/ikryptoz/GitMit/blob/main/SECURITY.md">Security Policy</a></li>
+      </ul>
+    </section>
+
+    <p class="footer">
+      Security disclosure: please follow <a href="https://github.com/ikryptoz/GitMit/blob/main/SECURITY.md">SECURITY.md</a>.
+    </p>
+  </main>
+</body>
+</html>

@@ -8009,6 +8009,20 @@ class _SettingsHome extends StatelessWidget {
               onTap: () => _open(context, const _SettingsEncryptionPage()),
             ),
             _SettingsSectionTile(
+              icon: Icons.verified_user_outlined,
+              title: AppLanguage.tr(
+                context,
+                'Security a důvěra',
+                'Security and trust',
+              ),
+              subtitle: AppLanguage.tr(
+                context,
+                'Veřejná security stránka a policy',
+                'Public security page and policy',
+              ),
+              onTap: () => _open(context, const _SettingsSecurityPage()),
+            ),
+            _SettingsSectionTile(
               icon: Icons.menu_book_outlined,
               title: AppLanguage.tr(
                 context,
@@ -8087,6 +8101,107 @@ class _SettingsSectionTile extends StatelessWidget {
         subtitle: Text(subtitle),
         trailing: const Icon(Icons.chevron_right),
         onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _SettingsSecurityPage extends StatelessWidget {
+  const _SettingsSecurityPage();
+
+  Future<void> _openExternal(BuildContext context, String rawUrl) async {
+    final uri = Uri.parse(rawUrl);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLanguage.tr(
+              context,
+              'Nepodařilo se otevřít odkaz.',
+              'Failed to open link.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppLanguage.tr;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(t(context, 'Security a důvěra', 'Security and trust')),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t(
+                      context,
+                      'Transparentní bezpečnostní informace',
+                      'Transparent security information',
+                    ),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    t(
+                      context,
+                      'GitMit zveřejňuje bezpečnostní model, threat model i pravidla hlášení zranitelností. Níže otevřeš veřejné stránky a repozitářové dokumenty.',
+                      'GitMit publishes its security model, threat model, and vulnerability disclosure policy. Use the links below to open public pages and repository docs.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          ListTile(
+            leading: const Icon(Icons.public),
+            title: Text(t(context, 'Web Security stránka', 'Web security page')),
+            subtitle: const Text('https://app.gitmit.eu/security'),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () => _openExternal(context, 'https://app.gitmit.eu/security'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.policy_outlined),
+            title: const Text('SECURITY.md'),
+            subtitle: const Text('Responsible disclosure policy'),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () => _openExternal(
+              context,
+              'https://github.com/ikryptoz/GitMit/blob/main/SECURITY.md',
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.shield_outlined),
+            title: const Text('Security Model'),
+            subtitle: const Text('Trust boundaries and controls'),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () => _openExternal(
+              context,
+              'https://github.com/ikryptoz/GitMit/blob/main/docs/SECURITY_MODEL.md',
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.key_outlined),
+            title: const Text('Encryption Architecture'),
+            subtitle: const Text('E2EE behavior and limits'),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () => _openExternal(
+              context,
+              'https://github.com/ikryptoz/GitMit/blob/main/docs/ENCRYPTION_ARCHITECTURE.md',
+            ),
+          ),
+        ],
       ),
     );
   }

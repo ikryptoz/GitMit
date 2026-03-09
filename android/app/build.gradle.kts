@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,6 +7,27 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+val releaseStoreFile =
+    keystoreProperties.getProperty("storeFile") ?: System.getenv("GITMIT_KEYSTORE_FILE")
+val releaseStorePassword =
+    keystoreProperties.getProperty("storePassword") ?: System.getenv("GITMIT_KEYSTORE_PASSWORD")
+val releaseKeyAlias =
+    keystoreProperties.getProperty("keyAlias") ?: System.getenv("GITMIT_KEY_ALIAS")
+val releaseKeyPassword =
+    keystoreProperties.getProperty("keyPassword") ?: System.getenv("GITMIT_KEY_PASSWORD")
+
+val hasReleaseSigning =
+    !releaseStoreFile.isNullOrBlank() &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.nothix.gitmit"
@@ -35,17 +58,21 @@ android {
 
     // --- Play Store Release Preparation ---
     signingConfigs {
-        create("release") {
-            storeFile = file("keystore/release.keystore")
-            storePassword = "gitmitstorepass"
-            keyAlias = "gitmitkey"
-            keyPassword = "gitmitstorepass"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
     buildTypes {
         release {
-            // Use the release signing config for Play Store builds
-            signingConfig = signingConfigs.getByName("release")
+            // Use release signing if configured. Otherwise keep local release builds possible
+            // with debug signing, but do not use that artifact for Play Console.
+            signingConfig =
+                signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             // Enable code shrinking and obfuscation for release
             isMinifyEnabled = true
             isShrinkResources = true

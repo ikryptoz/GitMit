@@ -1,0 +1,14 @@
+title = "GitMit gitleaks config"
+
+[allowlist]
+description = "Known non-secret files and generated configs"
+paths = [
+  '''docs/.*''',
+  '''dokumentace/.*''',
+  '''android/app/google-services.json''',
+  '''ios/Runner/GoogleService-Info.plist''',
+  '''lib/firebase_options.dart''',
+  '''web/.*''',
+  '''.*\.md''',
+  '''android/key.properties.example''',
+]
