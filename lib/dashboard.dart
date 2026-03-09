@@ -1,6 +1,4 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
-// ignore: uri_does_not_exist, unused_import
-import 'isar_stub.dart' if (dart.library.io) 'package:isar/isar.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -3588,6 +3586,7 @@ class _DashboardPageState extends State<DashboardPage> {
   int _currentDeviceLoginAt = 0;
   StreamSubscription<DatabaseEvent>? _deviceSessionSub;
   StreamSubscription<DatabaseEvent>? _autoDeviceKeyTransferSub;
+  Timer? _autoKeySyncTimer;
   bool _autoRestoreCompleted = false;
   bool _autoRestoreInFlight = false;
   int _autoRestoreLastAttemptAt = 0;
@@ -3596,10 +3595,12 @@ class _DashboardPageState extends State<DashboardPage> {
   final Set<String> _autoTransferHandled = <String>{};
   static const Duration _autoRestoreRetryThrottle = Duration(seconds: 20);
   static const Duration _autoRestoreTokenTtl = Duration(minutes: 6);
+  static const Duration _autoKeySyncInterval = Duration(minutes: 2);
   static const Duration _presenceSessionTtl = Duration(days: 3);
   late final _AppLifecycleObserver _lifecycleObserver;
 
   final GlobalKey<_ChatsTabState> _chatsKey = GlobalKey<_ChatsTabState>();
+  final GlobalKey<_JobsTabState> _jobsKey = GlobalKey<_JobsTabState>();
 
   void _applyPendingNotificationOpenTarget() {
     final target = AppNotifications.consumePendingOpenTarget();
@@ -3989,14 +3990,23 @@ class _DashboardPageState extends State<DashboardPage> {
                             if (liveShowNotificationPill) ...[
                               const SizedBox(width: 8),
                               ValueListenableBuilder<int>(
-                                valueListenable: _chatsNotificationCount,
+                                valueListenable: _index == 0
+                                    ? _jobsNotificationCount
+                                    : _chatsNotificationCount,
                                 builder: (context, notifCount, _) {
                                   return Material(
                                     color: Colors.transparent,
                                     child: InkWell(
                                       borderRadius: BorderRadius.circular(999),
-                                      onTap: () => _chatsKey.currentState
-                                          ?.openOverviewNotificationsPanelFromShell(),
+                                      onTap: () {
+                                        if (_index == 0) {
+                                          _jobsKey.currentState
+                                              ?.openJobsNotificationsPanelFromShell();
+                                          return;
+                                        }
+                                        _chatsKey.currentState
+                                            ?.openOverviewNotificationsPanelFromShell();
+                                      },
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 12,
@@ -4246,6 +4256,109 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
       ],
     );
+  }
+
+  Widget _buildWebChatsSplitPane(BuildContext context, Widget page) {
+    final liveState = _chatsKey.currentState;
+    final shouldSplit =
+        kIsWeb &&
+        _index == 1 &&
+        (liveState?.isMainChatsOverview ?? false) &&
+        MediaQuery.of(context).size.width >= 1200;
+    if (!shouldSplit) return page;
+
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Container(
+          width: 430,
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: cs.outlineVariant)),
+          ),
+          child: page,
+        ),
+        Expanded(
+          child: Container(
+            color: cs.surface.withValues(alpha: 0.28),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.lock_outline_rounded,
+                    size: 54,
+                    color: cs.onSurface.withValues(alpha: 0.42),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    AppLanguage.tr(
+                      context,
+                      'Vyber chat a začni psát',
+                      'Select a chat and start messaging',
+                    ),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: cs.onSurface.withValues(alpha: 0.72),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    AppLanguage.tr(
+                      context,
+                      'Zprávy jsou chráněné end-to-end šifrováním.',
+                      'Messages are protected with end-to-end encryption.',
+                    ),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurface.withValues(alpha: 0.58),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWebDesktopPopupPanel(BuildContext context, Widget child) {
+    final cs = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: cs.surface.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: cs.outlineVariant),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x33000000),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebDesktopBody(BuildContext context, Widget page) {
+    if (_index == 1) {
+      return _buildWebChatsSplitPane(context, page);
+    }
+    if (_index == 2 || _index == 3) {
+      return _buildWebDesktopPopupPanel(context, page);
+    }
+    return page;
   }
 
   Future<void> _logout() async {
@@ -4574,6 +4687,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _presenceEnabledSub?.cancel();
     _deviceSessionSub?.cancel();
     _autoDeviceKeyTransferSub?.cancel();
+    _autoKeySyncTimer?.cancel();
     super.dispose();
   }
 
@@ -4648,6 +4762,20 @@ class _DashboardPageState extends State<DashboardPage> {
     unawaited(
       _requestAutoKeyRestoreIfNeeded(uid: current.uid, deviceId: deviceId),
     );
+    _startAutoKeySyncLoop(uid: current.uid, deviceId: deviceId);
+  }
+
+  void _startAutoKeySyncLoop({required String uid, required String deviceId}) {
+    _autoKeySyncTimer?.cancel();
+    _autoKeySyncTimer = Timer.periodic(_autoKeySyncInterval, (_) {
+      unawaited(
+        _requestAutoKeyRestoreIfNeeded(
+          uid: uid,
+          deviceId: deviceId,
+          forceCheck: true,
+        ),
+      );
+    });
   }
 
   Future<void> _maybeShowPairingQrIfNeeded() async {
@@ -5108,8 +5236,9 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _requestAutoKeyRestoreIfNeeded({
     required String uid,
     required String deviceId,
+    bool forceCheck = false,
   }) async {
-    if (_autoRestoreCompleted) return;
+    if (_autoRestoreCompleted && !forceCheck) return;
 
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_autoRestoreInFlight) return;
@@ -5134,7 +5263,44 @@ class _DashboardPageState extends State<DashboardPage> {
       try {
         final local = await E2ee.exportDeviceKeyMaterial();
         if (local.isNotEmpty) {
-          _autoRestoreCompleted = true;
+          String localFp = '';
+          String remoteFp = '';
+          try {
+            localFp = await E2ee.fingerprintForMySigningKey(bytes: 8);
+          } catch (_) {
+            // best-effort
+          }
+          try {
+            remoteFp =
+                await E2ee.fingerprintForUserSigningKey(
+              uid: uid,
+              bytes: 8,
+                ) ??
+                '';
+          } catch (_) {
+            // best-effort
+          }
+
+          final isSynced =
+              localFp.isNotEmpty && remoteFp.isNotEmpty && localFp == remoteFp;
+          final canSkipSync =
+              !forceCheck || localFp.isEmpty || remoteFp.isEmpty || isSynced;
+
+          if (canSkipSync) {
+            _autoRestoreCompleted = true;
+            try {
+              await rtdb().ref('deviceSessions/$uid/$deviceId').update({
+                'paired': true,
+                'updatedAt': ServerValue.timestamp,
+              });
+            } catch (_) {
+              // best-effort
+            }
+            return;
+          }
+
+          // Keys exist but fingerprint differs, request silent resync.
+          _autoRestoreCompleted = false;
           try {
             await rtdb().ref('deviceSessions/$uid/$deviceId').update({
               'paired': true,
@@ -5143,7 +5309,6 @@ class _DashboardPageState extends State<DashboardPage> {
           } catch (_) {
             // best-effort
           }
-          return;
         }
       } catch (_) {
         // ignore and continue to best-effort auto restore
@@ -5471,7 +5636,7 @@ class _DashboardPageState extends State<DashboardPage> {
         );
 
         final pages = <Widget>[
-          const _JobsTab(),
+          _JobsTab(key: _jobsKey),
           _ChatsTab(
             key: _chatsKey,
             initialOpenLogin: _openChatLogin,
@@ -5490,14 +5655,16 @@ class _DashboardPageState extends State<DashboardPage> {
           _ProfileTab(vibrationEnabled: settings.vibrationEnabled),
         ];
 
-        final useLeftMenu = kIsWeb && MediaQuery.of(context).size.width >= 1000;
+        final useWebDesktopShell =
+            kIsWeb && MediaQuery.of(context).size.width >= 1000;
+
         final shellDecoration = BoxDecoration(
           color: Theme.of(context).scaffoldBackgroundColor,
         );
 
         return WillPopScope(
           onWillPop: _onWillPop,
-          child: useLeftMenu
+          child: useWebDesktopShell
               ? Scaffold(
                   body: Container(
                     decoration: shellDecoration,
@@ -5510,11 +5677,21 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                           const VerticalDivider(width: 1),
                           Expanded(
-                            child: Column(
-                              children: [
-                                _pillAppBar(context),
-                                Expanded(child: pages[_index]),
-                              ],
+                            child: ValueListenableBuilder<String?>(
+                              valueListenable: _chatsTopHandle,
+                              builder: (context, _, __) {
+                                return Column(
+                                  children: [
+                                    _pillAppBar(context),
+                                    Expanded(
+                                      child: _buildWebDesktopBody(
+                                        context,
+                                        pages[_index],
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
                             ),
                           ),
                         ],
@@ -6192,7 +6369,7 @@ class _JobsPostView {
 }
 
 class _JobsTab extends StatefulWidget {
-  const _JobsTab();
+  const _JobsTab({super.key});
 
   @override
   State<_JobsTab> createState() => _JobsTabState();
@@ -6204,6 +6381,16 @@ class _JobsTabState extends State<_JobsTab> {
   String _stackFilter = 'All';
   double _audienceSwipeDx = 0;
   double _audienceSwipeDy = 0;
+  bool _jobsAlertsEnabled = true;
+  Set<String> _jobsFollowTags = <String>{};
+  Set<String> _jobsFollowCompanies = <String>{};
+  final Set<String> _jobsAlertSeen = <String>{};
+  final List<Map<String, dynamic>> _jobsAlerts = <Map<String, dynamic>>[];
+  StreamSubscription<DatabaseEvent>? _jobsSeekersSub;
+  StreamSubscription<DatabaseEvent>? _jobsCompaniesSub;
+  StreamSubscription<DatabaseEvent>? _jobsDirectSub;
+  int _jobsAlertsStartMs = 0;
+  bool _jobsAlertsReady = false;
 
   static const List<String> _stackFilters = <String>[
     'All',
@@ -6213,6 +6400,420 @@ class _JobsTabState extends State<_JobsTab> {
     'Python',
     'DevOps',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initJobsNotifications();
+    });
+  }
+
+  @override
+  void dispose() {
+    _jobsSeekersSub?.cancel();
+    _jobsCompaniesSub?.cancel();
+    _jobsDirectSub?.cancel();
+    _jobsNotificationCount.value = 0;
+    super.dispose();
+  }
+
+  Future<void> _initJobsNotifications() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    await _loadJobsAlertPrefs(user.uid);
+    _jobsAlertsStartMs = DateTime.now().millisecondsSinceEpoch;
+    _jobsAlertsReady = true;
+    _startJobsAlertStreams(user.uid);
+  }
+
+  Future<void> _loadJobsAlertPrefs(String uid) async {
+    try {
+      final snap = await rtdb().ref('settings/$uid/jobsAlertPrefs').get();
+      final v = snap.value;
+      final m = (v is Map) ? Map<String, dynamic>.from(v) : null;
+      if (m == null) return;
+
+      final tagsRaw = (m['tags'] is Map)
+          ? Map<String, dynamic>.from(m['tags'] as Map)
+          : <String, dynamic>{};
+      final companiesRaw = (m['companies'] is Map)
+          ? Map<String, dynamic>.from(m['companies'] as Map)
+          : <String, dynamic>{};
+
+      final tags = <String>{};
+      for (final e in tagsRaw.entries) {
+        if (e.value == true) tags.add(e.key.toString().trim().toLowerCase());
+      }
+      final companies = <String>{};
+      for (final e in companiesRaw.entries) {
+        if (e.value == true) {
+          companies.add(e.key.toString().trim().toLowerCase());
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _jobsAlertsEnabled = m['enabled'] != false;
+        _jobsFollowTags = tags;
+        _jobsFollowCompanies = companies;
+      });
+    } catch (_) {
+      // best-effort
+    }
+  }
+
+  Future<void> _saveJobsAlertPrefs(String uid) async {
+    final tags = <String, bool>{for (final t in _jobsFollowTags) t: true};
+    final companies = <String, bool>{
+      for (final c in _jobsFollowCompanies) c: true,
+    };
+    await rtdb().ref('settings/$uid/jobsAlertPrefs').set({
+      'enabled': _jobsAlertsEnabled,
+      'tags': tags,
+      'companies': companies,
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
+  void _startJobsAlertStreams(String uid) {
+    _jobsSeekersSub?.cancel();
+    _jobsCompaniesSub?.cancel();
+    _jobsDirectSub?.cancel();
+
+    final startAt = (_jobsAlertsStartMs + 1).toDouble();
+    _jobsSeekersSub = rtdb()
+        .ref('jobs/posts/seekers')
+        .orderByChild('createdAt')
+        .startAt(startAt)
+        .onChildAdded
+        .listen((event) => _onJobsPostAdded(event, _JobsAudience.seekers));
+    _jobsCompaniesSub = rtdb()
+        .ref('jobs/posts/companies')
+        .orderByChild('createdAt')
+        .startAt(startAt)
+        .onChildAdded
+        .listen((event) => _onJobsPostAdded(event, _JobsAudience.companies));
+    _jobsDirectSub = rtdb()
+        .ref('jobsNotifications/$uid')
+        .orderByChild('createdAt')
+        .startAt(startAt)
+        .onChildAdded
+        .listen(_onJobsDirectNotification);
+  }
+
+  void _addJobsAlert(Map<String, dynamic> item) {
+    final id = (item['id'] ?? '').toString();
+    if (id.isEmpty || !_jobsAlertSeen.add(id)) return;
+    _jobsAlerts.insert(0, item);
+    if (_jobsAlerts.length > 120) {
+      _jobsAlerts.removeRange(120, _jobsAlerts.length);
+    }
+    if (_jobsNotificationCount.value != _jobsAlerts.length) {
+      _jobsNotificationCount.value = _jobsAlerts.length;
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> openJobsNotificationsPanelFromShell() async {
+    await _openJobsAlertsPanel();
+  }
+
+  void _onJobsPostAdded(DatabaseEvent event, _JobsAudience audience) {
+    if (!_jobsAlertsReady || !_jobsAlertsEnabled) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final key = event.snapshot.key?.toString() ?? '';
+    final raw = event.snapshot.value;
+    if (key.isEmpty || raw is! Map) return;
+    final m = Map<String, dynamic>.from(raw);
+
+    final authorUid = (m['authorUid'] ?? '').toString().trim();
+    if (authorUid == user.uid) return;
+    final author = (m['author'] ?? '').toString().trim();
+    final authorLower = author.toLowerCase();
+    final title = (m['title'] ?? '').toString().trim();
+
+    final tags = <String>{};
+    final tagsRaw = m['stackTags'];
+    if (tagsRaw is List) {
+      for (final t in tagsRaw) {
+        final s = (t ?? '').toString().trim().toLowerCase();
+        if (s.isNotEmpty) tags.add(s);
+      }
+    } else if (tagsRaw is String) {
+      for (final t in tagsRaw.split(',')) {
+        final s = t.trim().toLowerCase();
+        if (s.isNotEmpty) tags.add(s);
+      }
+    }
+
+    final matchesTag =
+        _jobsFollowTags.isNotEmpty && tags.any(_jobsFollowTags.contains);
+    final matchesCompany =
+        _jobsFollowCompanies.isNotEmpty &&
+        _jobsFollowCompanies.contains(authorLower);
+    if (!matchesTag && !matchesCompany) return;
+
+    final subtitle = AppLanguage.tr(
+      context,
+      'Nova Jobs nabidka od @$author: $title',
+      'New Jobs listing from @$author: $title',
+    );
+
+    _addJobsAlert({
+      'id': 'post:${audience.name}:$key',
+      'type': 'post_match',
+      'title': AppLanguage.tr(context, 'Jobs alert', 'Jobs alert'),
+      'subtitle': subtitle,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  void _onJobsDirectNotification(DatabaseEvent event) {
+    if (!_jobsAlertsReady || !_jobsAlertsEnabled) return;
+    final key = event.snapshot.key?.toString() ?? '';
+    final raw = event.snapshot.value;
+    if (key.isEmpty || raw is! Map) return;
+    final m = Map<String, dynamic>.from(raw);
+    final title = (m['title'] ?? '').toString().trim();
+    final body = (m['body'] ?? '').toString().trim();
+    _addJobsAlert({
+      'id': 'direct:$key',
+      'type': (m['type'] ?? 'direct').toString(),
+      'title': title.isEmpty
+          ? AppLanguage.tr(context, 'Jobs notification', 'Jobs notification')
+          : title,
+      'subtitle': body,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> _openJobsAlertsPanel() async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.68,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.notifications_active_outlined),
+                  title: Text(
+                    AppLanguage.tr(
+                      context,
+                      'Jobs notifikace',
+                      'Jobs notifications',
+                    ),
+                  ),
+                  trailing: IconButton(
+                    tooltip: AppLanguage.tr(
+                      context,
+                      'Filtr notifikaci',
+                      'Notification filter',
+                    ),
+                    icon: const Icon(Icons.tune_rounded),
+                    onPressed: () async {
+                      await _openJobsFilterPanel();
+                    },
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: _jobsAlerts.isEmpty
+                      ? Center(
+                          child: Text(
+                            AppLanguage.tr(
+                              context,
+                              'Zatim zadne Jobs notifikace.',
+                              'No Jobs notifications yet.',
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: _jobsAlerts.length,
+                          itemBuilder: (context, i) {
+                            final n = _jobsAlerts[i];
+                            return ListTile(
+                              leading: const Icon(Icons.work_outline),
+                              title: Text((n['title'] ?? '').toString()),
+                              subtitle: Text((n['subtitle'] ?? '').toString()),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (mounted) {
+      setState(() {
+        _jobsAlerts.clear();
+        _jobsAlertSeen.clear();
+      });
+      _jobsNotificationCount.value = 0;
+    }
+  }
+
+  Future<void> _openJobsFilterPanel() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final tagDraft = <String>{..._jobsFollowTags};
+    final companyCtrl = TextEditingController(
+      text: _jobsFollowCompanies.join(', '),
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (ctx, setLocal) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SwitchListTile(
+                        value: _jobsAlertsEnabled,
+                        onChanged: (v) {
+                          setState(() => _jobsAlertsEnabled = v);
+                          setLocal(() {});
+                        },
+                        title: Text(
+                          AppLanguage.tr(
+                            context,
+                            'Jobs notifikace',
+                            'Jobs notifications',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        AppLanguage.tr(
+                          context,
+                          'Sledovane stacky/jazyky',
+                          'Followed stacks/languages',
+                        ),
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _stackFilters
+                            .where((e) => e != 'All')
+                            .map((tag) {
+                              final lower = tag.toLowerCase();
+                              final selected = tagDraft.contains(lower);
+                              return FilterChip(
+                                label: Text(tag),
+                                selected: selected,
+                                onSelected: (v) {
+                                  setLocal(() {
+                                    if (v) {
+                                      tagDraft.add(lower);
+                                    } else {
+                                      tagDraft.remove(lower);
+                                    }
+                                  });
+                                },
+                              );
+                            })
+                            .toList(growable: false),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: companyCtrl,
+                        decoration: InputDecoration(
+                          labelText: AppLanguage.tr(
+                            context,
+                            'Firemni GitHub ucty (oddel carkou)',
+                            'Company GitHub accounts (comma separated)',
+                          ),
+                          hintText: 'acme, microsoft, google',
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: Text(
+                                AppLanguage.tr(context, 'Zrusit', 'Cancel'),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () async {
+                                final companies = companyCtrl.text
+                                    .split(',')
+                                    .map((e) => e.trim().toLowerCase())
+                                    .where((e) => e.isNotEmpty)
+                                    .toSet();
+                                setState(() {
+                                  _jobsFollowTags = tagDraft;
+                                  _jobsFollowCompanies = companies;
+                                });
+                                await _saveJobsAlertPrefs(user.uid);
+                                if (ctx.mounted) Navigator.of(ctx).pop();
+                              },
+                              child: Text(
+                                AppLanguage.tr(context, 'Ulozit', 'Save'),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+    companyCtrl.dispose();
+  }
+
+  Future<void> _notifyAuthorAboutApply({
+    required _JobsPostView post,
+    required String actorLogin,
+  }) async {
+    if (post.authorUid.trim().isEmpty) return;
+    await rtdb().ref('jobsNotifications/${post.authorUid}').push().set({
+      'type': 'apply_click',
+      'title': AppLanguage.tr(
+        context,
+        'Nova reakce na inzerat',
+        'New response to your listing',
+      ),
+      'body': AppLanguage.tr(
+        context,
+        '@$actorLogin klikl(a) na tvuj inzerat: ${post.title}',
+        '@$actorLogin clicked your listing: ${post.title}',
+      ),
+      'actorLogin': actorLogin,
+      'postId': post.id,
+      'createdAt': ServerValue.timestamp,
+      'audience': _audience.name,
+    });
+  }
 
   void _setAudience(_JobsAudience audience) {
     if (_audience == audience) return;
@@ -6767,6 +7368,12 @@ class _JobsTabState extends State<_JobsTab> {
                       if (user == null) return;
                       final myLogin = await _githubLoginForUid(user.uid);
                       final authorLogin = post.author;
+                      if (post.authorUid != user.uid) {
+                        await _notifyAuthorAboutApply(
+                          post: post,
+                          actorLogin: myLogin,
+                        );
+                      }
                       final chatLink = 'https://github.com/$myLogin';
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -8864,8 +9471,44 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
   String? _pairingError;
   String? _pairingInfo;
   bool _pairingBusy = false;
+  String _pairingPhase = 'idle';
 
   String _pairingStatusLabel(BuildContext context) {
+    if (_pairingPhase == 'creating_qr') {
+      return AppLanguage.tr(
+        context,
+        'Párování: připravuji QR…',
+        'Pairing: preparing QR…',
+      );
+    }
+    if (_pairingPhase == 'scanned_sending') {
+      return AppLanguage.tr(
+        context,
+        'Párování: přetahuji klíče z mobilu do webu…',
+        'Pairing: transferring keys from mobile to web…',
+      );
+    }
+    if (_pairingPhase == 'web_importing') {
+      return AppLanguage.tr(
+        context,
+        'Párování: importuji klíče ve webu…',
+        'Pairing: importing keys on web…',
+      );
+    }
+    if (_pairingPhase == 'syncing') {
+      return AppLanguage.tr(
+        context,
+        'Párování: synchronizuji zařízení…',
+        'Pairing: synchronizing devices…',
+      );
+    }
+    if (_pairingPhase == 'waiting_web_confirm') {
+      return AppLanguage.tr(
+        context,
+        'Párování: čekám na potvrzení webu…',
+        'Pairing: waiting for web confirmation…',
+      );
+    }
     if (_pairingBusy) {
       return AppLanguage.tr(
         context,
@@ -9049,6 +9692,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
     if (_pairingBusy) return;
     setState(() {
       _pairingBusy = true;
+      _pairingPhase = 'creating_qr';
       _pairingError = null;
       _pairingInfo = null;
       _pairingToken = null;
@@ -9077,6 +9721,18 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
         final m = Map<String, dynamic>.from(v);
         final status = (m['status'] ?? '').toString();
         if (status != 'ready') return;
+
+        if (mounted) {
+          setState(() {
+            _pairingBusy = true;
+            _pairingPhase = 'web_importing';
+            _pairingInfo = AppLanguage.tr(
+              context,
+              'QR je naskenovaný. Přetahuji klíče z mobilu do webu…',
+              'QR scanned. Transferring keys from mobile to web…',
+            );
+          });
+        }
 
         final payloadRaw = m['payload'];
         if (payloadRaw is! Map) {
@@ -9141,6 +9797,16 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
         if (importedPt.isNotEmpty) {
           await PlaintextCache.importEntries(importedPt);
         }
+        if (mounted) {
+          setState(() {
+            _pairingPhase = 'syncing';
+            _pairingInfo = AppLanguage.tr(
+              context,
+              'Klíče načteny. Synchronizuji sezení zařízení…',
+              'Keys loaded. Synchronizing device sessions…',
+            );
+          });
+        }
         await E2ee.publishMyPublicKey(uid: uid);
         await _rebuildWebPlaintextCache(uid: uid);
         await ref.update({
@@ -9161,6 +9827,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
 
         if (mounted) {
           setState(() {
+            _pairingPhase = 'done';
             _pairingInfo = AppLanguage.tr(
               context,
               'Klíče byly úspěšně přeneseny. Otevři chat znovu, aby se obnovilo dešifrování.',
@@ -9176,6 +9843,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
         setState(() {
           _pairingToken = token;
           _pairingBusy = false;
+          _pairingPhase = 'waiting_scan';
           _pairingInfo = AppLanguage.tr(
             context,
             'Naskenuj QR kód v mobilní aplikaci v Nastavení > Zařízení.',
@@ -9187,6 +9855,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
       if (mounted) {
         setState(() {
           _pairingBusy = false;
+          _pairingPhase = 'error';
           _pairingError =
               '${AppLanguage.tr(context, 'Párování selhalo', 'Pairing failed')}: $e';
         });
@@ -9235,8 +9904,13 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
 
     setState(() {
       _pairingBusy = true;
+      _pairingPhase = 'scanned_sending';
       _pairingError = null;
-      _pairingInfo = null;
+      _pairingInfo = AppLanguage.tr(
+        context,
+        'QR naskenován. Přetahuji klíče do webu…',
+        'QR scanned. Transferring keys to web…',
+      );
     });
 
     try {
@@ -9291,6 +9965,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
       if (mounted) {
         setState(() {
           _pairingBusy = false;
+          _pairingPhase = 'waiting_web_confirm';
           _pairingInfo = AppLanguage.tr(
             context,
             'Klíče byly odeslány do webu. Na webu počkej na potvrzení importu.',
@@ -9303,6 +9978,7 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
       if (mounted) {
         setState(() {
           _pairingBusy = false;
+          _pairingPhase = 'error';
           _pairingError =
               '${AppLanguage.tr(context, 'Přenos klíčů selhal', 'Key transfer failed')}: $e';
         });
@@ -9772,6 +10448,18 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
                               );
                             },
                           ),
+                          if (_pairingBusy) ...[
+                            const SizedBox(height: 10),
+                            const LinearProgressIndicator(minHeight: 3),
+                            const SizedBox(height: 8),
+                            Text(
+                              _pairingInfo ?? _pairingStatusLabel(context),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface
+                                    .withAlpha((0.78 * 255).round()),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 12),
                           if (kIsWeb) ...[
                             OutlinedButton.icon(
@@ -11730,6 +12418,7 @@ final ValueNotifier<bool> _chatsHasVerificationAlert = ValueNotifier<bool>(
   false,
 );
 final ValueNotifier<int> _chatsNotificationCount = ValueNotifier<int>(0);
+final ValueNotifier<int> _jobsNotificationCount = ValueNotifier<int>(0);
 
 class _ChatsTab extends StatefulWidget {
   const _ChatsTab({

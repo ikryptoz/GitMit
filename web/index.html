@@ -14,7 +14,14 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        var baseHrefEl = document.querySelector('base');
+        var baseHref = (baseHrefEl && baseHrefEl.getAttribute('href')) || '/';
+        if (!baseHref.endsWith('/')) {
+          baseHref += '/';
+        }
+        navigator.serviceWorker.register(baseHref + 'firebase-messaging-sw.js', {
+          scope: baseHref,
+        });
       });
     }
   </script>
