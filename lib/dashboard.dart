@@ -3717,6 +3717,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   final liveState = _chatsKey.currentState;
                   final liveShowOverviewNotifications =
                       _index == 1 && (liveState?.isMainChatsOverview ?? false);
+                  final liveShowNotificationPill =
+                      _index == 0 || liveShowOverviewNotifications;
                   final showVerificationAction =
                       liveShowOverviewNotifications && hasVerificationAlert;
                   final liveShowDmActions =
@@ -3984,53 +3986,68 @@ class _DashboardPageState extends State<DashboardPage> {
                                 ),
                               ),
                             ),
-                            if (liveShowOverviewNotifications) ...[
+                            if (liveShowNotificationPill) ...[
                               const SizedBox(width: 8),
                               ValueListenableBuilder<int>(
                                 valueListenable: _chatsNotificationCount,
                                 builder: (context, notifCount, _) {
-                                  return IconButton(
-                                    tooltip: AppLanguage.tr(
-                                      context,
-                                      'Notifikace',
-                                      'Notifications',
-                                    ),
-                                    onPressed: () => currentChatsState
-                                        ?.openOverviewNotificationsPanelFromShell(),
-                                    icon: Stack(
-                                      clipBehavior: Clip.none,
-                                      children: [
-                                        const Icon(
-                                          Icons.notifications_none_rounded,
+                                  return Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(999),
+                                      onTap: () => _chatsKey.currentState
+                                          ?.openOverviewNotificationsPanelFromShell(),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
                                         ),
-                                        if (notifCount > 0)
-                                          Positioned(
-                                            right: -8,
-                                            top: -8,
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 1,
+                                        decoration: BoxDecoration(
+                                          color: cs.surface,
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          border: Border.all(
+                                            color: cs.outlineVariant,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.notifications_none_rounded,
+                                              size: 18,
+                                            ),
+                                            if (notifCount > 0) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 1,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.redAccent,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        999,
+                                                      ),
+                                                ),
+                                                child: Text(
+                                                  notifCount > 99
+                                                      ? '99+'
+                                                      : '$notifCount',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
                                                   ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.redAccent,
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: Text(
-                                                notifCount > 99
-                                                    ? '99+'
-                                                    : '$notifCount',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w700,
                                                 ),
                                               ),
-                                            ),
-                                          ),
-                                      ],
+                                            ],
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   );
                                 },
