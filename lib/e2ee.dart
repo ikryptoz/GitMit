@@ -4,7 +4,8 @@ import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 import 'package:firebase_database/firebase_database.dart';
 // ignore: uri_does_not_exist
-import 'flutter_secure_storage_stub.dart' if (dart.library.io) 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'flutter_secure_storage_stub.dart'
+    if (dart.library.io) 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:gitmit/rtdb.dart';
 
 class E2eeException implements Exception {
@@ -16,12 +17,13 @@ class E2eeException implements Exception {
 }
 
 class E2ee {
-    /// Wipes all E2EE-related keys from secure storage (for panic password)
-    static Future<void> wipeAllKeys() async {
-      try {
-        await _storage.deleteAll();
-      } catch (_) {}
-    }
+  /// Wipes all E2EE-related keys from secure storage (for panic password)
+  static Future<void> wipeAllKeys() async {
+    try {
+      await _storage.deleteAll();
+    } catch (_) {}
+  }
+
   static const int v1 = 1;
   static const int v2 = 2;
 
@@ -63,7 +65,9 @@ class E2ee {
   }
 
   static String _scopedKey(String baseKey) {
-    final scope = (_activeUid == null || _activeUid!.isEmpty) ? 'no_uid' : _activeUid!;
+    final scope = (_activeUid == null || _activeUid!.isEmpty)
+        ? 'no_uid'
+        : _activeUid!;
     return '$baseKey::$scope';
   }
 
@@ -123,8 +127,9 @@ class E2ee {
   }
 
   static Future<void> _deleteScopedKeysByBasePrefix(String basePrefix) async {
-    final scope =
-        (_activeUid == null || _activeUid!.isEmpty) ? 'no_uid' : _activeUid!;
+    final scope = (_activeUid == null || _activeUid!.isEmpty)
+        ? 'no_uid'
+        : _activeUid!;
     final suffix = '::$scope';
     final all = await _storage.readAll();
     for (final rawKey in all.keys) {
@@ -158,7 +163,9 @@ class E2ee {
 
   static Future<Map<String, String>> exportDeviceKeyMaterial() async {
     final out = <String, String>{};
-    final scope = (_activeUid == null || _activeUid!.isEmpty) ? 'no_uid' : _activeUid!;
+    final scope = (_activeUid == null || _activeUid!.isEmpty)
+        ? 'no_uid'
+        : _activeUid!;
     final suffix = '::$scope';
 
     final all = await _storage.readAll();
@@ -184,7 +191,15 @@ class E2ee {
     return out;
   }
 
-  static Future<void> importDeviceKeyMaterial(Map<String, String> data) async {
+  static Future<void> importDeviceKeyMaterial(
+    Map<String, String> data, {
+    bool replaceExisting = false,
+  }) async {
+    if (replaceExisting) {
+      // Ensure this device uses only imported key material from the source
+      // device (no mixed local identity/fingerprint/session leftovers).
+      await _deleteScopedKeysByBasePrefix('e2ee_');
+    }
     for (final entry in data.entries) {
       final base = entry.key.trim();
       final value = entry.value;
@@ -201,7 +216,8 @@ class E2ee {
   static final _sha256 = Sha256();
 
   static final Random _rng = Random.secure();
-  static List<int> _randomBytes(int length) => List<int>.generate(length, (_) => _rng.nextInt(256), growable: false);
+  static List<int> _randomBytes(int length) =>
+      List<int>.generate(length, (_) => _rng.nextInt(256), growable: false);
 
   static List<int> _concat(List<List<int>> parts) {
     final out = <int>[];
@@ -236,7 +252,11 @@ class E2ee {
     return '';
   }
 
-  static int _fieldInt(Map<String, dynamic> m, List<String> keys, int fallback) {
+  static int _fieldInt(
+    Map<String, dynamic> m,
+    List<String> keys,
+    int fallback,
+  ) {
     for (final k in keys) {
       final v = m[k];
       if (v == null) continue;
@@ -266,7 +286,9 @@ class E2ee {
     if (maybeMap is! Map) return;
     for (final e in maybeMap.entries) {
       final k = e.key.toString();
-      if (!into.containsKey(k) || into[k] == null || (into[k] is String && (into[k] as String).trim().isEmpty)) {
+      if (!into.containsKey(k) ||
+          into[k] == null ||
+          (into[k] is String && (into[k] as String).trim().isEmpty)) {
         into[k] = e.value;
       }
     }
@@ -274,9 +296,18 @@ class E2ee {
 
   // Some older message schemas store the cipher fields inside a nested object
   // (e.g. {ciphertext: {iv, ct, tag}}). Flatten these so decrypt can read them.
-  static Map<String, dynamic> _flattenCipherEnvelope(Map<String, dynamic> message) {
+  static Map<String, dynamic> _flattenCipherEnvelope(
+    Map<String, dynamic> message,
+  ) {
     final out = Map<String, dynamic>.from(message);
-    for (final containerKey in const ['ciphertext', 'cipher', 'enc', 'box', 'payload', 'data']) {
+    for (final containerKey in const [
+      'ciphertext',
+      'cipher',
+      'enc',
+      'box',
+      'payload',
+      'data',
+    ]) {
       _mergeNested(out, message[containerKey]);
     }
     return out;
@@ -302,7 +333,10 @@ class E2ee {
     return fingerprintForPublicKey(publicKey: kp.publicKey, bytes: bytes);
   }
 
-  static Future<String?> fingerprintForUserSigningKey({required String uid, int bytes = 8}) async {
+  static Future<String?> fingerprintForUserSigningKey({
+    required String uid,
+    int bytes = 8,
+  }) async {
     final bundle = await fetchUserBundle(uid);
     final pk = bundle.identityEd25519;
     if (pk == null) return null;
@@ -353,7 +387,9 @@ class E2ee {
     return okm.sublist(0, length);
   }
 
-  static Future<({List<int> messageKey, List<int> nextChainKey})> _kdfCk(List<int> chainKey) async {
+  static Future<({List<int> messageKey, List<int> nextChainKey})> _kdfCk(
+    List<int> chainKey,
+  ) async {
     final mk = await _hmac(chainKey, const [0x01]);
     final ck = await _hmac(chainKey, const [0x02]);
     return (messageKey: mk, nextChainKey: ck);
@@ -364,12 +400,7 @@ class E2ee {
     required List<int> dhOut,
     required List<int> info,
   }) async {
-    final out = await _hkdf(
-      salt: rootKey,
-      ikm: dhOut,
-      info: info,
-      length: 64,
-    );
+    final out = await _hkdf(salt: rootKey, ikm: dhOut, info: info, length: 64);
     return (rootKey: out.sublist(0, 32), chainKey: out.sublist(32, 64));
   }
 
@@ -447,14 +478,22 @@ class E2ee {
     }
   }
 
-  static Future<({int spkId, SimpleKeyPairData spk, List<int> signature})> getOrCreateSignedPrekey() async {
+  static Future<({int spkId, SimpleKeyPairData spk, List<int> signature})>
+  getOrCreateSignedPrekey() async {
     try {
       final priv = await _readKey(_kSpkPrivKey);
       final pub = await _readKey(_kSpkPubKey);
       final idStr = await _readKey(_kSpkIdKey);
       final sigStr = await _readKey(_kSpkSigKey);
 
-      if (priv != null && priv.isNotEmpty && pub != null && pub.isNotEmpty && idStr != null && idStr.isNotEmpty && sigStr != null && sigStr.isNotEmpty) {
+      if (priv != null &&
+          priv.isNotEmpty &&
+          pub != null &&
+          pub.isNotEmpty &&
+          idStr != null &&
+          idStr.isNotEmpty &&
+          sigStr != null &&
+          sigStr.isNotEmpty) {
         final spkId = int.tryParse(idStr) ?? 0;
         final spkPriv = _unb64(priv);
         final spkPub = _unb64(pub);
@@ -542,18 +581,23 @@ class E2ee {
     }
   }
 
-  static Future<({
-    int version,
-    SimplePublicKey? identityX25519,
-    SimplePublicKey? identityEd25519,
-    int? spkId,
-    SimplePublicKey? signedPrekeyX25519,
-    List<int>? signedPrekeySig,
-  })> fetchUserBundle(String uid) async {
+  static Future<
+    ({
+      int version,
+      SimplePublicKey? identityX25519,
+      SimplePublicKey? identityEd25519,
+      int? spkId,
+      SimplePublicKey? signedPrekeyX25519,
+      List<int>? signedPrekeySig,
+    })
+  >
+  fetchUserBundle(String uid) async {
     final snap = await rtdb().ref('users/$uid/e2ee').get();
     final v = snap.value;
     final m = (v is Map) ? Map<String, dynamic>.from(v) : <String, dynamic>{};
-    final ver = (m['v'] is int) ? m['v'] as int : int.tryParse((m['v'] ?? '').toString()) ?? v1;
+    final ver = (m['v'] is int)
+        ? m['v'] as int
+        : int.tryParse((m['v'] ?? '').toString()) ?? v1;
 
     SimplePublicKey? ix;
     SimplePublicKey? ie;
@@ -563,11 +607,13 @@ class E2ee {
 
     try {
       final x = (m['x25519'] ?? '').toString().trim();
-      if (x.isNotEmpty) ix = SimplePublicKey(_unb64(x), type: KeyPairType.x25519);
+      if (x.isNotEmpty)
+        ix = SimplePublicKey(_unb64(x), type: KeyPairType.x25519);
     } catch (_) {}
     try {
       final e = (m['ed25519'] ?? '').toString().trim();
-      if (e.isNotEmpty) ie = SimplePublicKey(_unb64(e), type: KeyPairType.ed25519);
+      if (e.isNotEmpty)
+        ie = SimplePublicKey(_unb64(e), type: KeyPairType.ed25519);
     } catch (_) {}
     try {
       final id = m['spkId'];
@@ -579,7 +625,8 @@ class E2ee {
     } catch (_) {}
     try {
       final p = (m['spkX25519'] ?? '').toString().trim();
-      if (p.isNotEmpty) spk = SimplePublicKey(_unb64(p), type: KeyPairType.x25519);
+      if (p.isNotEmpty)
+        spk = SimplePublicKey(_unb64(p), type: KeyPairType.x25519);
     } catch (_) {}
     try {
       final s = (m['spkSig'] ?? '').toString().trim();
@@ -642,7 +689,12 @@ class E2ee {
     // Try v2 (Signal-like): signed prekeys + double ratchet.
     try {
       final bundle = await fetchUserBundle(otherUid);
-      if (bundle.version >= v2 && bundle.identityX25519 != null && bundle.identityEd25519 != null && bundle.spkId != null && bundle.signedPrekeyX25519 != null && bundle.signedPrekeySig != null) {
+      if (bundle.version >= v2 &&
+          bundle.identityX25519 != null &&
+          bundle.identityEd25519 != null &&
+          bundle.spkId != null &&
+          bundle.signedPrekeyX25519 != null &&
+          bundle.signedPrekeySig != null) {
         return await _encryptForUserV2(
           otherUid: otherUid,
           plaintext: plaintext,
@@ -660,11 +712,7 @@ class E2ee {
     final key = await _sharedKeyWith(otherUid: otherUid);
     final nonce = _randomBytes(12);
     final clearBytes = utf8.encode(plaintext);
-    final box = await _aead.encrypt(
-      clearBytes,
-      secretKey: key,
-      nonce: nonce,
-    );
+    final box = await _aead.encrypt(clearBytes, secretKey: key, nonce: nonce);
 
     return {
       'e2eeV': v1,
@@ -697,8 +745,14 @@ class E2ee {
     await _writeKey(_sessionKey(otherUid), jsonEncode(state.toJson()));
   }
 
-  static Future<List<int>> _dh({required SimpleKeyPairData my, required SimplePublicKey their}) async {
-    final shared = await _x25519.sharedSecretKey(keyPair: my, remotePublicKey: their);
+  static Future<List<int>> _dh({
+    required SimpleKeyPairData my,
+    required SimplePublicKey their,
+  }) async {
+    final shared = await _x25519.sharedSecretKey(
+      keyPair: my,
+      remotePublicKey: their,
+    );
     return shared.extractBytes();
   }
 
@@ -734,11 +788,19 @@ class E2ee {
 
       final dh1 = await _dh(my: myIk, their: otherSpkX25519);
       final dh2 = await _dh(
-        my: SimpleKeyPairData(myDhPriv, publicKey: SimplePublicKey(myDhPub.bytes, type: KeyPairType.x25519), type: KeyPairType.x25519),
+        my: SimpleKeyPairData(
+          myDhPriv,
+          publicKey: SimplePublicKey(myDhPub.bytes, type: KeyPairType.x25519),
+          type: KeyPairType.x25519,
+        ),
         their: otherIdentityX25519,
       );
       final dh3 = await _dh(
-        my: SimpleKeyPairData(myDhPriv, publicKey: SimplePublicKey(myDhPub.bytes, type: KeyPairType.x25519), type: KeyPairType.x25519),
+        my: SimpleKeyPairData(
+          myDhPriv,
+          publicKey: SimplePublicKey(myDhPub.bytes, type: KeyPairType.x25519),
+          type: KeyPairType.x25519,
+        ),
         their: otherSpkX25519,
       );
 
@@ -771,7 +833,11 @@ class E2ee {
       final myDh = st.myDhKeyPair();
       final their = SimplePublicKey(st.theirDhPub, type: KeyPairType.x25519);
       final dhOut = await _dh(my: myDh, their: their);
-      final k = await _kdfRk(rootKey: st.rootKey, dhOut: dhOut, info: utf8.encode('gitmit-dr-v2'));
+      final k = await _kdfRk(
+        rootKey: st.rootKey,
+        dhOut: dhOut,
+        info: utf8.encode('gitmit-dr-v2'),
+      );
       st = st.copyWith(rootKey: k.rootKey, sendCk: k.chainKey);
     }
 
@@ -817,7 +883,8 @@ class E2ee {
   }) async {
     final m = _flattenCipherEnvelope(message);
     final v = _fieldInt(m, ['e2eeV', 'v'], v1);
-    if (v >= v2 || (m['alg'] ?? '').toString().toLowerCase().contains('dr-v2')) {
+    if (v >= v2 ||
+        (m['alg'] ?? '').toString().toLowerCase().contains('dr-v2')) {
       try {
         return _decryptFromUserV2(otherUid: otherUid, message: m);
       } catch (_) {
@@ -851,10 +918,7 @@ class E2ee {
       mac: Mac(_unb64(mac)),
     );
 
-    final clearBytes = await _aead.decrypt(
-      box,
-      secretKey: key,
-    );
+    final clearBytes = await _aead.decrypt(box, secretKey: key);
     return utf8.decode(clearBytes);
   }
 
@@ -869,10 +933,17 @@ class E2ee {
     final dhB64 = _fieldStr(m, ['dh']);
     final n = _fieldInt(m, ['n'], 0);
     final pn = _fieldInt(m, ['pn'], 0);
-    final isInit = _fieldBool(m, ['init']) || (m['spkId'] ?? '').toString().trim().isNotEmpty;
-    final spkId = (m['spkId'] is int) ? m['spkId'] as int : int.tryParse((m['spkId'] ?? '').toString());
+    final isInit =
+        _fieldBool(m, ['init']) ||
+        (m['spkId'] ?? '').toString().trim().isNotEmpty;
+    final spkId = (m['spkId'] is int)
+        ? m['spkId'] as int
+        : int.tryParse((m['spkId'] ?? '').toString());
 
-    if (nonceB64.isEmpty || ciphertextB64.isEmpty || macB64.isEmpty || dhB64.isEmpty) {
+    if (nonceB64.isEmpty ||
+        ciphertextB64.isEmpty ||
+        macB64.isEmpty ||
+        dhB64.isEmpty) {
       throw E2eeException('E2EE: missing fields');
     }
 
@@ -905,8 +976,14 @@ class E2ee {
       }
 
       final dh1 = await _dh(my: mySpk.spk, their: otherIk);
-      final dh2 = await _dh(my: myIk, their: SimplePublicKey(dhPub, type: KeyPairType.x25519));
-      final dh3 = await _dh(my: mySpk.spk, their: SimplePublicKey(dhPub, type: KeyPairType.x25519));
+      final dh2 = await _dh(
+        my: myIk,
+        their: SimplePublicKey(dhPub, type: KeyPairType.x25519),
+      );
+      final dh3 = await _dh(
+        my: mySpk.spk,
+        their: SimplePublicKey(dhPub, type: KeyPairType.x25519),
+      );
 
       final ikm = _concat([dh1, dh2, dh3]);
       final out = await _hkdf(
@@ -923,10 +1000,18 @@ class E2ee {
       final myDhPriv = await myDhNew.extractPrivateKeyBytes();
       final myDhPub = await myDhNew.extractPublicKey();
       final dhOut = await _dh(
-        my: SimpleKeyPairData(myDhPriv, publicKey: SimplePublicKey(myDhPub.bytes, type: KeyPairType.x25519), type: KeyPairType.x25519),
+        my: SimpleKeyPairData(
+          myDhPriv,
+          publicKey: SimplePublicKey(myDhPub.bytes, type: KeyPairType.x25519),
+          type: KeyPairType.x25519,
+        ),
         their: SimplePublicKey(dhPub, type: KeyPairType.x25519),
       );
-      final k = await _kdfRk(rootKey: rootKey, dhOut: dhOut, info: utf8.encode('gitmit-dr-v2'));
+      final k = await _kdfRk(
+        rootKey: rootKey,
+        dhOut: dhOut,
+        info: utf8.encode('gitmit-dr-v2'),
+      );
       rootKey = k.rootKey;
       final sendCk = k.chainKey;
 
@@ -949,7 +1034,10 @@ class E2ee {
       final myDh = st.myDhKeyPair();
       final rk1 = await _kdfRk(
         rootKey: st.rootKey,
-        dhOut: await _dh(my: myDh, their: SimplePublicKey(dhPub, type: KeyPairType.x25519)),
+        dhOut: await _dh(
+          my: myDh,
+          their: SimplePublicKey(dhPub, type: KeyPairType.x25519),
+        ),
         info: utf8.encode('gitmit-dr-v2'),
       );
       var rootKey = rk1.rootKey;
@@ -962,7 +1050,14 @@ class E2ee {
       final rk2 = await _kdfRk(
         rootKey: rootKey,
         dhOut: await _dh(
-          my: SimpleKeyPairData(newMyDhPriv, publicKey: SimplePublicKey(newMyDhPub.bytes, type: KeyPairType.x25519), type: KeyPairType.x25519),
+          my: SimpleKeyPairData(
+            newMyDhPriv,
+            publicKey: SimplePublicKey(
+              newMyDhPub.bytes,
+              type: KeyPairType.x25519,
+            ),
+            type: KeyPairType.x25519,
+          ),
           their: SimplePublicKey(dhPub, type: KeyPairType.x25519),
         ),
         info: utf8.encode('gitmit-dr-v2'),
@@ -1179,10 +1274,7 @@ class E2ee {
       mac: Mac(_unb64(mac)),
     );
 
-    final clearBytes = await _aead.decrypt(
-      box,
-      secretKey: groupKey,
-    );
+    final clearBytes = await _aead.decrypt(box, secretKey: groupKey);
     return utf8.decode(clearBytes);
   }
 
@@ -1190,10 +1282,15 @@ class E2ee {
   // Group E2EE (v2): per-sender hash-ratcheted sender key (Signal-like Sender Keys)
   // ----------------
 
-  static String _gSendKey(String groupId, String myUid) => '$_kGSendPrefix$groupId:$myUid';
-  static String _gRecvKey(String groupId, String senderUid, String keyId) => '$_kGRecvPrefix$groupId:$senderUid:$keyId';
+  static String _gSendKey(String groupId, String myUid) =>
+      '$_kGSendPrefix$groupId:$myUid';
+  static String _gRecvKey(String groupId, String senderUid, String keyId) =>
+      '$_kGRecvPrefix$groupId:$senderUid:$keyId';
 
-  static Future<_GroupSenderState?> _loadGroupSenderState({required String groupId, required String myUid}) async {
+  static Future<_GroupSenderState?> _loadGroupSenderState({
+    required String groupId,
+    required String myUid,
+  }) async {
     try {
       final s = await _readKey(_gSendKey(groupId, myUid));
       if (s == null || s.isEmpty) return null;
@@ -1205,11 +1302,19 @@ class E2ee {
     }
   }
 
-  static Future<void> _saveGroupSenderState({required String groupId, required String myUid, required _GroupSenderState st}) async {
+  static Future<void> _saveGroupSenderState({
+    required String groupId,
+    required String myUid,
+    required _GroupSenderState st,
+  }) async {
     await _writeKey(_gSendKey(groupId, myUid), jsonEncode(st.toJson()));
   }
 
-  static Future<_GroupRecvState?> _loadGroupRecvState({required String groupId, required String senderUid, required String keyId}) async {
+  static Future<_GroupRecvState?> _loadGroupRecvState({
+    required String groupId,
+    required String senderUid,
+    required String keyId,
+  }) async {
     try {
       final s = await _readKey(_gRecvKey(groupId, senderUid, keyId));
       if (s == null || s.isEmpty) return null;
@@ -1221,8 +1326,16 @@ class E2ee {
     }
   }
 
-  static Future<void> _saveGroupRecvState({required String groupId, required String senderUid, required String keyId, required _GroupRecvState st}) async {
-    await _writeKey(_gRecvKey(groupId, senderUid, keyId), jsonEncode(st.toJson()));
+  static Future<void> _saveGroupRecvState({
+    required String groupId,
+    required String senderUid,
+    required String keyId,
+    required _GroupRecvState st,
+  }) async {
+    await _writeKey(
+      _gRecvKey(groupId, senderUid, keyId),
+      jsonEncode(st.toJson()),
+    );
   }
 
   static Future<bool> _groupSupportsV2(String groupId) async {
@@ -1250,14 +1363,18 @@ class E2ee {
     final memSnap = await rtdb().ref('groupMembers/$groupId').get();
     final mv = memSnap.value;
     final mm = (mv is Map) ? mv : null;
-    if (mm == null || mm.isEmpty) throw E2eeException('E2EE: group has no members');
+    if (mm == null || mm.isEmpty)
+      throw E2eeException('E2EE: group has no members');
 
     final updates = <String, Object?>{};
     for (final entry in mm.entries) {
       if (entry.value == null || entry.value == false) continue;
       final uid = entry.key.toString();
       // Distribute to everyone including self (simplifies multi-device future).
-      final envelope = await encryptForUser(otherUid: uid, plaintext: _b64(st.chainKey));
+      final envelope = await encryptForUser(
+        otherUid: uid,
+        plaintext: _b64(st.chainKey),
+      );
       updates['groupE2ee/$groupId/senderKeys/$myUid/$uid'] = {
         ...envelope,
         'fromUid': myUid,
@@ -1362,16 +1479,28 @@ class E2ee {
     final ciphertextB64 = _fieldStr(m, ['ciphertext', 'ct', 'cipher']);
     final macB64 = _fieldStr(m, ['mac', 'tag']);
     final keyId = (m['keyId'] ?? '').toString();
-    final n = (m['n'] is int) ? m['n'] as int : int.tryParse((m['n'] ?? '').toString()) ?? 0;
+    final n = (m['n'] is int)
+        ? m['n'] as int
+        : int.tryParse((m['n'] ?? '').toString()) ?? 0;
     final senderUid = (m['fromUid'] ?? '').toString();
-    if (nonceB64.isEmpty || ciphertextB64.isEmpty || macB64.isEmpty || keyId.isEmpty || senderUid.isEmpty) {
+    if (nonceB64.isEmpty ||
+        ciphertextB64.isEmpty ||
+        macB64.isEmpty ||
+        keyId.isEmpty ||
+        senderUid.isEmpty) {
       throw E2eeException('E2EE: missing fields');
     }
 
-    var st = await _loadGroupRecvState(groupId: groupId, senderUid: senderUid, keyId: keyId);
+    var st = await _loadGroupRecvState(
+      groupId: groupId,
+      senderUid: senderUid,
+      keyId: keyId,
+    );
     if (st == null) {
       // Fetch wrapped sender key for me.
-      final snap = await rtdb().ref('groupE2ee/$groupId/senderKeys/$senderUid/$myUid').get();
+      final snap = await rtdb()
+          .ref('groupE2ee/$groupId/senderKeys/$senderUid/$myUid')
+          .get();
       final v = snap.value;
       if (v is! Map) throw E2eeException('E2EE: missing sender key');
       final env = Map<String, dynamic>.from(v);
@@ -1398,7 +1527,8 @@ class E2ee {
 
     if (n < nr) {
       msgKey = skipped.remove(cacheKey);
-      if (msgKey == null) throw E2eeException('E2EE: duplicate/old group message');
+      if (msgKey == null)
+        throw E2eeException('E2EE: duplicate/old group message');
     } else {
       while (nr < n) {
         final d = await _kdfCk(ck);
@@ -1466,24 +1596,24 @@ class _DrState {
   final bool isInit;
 
   SimpleKeyPairData myDhKeyPair() => SimpleKeyPairData(
-        myDhPriv,
-        publicKey: SimplePublicKey(myDhPub, type: KeyPairType.x25519),
-        type: KeyPairType.x25519,
-      );
+    myDhPriv,
+    publicKey: SimplePublicKey(myDhPub, type: KeyPairType.x25519),
+    type: KeyPairType.x25519,
+  );
 
   Map<String, Object?> toJson() => {
-        'rk': base64UrlEncode(rootKey),
-        'sck': sendCk == null ? null : base64UrlEncode(sendCk!),
-        'rck': recvCk == null ? null : base64UrlEncode(recvCk!),
-        'mdp': base64UrlEncode(myDhPriv),
-        'mdq': base64UrlEncode(myDhPub),
-        'tdq': base64UrlEncode(theirDhPub),
-        'ns': ns,
-        'nr': nr,
-        'pn': pn,
-        'sk': skipped,
-        'init': isInit,
-      };
+    'rk': base64UrlEncode(rootKey),
+    'sck': sendCk == null ? null : base64UrlEncode(sendCk!),
+    'rck': recvCk == null ? null : base64UrlEncode(recvCk!),
+    'mdp': base64UrlEncode(myDhPriv),
+    'mdq': base64UrlEncode(myDhPub),
+    'tdq': base64UrlEncode(theirDhPub),
+    'ns': ns,
+    'nr': nr,
+    'pn': pn,
+    'sk': skipped,
+    'init': isInit,
+  };
 
   static _DrState fromJson(Map<String, dynamic> m) {
     List<int> unb(String s) => base64Url.decode(s);
@@ -1497,10 +1627,18 @@ class _DrState {
       myDhPriv: unb((m['mdp'] ?? '').toString()),
       myDhPub: unb((m['mdq'] ?? '').toString()),
       theirDhPub: unb((m['tdq'] ?? '').toString()),
-      ns: (m['ns'] is int) ? m['ns'] as int : int.tryParse((m['ns'] ?? '').toString()) ?? 0,
-      nr: (m['nr'] is int) ? m['nr'] as int : int.tryParse((m['nr'] ?? '').toString()) ?? 0,
-      pn: (m['pn'] is int) ? m['pn'] as int : int.tryParse((m['pn'] ?? '').toString()) ?? 0,
-      skipped: (m['sk'] is Map) ? Map<String, String>.from(m['sk'] as Map) : <String, String>{},
+      ns: (m['ns'] is int)
+          ? m['ns'] as int
+          : int.tryParse((m['ns'] ?? '').toString()) ?? 0,
+      nr: (m['nr'] is int)
+          ? m['nr'] as int
+          : int.tryParse((m['nr'] ?? '').toString()) ?? 0,
+      pn: (m['pn'] is int)
+          ? m['pn'] as int
+          : int.tryParse((m['pn'] ?? '').toString()) ?? 0,
+      skipped: (m['sk'] is Map)
+          ? Map<String, String>.from(m['sk'] as Map)
+          : <String, String>{},
       isInit: m['init'] == true,
     );
   }
@@ -1535,27 +1673,34 @@ class _DrState {
 }
 
 class _GroupSenderState {
-  _GroupSenderState({required this.keyId, required this.chainKey, required this.n});
+  _GroupSenderState({
+    required this.keyId,
+    required this.chainKey,
+    required this.n,
+  });
 
   final String keyId;
   final List<int> chainKey;
   final int n;
 
   Map<String, Object?> toJson() => {
-        'keyId': keyId,
-        'ck': base64UrlEncode(chainKey),
-        'n': n,
-      };
+    'keyId': keyId,
+    'ck': base64UrlEncode(chainKey),
+    'n': n,
+  };
 
   static _GroupSenderState fromJson(Map<String, dynamic> m) {
     return _GroupSenderState(
       keyId: (m['keyId'] ?? '').toString(),
       chainKey: base64Url.decode((m['ck'] ?? '').toString()),
-      n: (m['n'] is int) ? m['n'] as int : int.tryParse((m['n'] ?? '').toString()) ?? 0,
+      n: (m['n'] is int)
+          ? m['n'] as int
+          : int.tryParse((m['n'] ?? '').toString()) ?? 0,
     );
   }
 
-  _GroupSenderState copyWith({String? keyId, List<int>? chainKey, int? n}) => _GroupSenderState(
+  _GroupSenderState copyWith({String? keyId, List<int>? chainKey, int? n}) =>
+      _GroupSenderState(
         keyId: keyId ?? this.keyId,
         chainKey: chainKey ?? this.chainKey,
         n: n ?? this.n,
@@ -1563,29 +1708,41 @@ class _GroupSenderState {
 }
 
 class _GroupRecvState {
-  _GroupRecvState({required this.chainKey, required this.nr, required this.skipped});
+  _GroupRecvState({
+    required this.chainKey,
+    required this.nr,
+    required this.skipped,
+  });
 
   final List<int> chainKey;
   final int nr;
   final Map<String, String> skipped;
 
   Map<String, Object?> toJson() => {
-        'ck': base64UrlEncode(chainKey),
-        'nr': nr,
-        'sk': skipped,
-      };
+    'ck': base64UrlEncode(chainKey),
+    'nr': nr,
+    'sk': skipped,
+  };
 
   static _GroupRecvState fromJson(Map<String, dynamic> m) {
     return _GroupRecvState(
       chainKey: base64Url.decode((m['ck'] ?? '').toString()),
-      nr: (m['nr'] is int) ? m['nr'] as int : int.tryParse((m['nr'] ?? '').toString()) ?? 0,
-      skipped: (m['sk'] is Map) ? Map<String, String>.from(m['sk'] as Map) : <String, String>{},
+      nr: (m['nr'] is int)
+          ? m['nr'] as int
+          : int.tryParse((m['nr'] ?? '').toString()) ?? 0,
+      skipped: (m['sk'] is Map)
+          ? Map<String, String>.from(m['sk'] as Map)
+          : <String, String>{},
     );
   }
 
-  _GroupRecvState copyWith({List<int>? chainKey, int? nr, Map<String, String>? skipped}) => _GroupRecvState(
-        chainKey: chainKey ?? this.chainKey,
-        nr: nr ?? this.nr,
-        skipped: skipped ?? this.skipped,
-      );
+  _GroupRecvState copyWith({
+    List<int>? chainKey,
+    int? nr,
+    Map<String, String>? skipped,
+  }) => _GroupRecvState(
+    chainKey: chainKey ?? this.chainKey,
+    nr: nr ?? this.nr,
+    skipped: skipped ?? this.skipped,
+  );
 }

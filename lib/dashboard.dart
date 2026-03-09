@@ -4914,7 +4914,7 @@ class _DashboardPageState extends State<DashboardPage> {
           }
 
           try {
-            await E2ee.importDeviceKeyMaterial(material);
+            await E2ee.importDeviceKeyMaterial(material, replaceExisting: true);
             if (importedPt.isNotEmpty) {
               await PlaintextCache.importEntries(importedPt);
             }
@@ -5068,7 +5068,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     if (material.isEmpty) return false;
 
-    await E2ee.importDeviceKeyMaterial(material);
+    await E2ee.importDeviceKeyMaterial(material, replaceExisting: true);
     if (importedPt.isNotEmpty) {
       await PlaintextCache.importEntries(importedPt);
     }
@@ -5272,10 +5272,7 @@ class _DashboardPageState extends State<DashboardPage> {
           }
           try {
             remoteFp =
-                await E2ee.fingerprintForUserSigningKey(
-              uid: uid,
-              bytes: 8,
-                ) ??
+                await E2ee.fingerprintForUserSigningKey(uid: uid, bytes: 8) ??
                 '';
           } catch (_) {
             // best-effort
@@ -9793,26 +9790,35 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
           return;
         }
 
-        await E2ee.importDeviceKeyMaterial(material);
-        if (importedPt.isNotEmpty) {
-          await PlaintextCache.importEntries(importedPt);
-        }
-        if (mounted) {
-          setState(() {
-            _pairingPhase = 'syncing';
-            _pairingInfo = AppLanguage.tr(
-              context,
-              'Klíče načteny. Synchronizuji sezení zařízení…',
-              'Keys loaded. Synchronizing device sessions…',
-            );
+        try {
+          await E2ee.importDeviceKeyMaterial(material, replaceExisting: true);
+          if (importedPt.isNotEmpty) {
+            await PlaintextCache.importEntries(importedPt);
+          }
+          if (mounted) {
+            setState(() {
+              _pairingPhase = 'syncing';
+              _pairingInfo = AppLanguage.tr(
+                context,
+                'Klíče načteny. Synchronizuji sezení zařízení…',
+                'Keys loaded. Synchronizing device sessions…',
+              );
+            });
+          }
+          await E2ee.publishMyPublicKey(uid: uid);
+          await _rebuildWebPlaintextCache(uid: uid);
+          await ref.update({
+            'status': 'completed',
+            'completedAt': ServerValue.timestamp,
           });
+        } catch (e) {
+          await ref.update({
+            'status': 'failed',
+            'error': e.toString(),
+            'updatedAt': ServerValue.timestamp,
+          });
+          rethrow;
         }
-        await E2ee.publishMyPublicKey(uid: uid);
-        await _rebuildWebPlaintextCache(uid: uid);
-        await ref.update({
-          'status': 'completed',
-          'completedAt': ServerValue.timestamp,
-        });
 
         // Mark this web device session as paired so we don't prompt again.
         try {
@@ -9962,19 +9968,91 @@ class _SettingsDevicesPageState extends State<_SettingsDevicesPage> {
         'payload': {'e2ee': material, 'ptcache': ptCache},
       });
 
+      await _pairingSub?.cancel();
+      _pairingSub = null;
+
       if (mounted) {
         setState(() {
-          _pairingBusy = false;
+          _pairingBusy = true;
           _pairingPhase = 'waiting_web_confirm';
           _pairingInfo = AppLanguage.tr(
             context,
-            'Klíče byly odeslány do webu. Na webu počkej na potvrzení importu.',
-            'Keys were sent to web. Wait for import confirmation on web.',
+            'Klíče byly odeslány. Čekám na potvrzení importu z webu…',
+            'Keys were sent. Waiting for web import confirmation…',
           );
         });
-        _safeShowSnackBarSnackBar(SnackBar(content: Text(_pairingInfo!)));
       }
+
+      final done = Completer<void>();
+      _pairingSub = ref.onValue.listen((event) async {
+        final raw = event.snapshot.value;
+        if (raw is! Map) return;
+        final m = Map<String, dynamic>.from(raw);
+        final status = (m['status'] ?? '').toString().trim();
+
+        if (status == 'completed') {
+          if (mounted) {
+            setState(() {
+              _pairingBusy = false;
+              _pairingPhase = 'done';
+              _pairingInfo = AppLanguage.tr(
+                context,
+                'Přenos dokončen. Web nyní používá klíče z mobilu.',
+                'Transfer completed. Web now uses keys from mobile.',
+              );
+              _pairingError = null;
+            });
+            _safeShowSnackBarSnackBar(SnackBar(content: Text(_pairingInfo!)));
+          }
+          if (!done.isCompleted) done.complete();
+          return;
+        }
+
+        if (status == 'failed' ||
+            status == 'failed_auto' ||
+            status == 'cancelled' ||
+            status == 'expired') {
+          if (mounted) {
+            final reason = (m['error'] ?? '').toString().trim();
+            setState(() {
+              _pairingBusy = false;
+              _pairingPhase = 'error';
+              _pairingError = reason.isEmpty
+                  ? AppLanguage.tr(
+                      context,
+                      'Přenos se nepodařil.',
+                      'Transfer failed.',
+                    )
+                  : '${AppLanguage.tr(context, 'Přenos se nepodařil', 'Transfer failed')}: $reason';
+            });
+            _safeShowSnackBarSnackBar(SnackBar(content: Text(_pairingError!)));
+          }
+          if (!done.isCompleted) done.complete();
+        }
+      });
+
+      await Future.any<void>([
+        done.future,
+        Future<void>.delayed(const Duration(seconds: 35)),
+      ]);
+
+      if (!done.isCompleted && mounted) {
+        setState(() {
+          _pairingBusy = false;
+          _pairingPhase = 'error';
+          _pairingError = AppLanguage.tr(
+            context,
+            'Web nepotvrdil import včas. Zkus to znovu.',
+            'Web did not confirm import in time. Try again.',
+          );
+        });
+      }
+
+      await _pairingSub?.cancel();
+      _pairingSub = null;
     } catch (e) {
+      await _pairingSub?.cancel();
+      _pairingSub = null;
       if (mounted) {
         setState(() {
           _pairingBusy = false;
