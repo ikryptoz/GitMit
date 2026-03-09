@@ -15853,15 +15853,22 @@ class _ChatsTabState extends State<_ChatsTab>
       return;
     }
 
-    final msg = {
+    final selfMsg = {
+      ...encrypted,
+      'text': plaintext,
+      'fromUid': current.uid,
+      'createdAt': ServerValue.timestamp,
+    };
+
+    final peerMsg = {
       ...encrypted,
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
     };
 
     final updates = <String, Object?>{};
-    updates['messages/${current.uid}/$login/$key'] = msg;
-    updates['messages/$otherUid/$myLogin/$key'] = msg;
+    updates['messages/${current.uid}/$login/$key'] = selfMsg;
+    updates['messages/$otherUid/$myLogin/$key'] = peerMsg;
     if (otherUid == current.uid) {
       updates['messages/${current.uid}/$login/$key/deliveredTo/${current.uid}'] =
           true;
@@ -18385,7 +18392,15 @@ class _ChatsTabState extends State<_ChatsTab>
     );
     final key = rtdb().ref().push().key;
     if (key == null || key.isEmpty) return;
-    final nowPayload = {
+    final nowPayloadSelf = {
+      ...encrypted,
+      'text': forwardedText,
+      'fromUid': current.uid,
+      'createdAt': ServerValue.timestamp,
+      'forwarded': true,
+    };
+
+    final nowPayloadPeer = {
       ...encrypted,
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
@@ -18394,8 +18409,8 @@ class _ChatsTabState extends State<_ChatsTab>
 
     final myAvatar = await _myAvatarUrl(current.uid);
     final updates = <String, Object?>{};
-    updates['messages/${current.uid}/$cleaned/$key'] = nowPayload;
-    updates['messages/$otherUid/$myLogin/$key'] = nowPayload;
+    updates['messages/${current.uid}/$cleaned/$key'] = nowPayloadSelf;
+    updates['messages/$otherUid/$myLogin/$key'] = nowPayloadPeer;
     updates['savedChats/${current.uid}/$cleaned'] = {
       'login': cleaned,
       'status': 'accepted',
@@ -19653,7 +19668,24 @@ class _ChatsTabState extends State<_ChatsTab>
     final key = rtdb().ref().push().key;
     if (key == null || key.isEmpty) return;
 
-    final msg = {
+    final selfMsg = {
+      ...encrypted,
+      'text': outgoingText,
+      'fromUid': current.uid,
+      'createdAt': ServerValue.timestamp,
+      if (replyToKey != null && replyToKey.trim().isNotEmpty)
+        'replyToKey': replyToKey,
+      if (replyToFrom != null && replyToFrom.trim().isNotEmpty)
+        'replyToFrom': replyToFrom,
+      if (_replyToUid != null && _replyToUid!.trim().isNotEmpty)
+        'replyToUid': _replyToUid,
+      if (replyToPreview != null && replyToPreview.trim().isNotEmpty)
+        'replyToPreview': replyToPreview,
+      if (expiresAt != null) 'expiresAt': expiresAt,
+      if (burnAfterRead) 'burnAfterRead': true,
+    };
+
+    final peerMsg = {
       ...encrypted,
       'fromUid': current.uid,
       'createdAt': ServerValue.timestamp,
@@ -19670,8 +19702,8 @@ class _ChatsTabState extends State<_ChatsTab>
     };
 
     final updates = <String, Object?>{};
-    updates['messages/${current.uid}/$login/$key'] = msg;
-    updates['messages/$otherUid/$myLogin/$key'] = msg;
+    updates['messages/${current.uid}/$login/$key'] = selfMsg;
+    updates['messages/$otherUid/$myLogin/$key'] = peerMsg;
 
     // Chat tiles for both sides.
     updates['savedChats/${current.uid}/$login'] = {
