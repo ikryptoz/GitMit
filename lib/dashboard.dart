@@ -1056,35 +1056,9 @@ class _UserProfilePageState extends State<_UserProfilePage> {
     required String myUid,
     required String otherUid,
   }) async {
-    if (otherUid == myUid) {
-      _safeShowSnackBarSnackBar(
-        SnackBar(
-          content: Text(
-            AppLanguage.tr(
-              context,
-              'Tohle je tvůj profil.',
-              'This is your profile.',
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-
     final myLogin = await _myGithubUsername(myUid);
     if (myLogin == null || myLogin.trim().isEmpty) {
-      _safeShowSnackBarSnackBar(
-        SnackBar(
-          content: Text(
-            AppLanguage.tr(
-              context,
-              'Nepodařilo se zjistit tvůj GitHub username.',
-              'Failed to read your GitHub username.',
-            ),
-          ),
-        ),
-      );
-      return;
+      throw Exception('Nepodařilo se zjistit tvůj GitHub username.');
     }
 
     final ctrl = TextEditingController();
@@ -1098,26 +1072,32 @@ class _UserProfilePageState extends State<_UserProfilePage> {
           builder: (ctx, setLocalState) {
             return AlertDialog(
               title: Text(
-                AppLanguage.tr(
-                  context,
-                  'Napsat @${widget.login}',
-                  'Write to @${widget.login}',
-                ),
+                AppLanguage.tr(context, 'Napsat zprávu', 'Write message'),
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Text(
+                    AppLanguage.tr(
+                      context,
+                      'Příjemce: @${widget.login}',
+                      'Recipient: @${widget.login}',
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 10),
                   TextField(
                     controller: ctrl,
                     minLines: 3,
-                    maxLines: 6,
+                    maxLines: 5,
                     decoration: InputDecoration(
                       hintText: AppLanguage.tr(
                         context,
-                        'Ahoj, zaujala mě tvoje nabídka v Jobs...',
-                        'Hi, your Jobs listing caught my attention...',
+                        'Napiš krátkou zprávu...',
+                        'Write a short message...',
                       ),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   if (localError != null) ...[
@@ -3730,13 +3710,15 @@ class _DashboardPageState extends State<DashboardPage> {
           return ValueListenableBuilder<bool>(
             valueListenable: _chatsHasVerificationAlert,
             builder: (context, hasVerificationAlert, _) {
-              final showVerificationAction =
-                  _index == 1 && hasVerificationAlert;
               final shellBg = Theme.of(context).scaffoldBackgroundColor;
               return ValueListenableBuilder<String?>(
                 valueListenable: _chatsTopHandle,
                 builder: (context, activeHandle, _) {
                   final liveState = _chatsKey.currentState;
+                  final liveShowOverviewNotifications =
+                      _index == 1 && (liveState?.isMainChatsOverview ?? false);
+                  final showVerificationAction =
+                      liveShowOverviewNotifications && hasVerificationAlert;
                   final liveShowDmActions =
                       _index == 1 && (liveState?.hasActiveDm ?? false);
                   final liveShowGroupCallAction =
@@ -4002,37 +3984,56 @@ class _DashboardPageState extends State<DashboardPage> {
                                 ),
                               ),
                             ),
-                            if (_index == 1) ...[
+                            if (liveShowOverviewNotifications) ...[
                               const SizedBox(width: 8),
-                              IconButton(
-                                tooltip: AppLanguage.tr(
-                                  context,
-                                  'Notifikace',
-                                  'Notifications',
-                                ),
-                                onPressed: () => currentChatsState
-                                    ?.openOverviewNotificationsPanelFromShell(),
-                                icon: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    const Icon(
-                                      Icons.notifications_none_rounded,
+                              ValueListenableBuilder<int>(
+                                valueListenable: _chatsNotificationCount,
+                                builder: (context, notifCount, _) {
+                                  return IconButton(
+                                    tooltip: AppLanguage.tr(
+                                      context,
+                                      'Notifikace',
+                                      'Notifications',
                                     ),
-                                    if (hasVerificationAlert)
-                                      Positioned(
-                                        right: -1,
-                                        top: -1,
-                                        child: Container(
-                                          width: 9,
-                                          height: 9,
-                                          decoration: const BoxDecoration(
-                                            color: Colors.redAccent,
-                                            shape: BoxShape.circle,
-                                          ),
+                                    onPressed: () => currentChatsState
+                                        ?.openOverviewNotificationsPanelFromShell(),
+                                    icon: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        const Icon(
+                                          Icons.notifications_none_rounded,
                                         ),
-                                      ),
-                                  ],
-                                ),
+                                        if (notifCount > 0)
+                                          Positioned(
+                                            right: -8,
+                                            top: -8,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 1,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.redAccent,
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                notifCount > 99
+                                                    ? '99+'
+                                                    : '$notifCount',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  );
+                                },
                               ),
                             ],
                           ],
@@ -11711,6 +11712,7 @@ final ValueNotifier<bool> _chatsCanStepBack = ValueNotifier<bool>(false);
 final ValueNotifier<bool> _chatsHasVerificationAlert = ValueNotifier<bool>(
   false,
 );
+final ValueNotifier<int> _chatsNotificationCount = ValueNotifier<int>(0);
 
 class _ChatsTab extends StatefulWidget {
   const _ChatsTab({
@@ -11800,6 +11802,12 @@ class _ChatsTabState extends State<_ChatsTab>
   String? _activeDmScrollChatViewKey;
   StreamSubscription<DatabaseEvent>? _incomingCallInviteSub;
   StreamSubscription<DatabaseEvent>? _callResponseSub;
+  StreamSubscription<DatabaseEvent>? _notifInvitesSub;
+  StreamSubscription<DatabaseEvent>? _notifAdminInboxSub;
+  StreamSubscription<DatabaseEvent>? _notifDmReqSub;
+  StreamSubscription<DatabaseEvent>? _notifMyVerifySub;
+  StreamSubscription<DatabaseEvent>? _notifRoleSub;
+  StreamSubscription<DatabaseEvent>? _notifAllVerifySub;
   StreamSubscription<DatabaseEvent>? _dmThreadAddedSub;
   StreamSubscription<DatabaseEvent>? _dmThreadRemovedSub;
   final Map<String, StreamSubscription<DatabaseEvent>> _dmIncomingSubs =
@@ -11811,6 +11819,15 @@ class _ChatsTabState extends State<_ChatsTab>
   final Set<String> _incomingNotificationSeen = <String>{};
   int _incomingNotificationsStartMs = 0;
   bool _incomingNotificationsRunning = false;
+  int _notifInvitesCount = 0;
+  int _notifAdminInboxCount = 0;
+  int _notifDmReqCount = 0;
+  int _notifMyVerifyCount = 0;
+  int _notifModVerifyCount = 0;
+  bool _notifIsModerator = false;
+  int _notifLastTotal = 0;
+  int _notifSuppressInAppUntilMs = 0;
+  int _notifLastSnackbarAtMs = 0;
   Timer? _outgoingCallTimeout;
   Timer? _callElapsedTicker;
   Timer? _callRingingFeedbackTicker;
@@ -15645,6 +15662,73 @@ class _ChatsTabState extends State<_ChatsTab>
     );
   }
 
+  Future<void> _requestKeyShareBeforeAccept({
+    required String myUid,
+    required String myLogin,
+    required String otherLogin,
+    String? otherUid,
+    String? otherAvatarUrl,
+  }) async {
+    var peerUid = (otherUid ?? '').trim();
+    if (peerUid.isEmpty) {
+      peerUid =
+          (await _lookupUidForLoginLower(otherLogin.trim().toLowerCase()) ?? '')
+              .trim();
+    }
+    if (peerUid.isEmpty) {
+      throw Exception(
+        AppLanguage.tr(
+          context,
+          'Nepodařilo se zjistit UID protistrany.',
+          'Failed to resolve peer UID.',
+        ),
+      );
+    }
+
+    final myAvatar = await _myAvatarUrl(myUid);
+    final myLoginLower = myLogin.trim().toLowerCase();
+    final requestText = AppLanguage.tr(
+      context,
+      '🔐 Prosím povol sdílení E2EE klíče, ať se naváže šifrovaná komunikace.',
+      '🔐 Please allow E2EE key sharing so encrypted communication can start.',
+    );
+
+    try {
+      await E2ee.publishMyPublicKey(uid: myUid);
+    } catch (_) {
+      // best-effort
+    }
+
+    await rtdb().ref().update({
+      'dmRequests/$peerUid/$myLoginLower': {
+        'fromUid': myUid,
+        'fromLogin': myLogin,
+        if (myAvatar != null && myAvatar.trim().isNotEmpty)
+          'fromAvatarUrl': myAvatar.trim(),
+        'createdAt': ServerValue.timestamp,
+        'systemType': 'key_share_request',
+        'systemText': requestText,
+      },
+      'savedChats/$myUid/$otherLogin': {
+        'login': otherLogin,
+        if (otherAvatarUrl != null && otherAvatarUrl.trim().isNotEmpty)
+          'avatarUrl': otherAvatarUrl.trim(),
+        'status': 'pending_out',
+        'lastMessageText': requestText,
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+      'savedChats/$peerUid/$myLogin': {
+        'login': myLogin,
+        if (myAvatar != null) 'avatarUrl': myAvatar,
+        'status': 'pending_in',
+        'lastMessageText': requestText,
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      },
+    });
+  }
+
   Future<void> _rejectDmRequest({
     required String myUid,
     required String otherLogin,
@@ -15663,14 +15747,38 @@ class _ChatsTabState extends State<_ChatsTab>
     final req = Map<String, dynamic>.from(rv);
     final fromUid = (req['fromUid'] ?? '').toString();
     final fromLogin = (req['fromLogin'] ?? otherLogin).toString();
+    final fromAvatarUrl = (req['fromAvatarUrl'] ?? '').toString();
 
     final myLogin = await _myGithubUsername(myUid);
+    final myAvatar = await _myAvatarUrl(myUid);
+    final rejectedText = AppLanguage.tr(
+      context,
+      '❌ Žádost o chat byla odmítnuta.',
+      '❌ Chat request was declined.',
+    );
     final updates = <String, Object?>{
       'dmRequests/$myUid/$otherLower': null,
       'savedChats/$myUid/$fromLogin': null,
     };
     if (fromUid.isNotEmpty && myLogin != null && myLogin.trim().isNotEmpty) {
-      updates['savedChats/$fromUid/$myLogin'] = null;
+      updates['savedChats/$fromUid/$myLogin'] = {
+        'login': myLogin,
+        if (myAvatar != null) 'avatarUrl': myAvatar,
+        'status': 'rejected',
+        'lastMessageText': rejectedText,
+        'lastMessageAt': ServerValue.timestamp,
+        'savedAt': ServerValue.timestamp,
+      };
+      final msgKey = rtdb().ref().push().key;
+      if (msgKey != null && msgKey.isNotEmpty) {
+        updates['messages/$fromUid/$myLogin/$msgKey'] = {
+          'text': rejectedText,
+          'fromUid': myUid,
+          if (fromAvatarUrl.isNotEmpty) 'fromAvatarUrl': fromAvatarUrl,
+          'createdAt': ServerValue.timestamp,
+          'system': true,
+        };
+      }
     }
     await rtdb().ref().update(updates);
   }
@@ -15723,6 +15831,11 @@ class _ChatsTabState extends State<_ChatsTab>
     }
 
     final myAvatar = await _myAvatarUrl(myUid);
+    final acceptedText = AppLanguage.tr(
+      context,
+      '✅ Žádost o chat byla přijata.',
+      '✅ Chat request was accepted.',
+    );
 
     final updates = <String, Object?>{
       'dmContacts/$myUid/$otherLoginLower': true,
@@ -15731,7 +15844,7 @@ class _ChatsTabState extends State<_ChatsTab>
         'login': fromLogin,
         if (fromAvatarUrl.isNotEmpty) 'avatarUrl': fromAvatarUrl,
         'status': 'accepted',
-        'lastMessageText': '🔒',
+        'lastMessageText': acceptedText,
         'lastMessageAt': ServerValue.timestamp,
         'savedAt': ServerValue.timestamp,
       },
@@ -15739,7 +15852,7 @@ class _ChatsTabState extends State<_ChatsTab>
         'login': myLogin,
         if (myAvatar != null) 'avatarUrl': myAvatar,
         'status': 'accepted',
-        'lastMessageText': '🔒',
+        'lastMessageText': acceptedText,
         'lastMessageAt': ServerValue.timestamp,
         'savedAt': ServerValue.timestamp,
       },
@@ -15757,6 +15870,18 @@ class _ChatsTabState extends State<_ChatsTab>
         updates['messages/$myUid/$fromLogin/$key'] = msg;
         updates['messages/$fromUid/$myLogin/$key'] = msg;
       }
+    }
+
+    final systemKey = rtdb().ref().push().key;
+    if (systemKey != null && systemKey.isNotEmpty) {
+      final systemMsg = {
+        'text': acceptedText,
+        'fromUid': myUid,
+        'createdAt': ServerValue.timestamp,
+        'system': true,
+      };
+      updates['messages/$myUid/$fromLogin/$systemKey'] = systemMsg;
+      updates['messages/$fromUid/$myLogin/$systemKey'] = systemMsg;
     }
 
     await rtdb().ref().update(updates);
@@ -15917,6 +16042,7 @@ class _ChatsTabState extends State<_ChatsTab>
     }
     _dmScrollController.addListener(_handleDmScrollPositionChanged);
     _syncShellChatMeta();
+    _startOverviewNotificationTracking();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prewarmDmDecryptAfterJoin();
       _prewarmGroupDecryptAfterJoin();
@@ -16023,6 +16149,12 @@ class _ChatsTabState extends State<_ChatsTab>
     _ttlUiTicker?.cancel();
     _incomingCallInviteSub?.cancel();
     _callResponseSub?.cancel();
+    _notifInvitesSub?.cancel();
+    _notifAdminInboxSub?.cancel();
+    _notifDmReqSub?.cancel();
+    _notifMyVerifySub?.cancel();
+    _notifRoleSub?.cancel();
+    _notifAllVerifySub?.cancel();
     unawaited(_stopIncomingMessageNotifications());
     _outgoingCallTimeout?.cancel();
     _callElapsedTicker?.cancel();
@@ -16037,6 +16169,7 @@ class _ChatsTabState extends State<_ChatsTab>
     _chatsTopHandle.value = null;
     _chatsCanStepBack.value = false;
     _chatsHasVerificationAlert.value = false;
+    _chatsNotificationCount.value = 0;
     _typingAnim.dispose();
     super.dispose();
   }
@@ -16192,6 +16325,133 @@ class _ChatsTabState extends State<_ChatsTab>
     if (_outgoingGroupCallRinging && _outgoingGroupId == gid) return true;
     if (_callConnected && _outgoingGroupId == gid) return true;
     return false;
+  }
+
+  bool get isMainChatsOverview {
+    return !hasActiveDm &&
+        !hasActiveGroup &&
+        _activeVerifiedUid == null &&
+        _overviewMode == 0 &&
+        _activeFolderId == null;
+  }
+
+  int _pendingMapCount(Object? value) => (value is Map) ? value.length : 0;
+
+  void _syncShellNotificationCount(int value) {
+    if (_chatsNotificationCount.value != value) {
+      _chatsNotificationCount.value = value;
+    }
+  }
+
+  void _recomputeNotificationCount() {
+    final total =
+        _notifInvitesCount +
+        _notifAdminInboxCount +
+        _notifDmReqCount +
+        _notifMyVerifyCount +
+        _notifModVerifyCount;
+    final prev = _notifLastTotal;
+    _notifLastTotal = total;
+    _syncShellNotificationCount(total);
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final canAnnounce =
+        mounted &&
+        total > prev &&
+        now > _notifSuppressInAppUntilMs &&
+        (now - _notifLastSnackbarAtMs) > 1300;
+    if (!canAnnounce) return;
+
+    _notifLastSnackbarAtMs = now;
+    final text = AppLanguage.tr(
+      context,
+      'Nová notifikace ($total)',
+      'New notification ($total)',
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(duration: const Duration(seconds: 2), content: Text(text)),
+    );
+  }
+
+  void _bindModeratorNotificationsStream({
+    required String uid,
+    required bool isModerator,
+  }) {
+    if (!isModerator) {
+      _notifAllVerifySub?.cancel();
+      _notifAllVerifySub = null;
+      _notifModVerifyCount = 0;
+      _recomputeNotificationCount();
+      return;
+    }
+    _notifAllVerifySub?.cancel();
+    _notifAllVerifySub = rtdb().ref('verifiedRequests').onValue.listen((event) {
+      final v = event.snapshot.value;
+      final m = (v is Map) ? v : null;
+      var pending = 0;
+      if (m != null) {
+        for (final e in m.entries) {
+          final rv = e.value;
+          if (rv is! Map) continue;
+          if ((rv['status'] ?? '').toString() == 'pending') {
+            pending++;
+          }
+        }
+      }
+      _notifModVerifyCount = pending;
+      _recomputeNotificationCount();
+    });
+  }
+
+  void _startOverviewNotificationTracking() {
+    final current = FirebaseAuth.instance.currentUser;
+    if (current == null) return;
+    final uid = current.uid;
+
+    _notifSuppressInAppUntilMs = DateTime.now().millisecondsSinceEpoch + 2500;
+
+    _notifInvitesSub?.cancel();
+    _notifAdminInboxSub?.cancel();
+    _notifDmReqSub?.cancel();
+    _notifMyVerifySub?.cancel();
+    _notifRoleSub?.cancel();
+    _notifAllVerifySub?.cancel();
+
+    _notifInvitesSub = rtdb().ref('groupInvites/$uid').onValue.listen((event) {
+      _notifInvitesCount = _pendingMapCount(event.snapshot.value);
+      _recomputeNotificationCount();
+    });
+
+    _notifAdminInboxSub = rtdb().ref('groupAdminInbox/$uid').onValue.listen((
+      event,
+    ) {
+      _notifAdminInboxCount = _pendingMapCount(event.snapshot.value);
+      _recomputeNotificationCount();
+    });
+
+    _notifDmReqSub = rtdb().ref('dmRequests/$uid').onValue.listen((event) {
+      _notifDmReqCount = _pendingMapCount(event.snapshot.value);
+      _recomputeNotificationCount();
+    });
+
+    _notifMyVerifySub = _verifiedRequestRef(uid).onValue.listen((event) {
+      final v = event.snapshot.value;
+      final m = (v is Map) ? v : null;
+      final status = (m?['status'] ?? '').toString();
+      final hasNew = m?['hasNewModeratorMessage'] == true;
+      _notifMyVerifyCount = (hasNew && status.isNotEmpty) ? 1 : 0;
+      _recomputeNotificationCount();
+    });
+
+    _notifRoleSub = rtdb().ref('users/$uid').onValue.listen((event) {
+      final v = event.snapshot.value;
+      final m = (v is Map) ? v : null;
+      final isModerator = _isModeratorFromUserMap(m);
+      if (isModerator != _notifIsModerator) {
+        _notifIsModerator = isModerator;
+        _bindModeratorNotificationsStream(uid: uid, isModerator: isModerator);
+      }
+    });
   }
 
   void _syncVerificationAlertBadge(bool value) {
@@ -18987,11 +19247,59 @@ class _ChatsTabState extends State<_ChatsTab>
                               ...items.map((req) {
                                 final fromLogin = (req['fromLogin'] ?? '')
                                     .toString();
+                                final fromUid = (req['fromUid'] ?? '')
+                                    .toString();
+                                final fromAvatar = (req['fromAvatarUrl'] ?? '')
+                                    .toString();
                                 return ListTile(
                                   title: Text('@$fromLogin'),
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.key_outlined),
+                                        tooltip: t(
+                                          sheetCtx,
+                                          'Požádat o sdílení klíče',
+                                          'Request key sharing',
+                                        ),
+                                        onPressed: () async {
+                                          try {
+                                            await _requestKeyShareBeforeAccept(
+                                              myUid: myUid,
+                                              myLogin: myGithub,
+                                              otherLogin: fromLogin,
+                                              otherUid: fromUid,
+                                              otherAvatarUrl: fromAvatar,
+                                            );
+                                            if (!mounted) return;
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  t(
+                                                    sheetCtx,
+                                                    'Žádost o sdílení klíče odeslána.',
+                                                    'Key sharing request sent.',
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          } catch (e) {
+                                            if (!mounted) return;
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  '${t(sheetCtx, 'Chyba', 'Error')}: $e',
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                      ),
                                       IconButton(
                                         icon: const Icon(Icons.close),
                                         onPressed: () => _rejectDmRequest(
@@ -20204,6 +20512,11 @@ class _ChatsTabState extends State<_ChatsTab>
                                                         (req['fromAvatarUrl'] ??
                                                                 '')
                                                             .toString();
+                                                    final systemText =
+                                                        (req['systemText'] ??
+                                                                '')
+                                                            .toString()
+                                                            .trim();
                                                     final hasEncryptedText =
                                                         ((req['ciphertext'] ??
                                                                 req['ct'] ??
@@ -20242,7 +20555,10 @@ class _ChatsTabState extends State<_ChatsTab>
                                                       title: Text(
                                                         '@$fromLogin',
                                                       ),
-                                                      subtitle: hasEncryptedText
+                                                      subtitle:
+                                                          systemText.isNotEmpty
+                                                          ? Text(systemText)
+                                                          : hasEncryptedText
                                                           ? Text(
                                                               AppLanguage.tr(
                                                                 context,
