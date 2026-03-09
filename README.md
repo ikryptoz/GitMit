@@ -2,9 +2,30 @@
 
 GitMit is a Flutter messaging platform with end-to-end encryption (E2EE) focused on practical privacy, transparent security behavior, and multi-device usage.
 
+## Repository Purpose
+
+This repository is intentionally structured for:
+- understanding how the system works,
+- reviewing security/privacy design decisions,
+- contributing new features safely.
+
+It is not just a "download and run" project page. The primary goal is transparent engineering and contributor onboarding.
+
+## Study Path (Recommended)
+
+If you are new and want to understand internals first, read in this order:
+1. `docs/ARCHITECTURE_OVERVIEW.md`
+2. `docs/CODEBASE_MAP.md`
+3. `docs/ENCRYPTION_ARCHITECTURE.md`
+4. `docs/THREAT_MODEL.md`
+5. `CONTRIBUTING.md`
+
 ## Documentation Index
 
 - Public security page: `/security` on web deployment (for example `https://app.gitmit.eu/security`).
+- `docs/ARCHITECTURE_OVERVIEW.md`: high-level system architecture and change strategy.
+- `docs/CODEBASE_MAP.md`: practical map of features to files.
+- `CONTRIBUTING.md`: contribution process and security expectations.
 - `docs/ENCRYPTION_ARCHITECTURE.md`: how encryption works, what it protects, and what it does not.
 - `docs/SECURITY_MODEL.md`: trust boundaries, threat model, and operational hardening.
 - `docs/SOURCE_CODE_PROTECTION.md`: realistic source protection strategy for public/private repos.
@@ -37,14 +58,17 @@ Important transparency note:
 
 Security is achieved through layered controls: cryptography, backend authorization, secrets management, release hardening, and incident response.
 
-## Quick Start
+## Contributing New Features
 
-```bash
-git clone https://github.com/ikryptoz/GitMit.git
-cd GitMit
-flutter pub get
-flutter run
-```
+For feature work and refactors:
+1. follow `CONTRIBUTING.md`,
+2. map changes via `docs/CODEBASE_MAP.md`,
+3. update docs for any behavior/security impact.
+
+Local validation before PR:
+- `dart analyze`
+- `flutter test` (where relevant)
+- `bash scripts/check_no_secrets.sh`
 
 ## Android Release Artifacts
 
@@ -85,3 +109,12 @@ See `docs/SOURCE_CODE_PROTECTION.md` for an implementation checklist.
 ## Responsible Disclosure
 
 Please report vulnerabilities privately according to `SECURITY.md`.
+
+## Optional Local Run
+
+```bash
+git clone https://github.com/ikryptoz/GitMit.git
+cd GitMit
+flutter pub get
+flutter run
+```

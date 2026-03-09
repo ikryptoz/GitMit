@@ -1,0 +1,34 @@
+name: Security concern
+description: Report a security or privacy concern (non-sensitive)
+title: "[Security]: "
+labels:
+  - security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a sensitive vulnerability with exploit details, do not post publicly.
+        Follow SECURITY.md for responsible disclosure.
+  - type: textarea
+    id: area
+    attributes:
+      label: Affected area
+      description: Which component is affected (crypto, backend authz, key management, etc.)?
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Potential impact
+      description: What could happen if this is exploited?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction details
+      description: Provide minimal safe repro info.
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested mitigation

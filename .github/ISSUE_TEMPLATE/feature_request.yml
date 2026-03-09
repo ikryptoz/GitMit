@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a new feature or enhancement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the expected behavior and UX.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security/privacy considerations
+      description: Any impact on encryption, metadata, authz, or secrets handling?
+  - type: textarea
+    id: scope
+    attributes:
+      label: Implementation scope
+      description: Which files/modules are likely to change?
