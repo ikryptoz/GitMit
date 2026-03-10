@@ -15,6 +15,7 @@ import 'package:gitmit/e2ee.dart';
 import 'package:gitmit/plaintext_cache.dart';
 import 'package:gitmit/data_usage.dart';
 import 'package:gitmit/firebase_options.dart';
+import 'package:in_app_update/in_app_update.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -283,9 +284,75 @@ class _AuthGateState extends State<AuthGate> {
   StreamSubscription<User?>? _sub;
   User? _user;
   bool _ready = false;
+  bool _updateCheckStarted = false;
   String? _githubGateUid;
   int _githubGateStartedAt = 0;
   bool _githubRepairInFlight = false;
+
+  Future<void> _checkAndroidInAppUpdateOnce() async {
+    if (_updateCheckStarted) return;
+    _updateCheckStarted = true;
+
+    // In-app updates are only available on Android Play-distributed builds.
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+
+    try {
+      final info = await InAppUpdate.checkForUpdate();
+      if (info.updateAvailability != UpdateAvailability.updateAvailable) {
+        return;
+      }
+
+      // Keep user session continuity: update flow should not sign out users.
+      if (info.immediateUpdateAllowed) {
+        await InAppUpdate.performImmediateUpdate();
+        return;
+      }
+
+      if (info.flexibleUpdateAllowed) {
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 8),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppLanguage.tr(
+                      context,
+                      'Stahuji aktualizaci aplikace…',
+                      'Downloading app update…',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const LinearProgressIndicator(),
+                ],
+              ),
+            ),
+          );
+        }
+
+        await InAppUpdate.startFlexibleUpdate();
+        await InAppUpdate.completeFlexibleUpdate();
+
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(
+              content: Text(
+                AppLanguage.tr(
+                  context,
+                  'Aktualizace je připravená. Aplikace se obnoví.',
+                  'Update is ready. The app will refresh.',
+                ),
+              ),
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      // Best effort only. App should continue normally when update check fails.
+    }
+  }
 
   void _resetGithubGate(String uid) {
     if (_githubGateUid == uid && _githubGateStartedAt > 0) return;
@@ -368,6 +435,10 @@ class _AuthGateState extends State<AuthGate> {
       AppNotifications.setUser(u);
       AppLanguage.bindUser(u?.uid);
       DeepLinks.onAuthChanged(u);
+
+      // Trigger once per app launch. This does not force re-login/re-verification.
+      unawaited(_checkAndroidInAppUpdateOnce());
+
       if (mounted) setState(() {});
     });
   }
