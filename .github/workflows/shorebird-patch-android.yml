@@ -1,0 +1,46 @@
+name: Shorebird Patch Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Existing release version to patch (example 1.2.3+45)
+        required: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Install Shorebird CLI
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh | bash
+          echo "$HOME/.shorebird/bin" >> "$GITHUB_PATH"
+
+      - name: Shorebird patch android
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+        run: |
+          if [ -z "$SHOREBIRD_TOKEN" ]; then
+            echo "Missing secret: SHOREBIRD_TOKEN"
+            exit 1
+          fi
+          shorebird patch android --release-version "${{ inputs.release_version }}"

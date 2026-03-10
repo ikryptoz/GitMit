@@ -1,0 +1,69 @@
+name: Shorebird Release Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_version:
+        description: Flutter version channel/version for Shorebird
+        required: false
+        default: stable
+      artifact:
+        description: Shorebird release artifact type
+        required: false
+        default: aab
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Install Shorebird CLI
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh | bash
+          echo "$HOME/.shorebird/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare Android keystore
+        env:
+          GITMIT_KEYSTORE_FILE_BASE64: ${{ secrets.GITMIT_KEYSTORE_FILE_BASE64 }}
+        run: |
+          if [ -z "$GITMIT_KEYSTORE_FILE_BASE64" ]; then
+            echo "Missing secret: GITMIT_KEYSTORE_FILE_BASE64"
+            exit 1
+          fi
+          mkdir -p android/app/keystore
+          echo "$GITMIT_KEYSTORE_FILE_BASE64" | base64 -d > android/app/keystore/release.keystore
+
+      - name: Shorebird release android
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+          KEYSTORE_PASSWORD: ${{ secrets.GITMIT_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.GITMIT_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.GITMIT_KEY_PASSWORD }}
+        run: |
+          if [ -z "$SHOREBIRD_TOKEN" ]; then
+            echo "Missing secret: SHOREBIRD_TOKEN"
+            exit 1
+          fi
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Missing Android signing secret(s)."
+            exit 1
+          fi
+          shorebird release android --artifact "${{ inputs.artifact }}" --flutter-version="${{ inputs.flutter_version }}"

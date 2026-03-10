@@ -36,6 +36,7 @@ If you are new and want to understand internals first, read in this order:
 - `docs/RELEASE_SECURITY_CHECKLIST.md`: secure release process for Android/Web.
 - `docs/SECURITY_FAQ.md`: concise answers for users asking about privacy and encryption.
 - `docs/PLAY_STORE_PRIVACY_TEXT.md`: ready-to-adapt text snippets for Play Console forms.
+- `docs/SHOREBIRD_UPDATES.md`: Shorebird release and patch workflow for Android.
 - `SECURITY.md`: vulnerability reporting policy.
 - `TRADEMARK_POLICY.md`: branding and logo usage rules.
 - `docs/cs/README.md`: Czech translations of security/privacy docs.
@@ -69,6 +70,18 @@ Local validation before PR:
 - `dart analyze`
 - `flutter test` (where relevant)
 - `bash scripts/check_no_secrets.sh`
+
+## Shorebird Fast Updates (Android)
+
+For Dart-only hotfixes between full Play releases:
+- local release script: `scripts/shorebird_release_android.sh`
+- local patch script: `scripts/shorebird_patch_android.sh <release-version>`
+- CI manual release workflow: `.github/workflows/shorebird-release-android.yml`
+- CI manual patch workflow: `.github/workflows/shorebird-patch-android.yml`
+
+Important:
+- use patches only for Dart-only changes,
+- native/plugin/Gradle/manifest updates still require a new Play release.
 
 ## Android Release Artifacts
 
